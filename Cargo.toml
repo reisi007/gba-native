@@ -1,0 +1,18 @@
+[package]
+name = "gba-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+default-run = "gba-native"
+description = "Documentation-driven experimental hybrid GBA-to-native prototype"
+publish = false
+
+[lib]
+name = "gba_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gba-native"
+path = "src/main.rs"
+
+[dependencies]

@@ -1,0 +1,70 @@
+// Quality gates for gba-native. The project owns the counting in
+// src/bin/quality-counter; Ratchet owns the baseline, the direction and the
+// report. The baseline is machine-written by `ratchet baseline init/update`
+// and is never hand-edited.
+[
+  {
+    "name": "gba-native",
+    "tiers": {
+      "fast": { "floor": 2 },
+      "slow": { "floor": 1 }
+    },
+    "rules": {
+      "oversized-rust-file": {
+        "class": "oversized source unit",
+        "incident": "the pre-refactor monolithic worktree mixed discovery, emission, decoding, CLI and path handling in a few very large files that exceeded the 500-line hard limit; the code was split into modules without a baseline exemption (the specific pre-refactor working-tree line counts were uncommitted and are not historical HEAD measurements)",
+        "unit": "maintained Rust files above 500 physical lines",
+        "direction": "ceiling",
+        "tier": "fast",
+        "description": "Counts every maintained *.rs file in the repository whose physical line count exceeds 500. Blank lines and comments count; a trailing newline adds no phantom line. Generated artifacts in the root-level .git, target/ and output/ directories are not maintained sources and are skipped. The exemption is positional: a nested directory with one of those names, such as src/output/ or tests/target/, is scanned. scripts/short.sh and CI also run the same counter with --hard, so editing this baseline cannot dilute the hard limit. The baseline must stay 0.",
+        "count": {
+          "command": [
+            "cargo",
+            "run",
+            "--quiet",
+            "--offline",
+            "--bin",
+            "quality-counter",
+            "--",
+            "oversized",
+            "--max",
+            "500",
+            "--format",
+            "count"
+          ]
+        }
+      },
+      "rust-source-population": {
+        "class": "quality gate population",
+        "incident": "a changed-files-only selection can be empty on a clean checkout and report green; the physical-line limit must read the whole maintained Rust population, including root files, build.rs and new untracked sources",
+        "unit": "maintained Rust files",
+        "direction": "floor",
+        "tier": "fast",
+        "description": "Floor over the same population the hard limit scans: every *.rs file outside the root-level .git, target/ and output/ directories (nested same-named directories are scanned), including tests, root files and untracked sources. An empty selection is a counter error (exit 3), not a pass. Adding files keeps the count above the floor; deleting the population fails.",
+        "count": {
+          "command": [
+            "cargo",
+            "run",
+            "--quiet",
+            "--offline",
+            "--bin",
+            "quality-counter",
+            "--",
+            "rust-files",
+            "--format",
+            "count"
+          ]
+        }
+      },
+      "native-consistency": {
+        "class": "native/reference divergent execution",
+        "incident": "the first review found a defect in the decoder path shared by the native emitter and the reference interpreter: both were consistently wrong in the same way and no native/reference divergence was observed, so the differential passed; this proof re-runs the synthetic native fixture and asserts a match, while the independent ISA golden vectors remain the evidence for the ARM/Thumb subset, because emitter/reference consistency cannot catch a defect they share",
+        "unit": "successful synthetic native proof",
+        "direction": "floor",
+        "tier": "slow",
+        "description": "Runs the real AOT proof against a freshly generated synthetic fixture in an owned temporary directory and prints 1 only for proof=ok, native_vs_reference=match and fallbacks=0. The differential compares the emitter with the reference interpreter over the shared decoder, so it establishes consistency between those paths, not ISA correctness or retail-game compatibility; a defect shared by both paths passes this rule and is covered only by the independent ISA golden vectors.",
+        "count": { "command": ["bash", "scripts/native-consistency.sh"] }
+      }
+    }
+  }
+]

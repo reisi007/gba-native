@@ -1,0 +1,86 @@
+# Source register
+
+Retrieved 2026-10-24. No emulator implementation source was used.
+
+Status of this repository: experimental; no retail game is playable, no GPU
+vendor upscaling is integrated, no REA Evidence was obtained, and this is not a
+formal separate-team legal clean-room process.
+
+## S1 — GBATEK (hardware and CPU reference)
+
+URL: <https://mgba-emu.github.io/gbatek/>
+
+Retrieved HTML: 5,473,181 bytes; SHA-256:
+`a701cf0f5be47b23dd31298d7dc593a7cccb3ae9a59087dea940305565025b70`.
+This identifies the fetched document, not an immutable upstream version. Public
+reference material is cited and paraphrased, not vendored into this project.
+
+Relevant anchors actually consulted for this milestone:
+
+- `#gba-cartridge-header`: 192-byte header, fields, complement checksum.
+- `#gba-cartridge-rom`: ROM bus, wait-state background, backup IDs.
+- `#gba-memory-map`: memory sizes, buses, little-endian data representation.
+- `#arm-cpu-flags--condition-field-cond`: conditions and CPSR flags.
+- `#arm-cpu-memory-alignments`: aligned stores, rotated ARM7 word reads,
+  odd-address LDRH rotation and LDRSH/LDRSB note.
+- `#arm-opcodes-branch-and-branch-with-link-b-bl-bx-blx-swi-bkpt`.
+- `#arm-opcodes-data-processing-alu`.
+- `#arm-opcodes-memory-single-data-transfer-ldr-str-pld`.
+- `#arm-opcodes-memory-halfword-doubleword-and-signed-data-transfer`.
+- `#thumb-instruction-summary`.
+- `#thumb-opcodes-register-operations-alu-bx`.
+- `#thumb-opcodes-memory-loadstore-ldrstr`.
+- `#thumb-opcodes-jumps-and-calls`.
+- `#lcd-io-display-control`, `#lcd-vram-bitmap-bg-modes`.
+
+Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
+other consoles; their opcodes/features must not accidentally enter the GBA core.
+The implemented subset is deliberately narrower than the document; see
+`gba-contract.md`.
+
+## S2 — gbadev resources
+
+<https://gbadev.net/resources>
+
+Discovery index for documentation and future hardware test suites. Merely
+listing a test suite here does **not** mean it has been fetched or passed.
+Linked emulator/game/BIOS implementation sources were not opened.
+
+## S3 — gbadoc
+
+<https://github.com/gbadev-org/gbadoc>
+
+Repository landing page inspected; identifies a community technical documentation
+project under CC0-1.0. Not used as evidence for individual instruction semantics
+in this milestone. No implementation files were fetched.
+
+## S4 — AMD FSR 1 documentation
+
+<https://gpuopen.com/fidelityfx-superresolution/>
+
+Vendor describes a spatial EASU reconstruction pass and RCAS sharpening pass,
+without motion vectors or frame history. This is **not ML-based upscaling**.
+The vendor lists DX11/DX12/Vulkan and permits ports. No AMD shader source or SDK
+is incorporated in this milestone.
+
+## S5 — NVIDIA DLSS documentation
+
+<https://developer.nvidia.com/rtx/dlss/get-started>
+
+Vendor identifies RTX Tensor Cores and describes Super Resolution using motion
+data and previous frames. This establishes that resizing a framebuffer is not
+equivalent to DLSS. No SDK/library/model was downloaded or integrated.
+
+## Design-only work
+
+The typed IR, discovery strategy, local constant propagation, native Rust
+emission, artifact digest binding, test harness and bitmap snapshot are **Design**
+choices. They are not copied from an emulator, compiler or vendor source. The
+Rust standard library is the only implementation dependency.
+
+## Local observations
+
+REA observations are in `rea-status.md`. Header inspection of the supplied ROM
+uses our own parser, **not REA**. Synthetic instruction tests are local tests,
+not measurements on real GBA hardware. No retail-game compatibility is inferred
+from a correct header or a completed instruction budget.

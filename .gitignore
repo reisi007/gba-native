@@ -1,0 +1,10 @@
+/target/
+/output/
+*.gba
+*.GBA
+*.bin
+*.bios
+*.sav
+*.srm
+*.ss0
+.DS_Store

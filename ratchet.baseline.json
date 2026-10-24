@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": {
+    "native-consistency": {
+      "value": 1,
+      "reason": "initial zero-debt baseline after the 500-line refactor"
+    },
+    "oversized-rust-file": {
+      "value": 0,
+      "reason": "initial zero-debt baseline after the 500-line refactor"
+    },
+    "rust-source-population": {
+      "value": 36,
+      "reason": "initial zero-debt baseline after the 500-line refactor"
+    }
+  }
+}
