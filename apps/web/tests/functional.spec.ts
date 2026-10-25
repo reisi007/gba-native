@@ -747,6 +747,7 @@ test('forced WebGPU reports the browser WebGPU adapter and presents pixels', asy
   );
   await expectWebGpuConfirmationRedraw(page, status);
   GOLDEN.forEach((entry, index) => expect(close(samples.guest[index], entry.rgb)).toBe(true));
+  await expect(page.locator('#probe-gl')).toContainText('not probed here');
   expectNoCapabilityProbeContextLoss(page);
 });
 

@@ -405,6 +405,11 @@ async function beginStart(choice) {
 function probeCapabilities() {
   const gpu = "gpu" in navigator ? "present" : "absent";
   byId("probe-gpu").textContent = gpu;
+  if (initialBackend !== "webgl2") {
+    byId("probe-gl").textContent =
+      "not probed here; auto checks WebGL2 only if WebGPU is unusable, and forced WebGPU never falls back";
+    return;
+  }
   let gl = "unavailable";
   try {
     const probe = document.createElement("canvas");

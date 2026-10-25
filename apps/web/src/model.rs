@@ -87,7 +87,9 @@ impl std::error::Error for ChoiceError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrowserProbe {
     pub webgpu: bool,
-    pub webgl2: bool,
+    /// `None` means WebGL2 was intentionally not probed because the selected
+    /// route did not need a compatibility decision.
+    pub webgl2: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,7 +151,7 @@ pub fn resolve_backend(
             }
         }
         BackendChoice::WebGl2 => {
-            if probe.webgl2 {
+            if probe.webgl2 == Some(true) {
                 Ok(Resolution {
                     backend: BrowserBackend::WebGl2,
                     auto_fallback: false,
@@ -164,7 +166,7 @@ pub fn resolve_backend(
                     backend: BrowserBackend::WebGpu,
                     auto_fallback: false,
                 })
-            } else if probe.webgl2 {
+            } else if probe.webgl2 == Some(true) {
                 Ok(Resolution {
                     backend: BrowserBackend::WebGl2,
                     auto_fallback: true,
@@ -174,6 +176,11 @@ pub fn resolve_backend(
             }
         }
     }
+}
+
+/// Whether backend selection needs a real WebGL2 capability probe.
+pub fn should_probe_webgl2(choice: BackendChoice, webgpu: bool) -> bool {
+    choice == BackendChoice::WebGl2 || (choice == BackendChoice::Auto && !webgpu)
 }
 
 /// Integer nearest-neighbour viewport inside a physical surface.
@@ -301,7 +308,7 @@ mod tests {
             BackendChoice::Auto,
             BrowserProbe {
                 webgpu: true,
-                webgl2: true,
+                webgl2: None,
             },
         )
         .unwrap();
@@ -312,7 +319,7 @@ mod tests {
             BackendChoice::Auto,
             BrowserProbe {
                 webgpu: false,
-                webgl2: true,
+                webgl2: Some(true),
             },
         )
         .unwrap();
@@ -324,7 +331,7 @@ mod tests {
                 BackendChoice::Auto,
                 BrowserProbe {
                     webgpu: false,
-                    webgl2: false
+                    webgl2: Some(false)
                 }
             ),
             Err(ResolveError::NoBrowserBackend)
@@ -338,7 +345,7 @@ mod tests {
                 BackendChoice::WebGpu,
                 BrowserProbe {
                     webgpu: false,
-                    webgl2: true
+                    webgl2: Some(true)
                 }
             ),
             Err(ResolveError::WebGpuUnavailable)
@@ -348,7 +355,7 @@ mod tests {
                 BackendChoice::WebGl2,
                 BrowserProbe {
                     webgpu: true,
-                    webgl2: false
+                    webgl2: None
                 }
             ),
             Err(ResolveError::WebGl2Unavailable)
@@ -356,6 +363,15 @@ mod tests {
         let message = ResolveError::WebGpuUnavailable.to_string();
         assert!(message.contains("No WebGL2 fallback"));
         assert!(!message.contains("CPU"));
+    }
+
+    #[test]
+    fn webgl2_probe_is_limited_to_routes_that_need_its_result() {
+        assert!(!should_probe_webgl2(BackendChoice::WebGpu, true));
+        assert!(!should_probe_webgl2(BackendChoice::WebGpu, false));
+        assert!(!should_probe_webgl2(BackendChoice::Auto, true));
+        assert!(should_probe_webgl2(BackendChoice::Auto, false));
+        assert!(should_probe_webgl2(BackendChoice::WebGl2, true));
     }
 
     #[test]

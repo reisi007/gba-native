@@ -17,7 +17,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::web::EventLoopExtWebSys;
 
-use crate::model::{BackendChoice, BrowserProbe, resolve_backend};
+use crate::model::{BackendChoice, BrowserProbe, resolve_backend, should_probe_webgl2};
 use crate::presentation;
 
 pub use app::App;
@@ -114,17 +114,22 @@ async fn start_inner(backend: &str) {
     } else {
         pixels::wgpu::util::is_browser_webgpu_supported().await
     };
-    let probe = BrowserProbe {
-        webgpu,
-        webgl2: dom::probe_webgl2(&document),
-    };
+    // Forced WebGPU never falls back, and auto already has its preferred
+    // backend when WebGPU is usable. Avoid creating a detached WebGL context in
+    // either route; `None` records that WebGL2 was not probed, not unavailable.
+    let webgl2 = should_probe_webgl2(choice, webgpu).then(|| dom::probe_webgl2(&document));
+    let probe = BrowserProbe { webgpu, webgl2 };
     let resolution = match resolve_backend(choice, probe) {
         Ok(resolution) => resolution,
         Err(error) => {
             let mut status = status::Status::new("error", error.to_string(), &requested);
             status.detail = Some(format!(
                 "probe: webgpu={} webgl2={}",
-                probe.webgpu, probe.webgl2
+                probe.webgpu,
+                probe.webgl2.map_or_else(
+                    || "not-probed".to_owned(),
+                    |available| available.to_string()
+                )
             ));
             status::emit(&status);
             return;

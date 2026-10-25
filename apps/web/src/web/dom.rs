@@ -47,8 +47,9 @@ pub fn physical_canvas_size(canvas: &HtmlCanvasElement, reported: (u32, u32)) ->
     )
 }
 
-/// Probe WebGL2 on a detached canvas so the real canvas context type stays
-/// undecided for WGPU. A negative probe is reported, never faked.
+/// Probe WebGL2 on a detached canvas only when backend selection needs it, so
+/// the real canvas context type stays undecided. A negative probe is reported,
+/// never faked.
 pub fn probe_webgl2(document: &Document) -> bool {
     let Ok(element) = document.create_element("canvas") else {
         return false;
