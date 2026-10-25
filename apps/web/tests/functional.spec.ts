@@ -11,7 +11,8 @@
 // - Loss/restart is triggered through the real WebGL context-loss extension.
 
 import { expect, test as base } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 const SOURCE_SHA256 = 'b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154';
 const GUEST_BUDGET = 230_411;
@@ -26,6 +27,16 @@ const GOLDEN = [
 // Chromium colour management can shift a value slightly; the observed local
 // difference was zero. Keep a small, documented tolerance instead of exactness.
 const COLOR_TOLERANCE = 6;
+const VISIBLE_PIXEL_POLL_WINDOW_MS = 2_500;
+const VISIBLE_PIXEL_POLL_MS = 50;
+// Applies to the complete retry/capture/PNG-decode/artifact-write step. This is
+// Playwright's timeout budget; timeout scheduling and teardown can add overhead.
+const VISIBLE_PIXEL_SAMPLE_BUDGET_MS = 10_000;
+const CANVAS_VISIBILITY_TIMEOUT_MS = 500;
+const SCREENSHOT_TIMEOUT_MS = 5_000;
+const WEBGPU_CONFIRMATION_TIMEOUT_MS = 1_000;
+const WEBGPU_STABILITY_STEP_TIMEOUT_MS = 3_000;
+const WEBGPU_STABILITY_FRAMES = 8;
 const DISCLAIMER = 'Experimental synthetic GPU demo; no playable ROM, saves or game input yet.';
 
 type Fixtures = {
@@ -95,7 +106,14 @@ async function openApp(page: Page, query: string): Promise<void> {
 
 async function expectReady(page: Page): Promise<Status> {
   await waitForState(page, 'ready');
-  await page.waitForTimeout(300);
+  await page.waitForFunction(
+    () => {
+      const status = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+      return status?.state === 'ready' && (status.presented ?? 0) >= 1;
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
   const status = await statusOf(page);
   expect(status.state).toBe('ready');
   expect(status.sourceSha256).toBe(SOURCE_SHA256);
@@ -169,6 +187,7 @@ async function badgeContrast(page: Page, selector: string): Promise<number> {
 type Samples = {
   png: [number, number];
   canvas: [number, number];
+  capture: Uint8Array;
   corner: [number, number, number];
   guest: Array<[number, number, number]>;
   guestNeighborhoods: Array<Array<{ dx: number; dy: number; rgb: [number, number, number] }>>;
@@ -177,8 +196,8 @@ type Samples = {
 
 async function sampleRenderedCanvas(page: Page, status: Status): Promise<Samples> {
   const canvas = page.locator('#gba-canvas');
-  await expect(canvas).toBeVisible();
-  const png = await canvas.screenshot();
+  await expect(canvas).toBeVisible({ timeout: CANVAS_VISIBILITY_TIMEOUT_MS });
+  const png = await canvas.screenshot({ timeout: SCREENSHOT_TIMEOUT_MS });
   const metrics = await canvas.evaluate((element: HTMLCanvasElement) => ({
     width: element.width,
     height: element.height,
@@ -242,11 +261,158 @@ async function sampleRenderedCanvas(page: Page, status: Status): Promise<Samples
       golden: GOLDEN[0].rgb,
     },
   );
-  return samples;
+  return { ...samples, capture: png };
 }
 
 function close(a: [number, number, number], b: number[]): boolean {
   return a.every((value, index) => Math.abs(value - b[index]) <= COLOR_TOLERANCE);
+}
+
+async function waitForVisibleCanvas(
+  page: Page,
+  status: Status,
+  testInfo: TestInfo,
+  description: string,
+  matches: (samples: Samples) => boolean,
+): Promise<Samples> {
+  return test.step(
+    `sample real canvas pixels: ${description}`,
+    async () => {
+      const started = Date.now();
+      const deadline = started + VISIBLE_PIXEL_POLL_WINDOW_MS;
+      let attempts = 0;
+      let latest: Samples | undefined;
+      while (Date.now() <= deadline) {
+        attempts += 1;
+        latest = await sampleRenderedCanvas(page, status);
+        if (matches(latest)) {
+          const elapsed = Date.now() - started;
+          await writeFile(testInfo.outputPath('presented-canvas.png'), latest.capture);
+          console.log(
+            `observed real canvas pixels (${description}) after ${elapsed}ms/${attempts} screenshot(s): ${JSON.stringify({ actual: status.actual, backend: status.backend, surface: status.surfaceFormat, guest: latest.guest })}`,
+          );
+          return latest;
+        }
+        if (Date.now() >= deadline) break;
+        await page.waitForTimeout(Math.min(VISIBLE_PIXEL_POLL_MS, deadline - Date.now()));
+      }
+
+      if (latest) {
+        await writeFile(testInfo.outputPath('last-canvas-observation.png'), latest.capture);
+      }
+      const elapsed = Date.now() - started;
+      throw new Error(
+        `real canvas pixels were not observed in the ${VISIBLE_PIXEL_POLL_WINDOW_MS}ms ` +
+          `polling window (${attempts} screenshot(s)); the complete visibility, screenshot, PNG decode, ` +
+          `pixel evaluation, retry, and artifact-write operation has a ` +
+          `${VISIBLE_PIXEL_SAMPLE_BUDGET_MS}ms Playwright step timeout budget ` +
+          `(plus timeout/teardown scheduling overhead): ` +
+          JSON.stringify({
+            description,
+            elapsed,
+            requested: status.requested,
+            actual: status.actual,
+            backend: status.backend,
+            surface: status.surfaceFormat,
+            sourceSha256: status.sourceSha256,
+            guestBudget: status.guestBudget,
+            lastCanvas: latest?.canvas,
+            lastPng: latest?.png,
+            lastCorner: latest?.corner,
+            lastGuest: latest?.guest,
+            nearestGolden: latest?.nearestGolden,
+          }),
+      );
+    },
+    { timeout: VISIBLE_PIXEL_SAMPLE_BUDGET_MS },
+  );
+}
+
+function allGoldenPixelsVisible(samples: Samples): boolean {
+  return GOLDEN.every((entry, index) => close(samples.guest[index], entry.rgb));
+}
+
+async function expectWebGpuConfirmationRedraw(page: Page, status: Status): Promise<void> {
+  if (status.actual !== 'webgpu') return;
+  await test.step(
+    'WebGPU confirmation redraw settles without a redraw loop or resize',
+    async () => {
+      await page.waitForFunction(
+        () => {
+          const current = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+          return current?.actual === 'webgpu' && (current.presented ?? 0) >= 2;
+        },
+        undefined,
+        { timeout: WEBGPU_CONFIRMATION_TIMEOUT_MS },
+      );
+      const stability = await page.evaluate(async (stableFrames) => {
+        const canvas = document.querySelector<HTMLCanvasElement>('#gba-canvas');
+        if (!canvas) throw new Error('WebGPU canvas disappeared during redraw stability check');
+        let windowResizeEvents = 0;
+        let canvasResizeEvents = 0;
+        const onWindowResize = () => { windowResizeEvents += 1; };
+        const resizeObserver = new ResizeObserver(() => { canvasResizeEvents += 1; });
+        window.addEventListener('resize', onWindowResize);
+        resizeObserver.observe(canvas);
+        const geometry = () => {
+          const rect = canvas.getBoundingClientRect();
+          return [rect.x, rect.y, rect.width, rect.height, canvas.width, canvas.height];
+        };
+        const equalGeometry = (left: number[], right: number[]) =>
+          left.every((value, index) => value === right[index]);
+        const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        let previous = geometry();
+        let stableLayoutFrames = 0;
+        for (let frame = 0; frame < 30 && stableLayoutFrames < 3; frame += 1) {
+          await nextFrame();
+          const current = geometry();
+          stableLayoutFrames = equalGeometry(current, previous) ? stableLayoutFrames + 1 : 0;
+          previous = current;
+        }
+        // Let any ResizeObserver notification for the settled layout run before
+        // taking the no-resize baseline for the following animation frames.
+        await nextFrame();
+        const baselineGeometry = geometry();
+        const baselineStatus = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+        const baselinePresented = baselineStatus.presented ?? 0;
+        const baselineWindowResizeEvents = windowResizeEvents;
+        const baselineCanvasResizeEvents = canvasResizeEvents;
+        let stablePresentationFrames = 0;
+        for (let frame = 0; frame < stableFrames; frame += 1) {
+          await nextFrame();
+          const currentStatus = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+          const noResize =
+            equalGeometry(geometry(), baselineGeometry) &&
+            windowResizeEvents === baselineWindowResizeEvents &&
+            canvasResizeEvents === baselineCanvasResizeEvents;
+          if ((currentStatus.presented ?? 0) === baselinePresented && noResize) {
+            stablePresentationFrames += 1;
+          }
+        }
+        const finalStatus = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', onWindowResize);
+        return {
+          layoutStable: stableLayoutFrames >= 3,
+          baselinePresented,
+          finalPresented: finalStatus.presented ?? 0,
+          stablePresentationFrames,
+          windowResizeEvents: windowResizeEvents - baselineWindowResizeEvents,
+          canvasResizeEvents: canvasResizeEvents - baselineCanvasResizeEvents,
+        };
+      }, WEBGPU_STABILITY_FRAMES);
+      expect(stability.layoutStable, 'canvas geometry must settle before stability sampling').toBe(true);
+      expect(stability.baselinePresented, 'the one confirmation redraw must be acknowledged').toBeGreaterThanOrEqual(2);
+      expect(stability.finalPresented, 'presentation count must stop after confirmation').toBe(stability.baselinePresented);
+      expect(stability.stablePresentationFrames, 'all observed animation frames must stay at the settled count').toBe(
+        WEBGPU_STABILITY_FRAMES,
+      );
+      expect(stability.windowResizeEvents, 'window resize events during the stability window').toBe(0);
+      expect(stability.canvasResizeEvents, 'canvas resize observations during the stability window').toBe(0);
+      console.log(`WebGPU redraw settled across ${WEBGPU_STABILITY_FRAMES} animation frames: ${JSON.stringify(stability)}`);
+    },
+    { timeout: WEBGPU_STABILITY_STEP_TIMEOUT_MS },
+  );
 }
 
 test('empty state is explicit, not blank', async ({ page }) => {
@@ -291,7 +457,7 @@ test('semantic badges meet WCAG AA text contrast on desktop and portrait states'
   }
 });
 
-test('auto start executes the fixture once and presents real canvas pixels', async ({ page }) => {
+test('auto start executes the fixture once and presents real canvas pixels', async ({ page }, testInfo) => {
   await openApp(page, 'autostart=1&backend=auto');
   const status = await expectReady(page);
   expect(['webgpu', 'webgl2']).toContain(status.actual);
@@ -310,7 +476,14 @@ test('auto start executes the fixture once and presents real canvas pixels', asy
   expectPhysicalBacking(metrics.width, metrics.height, metrics.cssWidth, metrics.cssHeight, metrics.dpr);
   assertViewport(status, metrics.width, metrics.height);
 
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'auto backend golden samples',
+    allGoldenPixelsVisible,
+  );
+  await expectWebGpuConfirmationRedraw(page, status);
   expect(samples.corner).toEqual([0, 0, 0]);
   GOLDEN.forEach((entry, index) => {
     expect(close(samples.guest[index], entry.rgb), `guest ${entry.guest.join(',')} got ${samples.guest[index]}`).toBe(true);
@@ -320,26 +493,88 @@ test('auto start executes the fixture once and presents real canvas pixels', asy
   await expect(page.locator('#source-line')).toContainText(String(GUEST_BUDGET));
 });
 
-test('forced WebGL2 reports the GL adapter and presents pixels', async ({ page }) => {
+test('forced WebGL2 reports the GL adapter and presents pixels', async ({ page }, testInfo) => {
   await openApp(page, 'autostart=1&backend=webgl2');
   const status = await expectReady(page);
   expect(status.actual).toBe('webgl2');
   expect(status.backend).toBe('Gl');
   expect(status.autoFallback).toBe(false);
   console.log(`observed forced WebGL2: ${JSON.stringify({ backend: status.backend, adapter: status.adapterName, deviceType: status.deviceType, surface: status.surfaceFormat })}`);
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'forced WebGL2 golden samples',
+    allGoldenPixelsVisible,
+  );
   GOLDEN.forEach((entry, index) => expect(close(samples.guest[index], entry.rgb)).toBe(true));
 });
 
-test('forced WebGPU reports the browser WebGPU adapter and presents pixels', async ({ page }) => {
+test('forced WebGPU reports the browser WebGPU adapter and presents pixels', async ({ page }, testInfo) => {
   await openApp(page, 'autostart=1&backend=webgpu');
   const status = await expectReady(page);
   expect(status.actual).toBe('webgpu');
   expect(status.backend).toBe('BrowserWebGpu');
   expect(status.autoFallback).toBe(false);
   console.log(`observed forced WebGPU: ${JSON.stringify({ backend: status.backend, adapter: status.adapterName, deviceType: status.deviceType, surface: status.surfaceFormat })}`);
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'forced WebGPU golden samples',
+    allGoldenPixelsVisible,
+  );
+  await expectWebGpuConfirmationRedraw(page, status);
   GOLDEN.forEach((entry, index) => expect(close(samples.guest[index], entry.rgb)).toBe(true));
+});
+
+test('permanently blank or hidden canvas fails within the sampler bounds', async ({ page }, testInfo) => {
+  const status: Status = {
+    state: 'ready',
+    message: 'synthetic blank-canvas regression fixture',
+    requested: 'webgl2',
+    actual: 'webgl2',
+    autoFallback: false,
+    viewportX: 0,
+    viewportY: 0,
+    viewportWidth: 240,
+    viewportHeight: 160,
+    viewportScale: 1,
+  };
+  const description = 'blank-canvas timeout regression';
+
+  await page.setContent('<canvas id="gba-canvas" width="240" height="160"></canvas>');
+  const blankStarted = Date.now();
+  let blankFailure = '';
+  try {
+    await waitForVisibleCanvas(page, status, testInfo, description, (samples) =>
+      close(samples.guest[0], GOLDEN[0].rgb),
+    );
+  } catch (error) {
+    blankFailure = String(error);
+  }
+  const blankElapsed = Date.now() - blankStarted;
+  if (!blankFailure.includes('real canvas pixels were not observed')) {
+    throw new Error(`blank canvas did not reach the expected bounded poll failure: ${blankFailure}`);
+  }
+  expect(blankElapsed, 'a permanently black canvas must fail promptly').toBeLessThan(
+    VISIBLE_PIXEL_POLL_WINDOW_MS + 2_500,
+  );
+
+  await page.setContent('<canvas id="gba-canvas" width="240" height="160" hidden></canvas>');
+  const hiddenStarted = Date.now();
+  let hiddenFailure = '';
+  try {
+    await waitForVisibleCanvas(page, status, testInfo, description, () => false);
+  } catch (error) {
+    hiddenFailure = String(error);
+  }
+  const hiddenElapsed = Date.now() - hiddenStarted;
+  if (!hiddenFailure.includes(`with timeout ${CANVAS_VISIBILITY_TIMEOUT_MS}ms`)) {
+    throw new Error(`hidden canvas did not reach the expected visibility timeout: ${hiddenFailure}`);
+  }
+  expect(hiddenElapsed, 'a permanently hidden canvas must not inherit the global expect timeout').toBeLessThan(2_000);
+  console.log(`bounded blank-canvas failures: visible=${blankElapsed}ms hidden=${hiddenElapsed}ms`);
 });
 
 test('unsupported-WebGPU browser uses the explicit WebGL2 path and refuses forced WebGPU', async ({ page }) => {
@@ -416,7 +651,7 @@ test('keyboard-only backend selection and start work', async ({ page }) => {
   expect(status.requested).toBe('webgpu');
 });
 
-test('mobile portrait device-pixel-ratio letterbox stays integer and centred', async ({ browser }) => {
+test('mobile portrait device-pixel-ratio letterbox stays integer and centred', async ({ browser }, testInfo) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -460,19 +695,31 @@ test('mobile portrait device-pixel-ratio letterbox stays integer and centred', a
   expect([Math.round(metrics.cssHeight), Math.round(metrics.cssHeight * metrics.dpr)]).toContain(metrics.reported.block);
   expect(metrics.imageRendering).toBe('pixelated');
   assertViewport(status, metrics.width, metrics.height);
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'mobile WebGL2 source sample',
+    (samples) => close(samples.guest[0], GOLDEN[0].rgb),
+  );
   expect(samples.corner).toEqual([0, 0, 0]);
   expect(close(samples.guest[0], GOLDEN[0].rgb)).toBe(true);
   await context.close();
   expect(problems).toEqual([]);
 });
 
-test('resize re-negotiates the surface with the same static image', async ({ page }) => {
+test('resize re-negotiates the surface with the same static image', async ({ page }, testInfo) => {
   await openApp(page, 'autostart=1&backend=webgl2');
   await expectReady(page);
   await page.setViewportSize({ width: 900, height: 700 });
-  await page.waitForFunction(() => document.body.dataset.appState === 'ready');
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => {
+    const status = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
+    const canvas = document.querySelector<HTMLCanvasElement>('#gba-canvas');
+    if (!canvas || !status || status.state !== 'ready') return false;
+    const scale = Math.max(1, Math.min(Math.floor(canvas.width / 240), Math.floor(canvas.height / 160)));
+    return status.viewportWidth === Math.min(240 * scale, canvas.width) &&
+      status.viewportHeight === Math.min(160 * scale, canvas.height);
+  }, undefined, { timeout: 5_000 });
   const status = await statusOf(page);
   const metrics = await page.locator('#gba-canvas').evaluate((element: HTMLCanvasElement) => ({
     width: element.width,
@@ -483,12 +730,18 @@ test('resize re-negotiates the surface with the same static image', async ({ pag
   }));
   expectPhysicalBacking(metrics.width, metrics.height, metrics.cssWidth, metrics.cssHeight, metrics.dpr);
   assertViewport(status, metrics.width, metrics.height);
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'resized WebGL2 source sample',
+    (samples) => close(samples.guest[0], GOLDEN[0].rgb),
+  );
   expect(samples.corner).toEqual([0, 0, 0]);
   expect(close(samples.guest[0], GOLDEN[0].rgb)).toBe(true);
 });
 
-test('fractional DPR uses nearest physical backing pixels and preserves source samples', async ({ browser }) => {
+test('fractional DPR uses nearest physical backing pixels and preserves source samples', async ({ browser }, testInfo) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 1.25,
@@ -513,7 +766,15 @@ test('fractional DPR uses nearest physical backing pixels and preserves source s
   expectPhysicalBacking(metrics.width, metrics.height, metrics.cssWidth, metrics.cssHeight, metrics.dpr);
   expect(metrics.imageRendering).toBe('pixelated');
   assertViewport(status, metrics.width, metrics.height);
-  const samples = await sampleRenderedCanvas(page, status);
+  const samples = await waitForVisibleCanvas(
+    page,
+    status,
+    testInfo,
+    'fractional-DPR neighborhood samples',
+    (sample) => GOLDEN.slice(0, -1).every((entry, index) =>
+      sample.guestNeighborhoods[index].some(({ rgb }) => close(rgb, entry.rgb)),
+    ),
+  );
   GOLDEN.slice(0, -1).forEach((entry, index) => {
     // At fractional DPR, the screenshot clip can put a backing-pixel center on
     // a PNG pixel boundary. Allow only that immediate rasterization ambiguity.

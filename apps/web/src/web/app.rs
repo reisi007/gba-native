@@ -416,6 +416,9 @@ impl App {
             if state.failed || state.lost {
                 return;
             }
+            if state.pixels.is_some() && (state.size.0 == 0 || state.size.1 == 0) {
+                return;
+            }
             state.pixels.is_some()
         };
         if !has_pixels {
@@ -453,15 +456,18 @@ impl App {
         };
         match rendered {
             Ok(()) => {
-                let presented = {
+                let confirm_webgpu_surface = {
                     let mut state = self.state.borrow_mut();
                     state.presented = state.presented.saturating_add(1);
-                    state.presented
+                    state.presented == 1 && state.resolved.backend == BrowserBackend::WebGpu
                 };
-                // One acknowledgement per requested redraw; the guest image is
-                // static, so this is not a frame loop.
-                if presented == 1 {
-                    emit_viewport(&self.state.borrow());
+                // Pixels 0.17.2 maps WebGPU surface Timeout/Occluded to Ok. Ask
+                // Winit for one confirmation redraw on its next animation frame
+                // so a transient first surface acquisition cannot strand this
+                // static canvas on its clear colour. This is bounded, not a loop.
+                emit_viewport(&self.state.borrow());
+                if confirm_webgpu_surface {
+                    self.request_redraw();
                 }
             }
             Err(message) => {
