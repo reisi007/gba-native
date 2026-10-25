@@ -411,7 +411,6 @@ function probeCapabilities() {
     const context = probe.getContext("webgl2");
     if (context) {
       gl = "available";
-      context.getExtension("WEBGL_lose_context")?.loseContext();
     }
   } catch {
     gl = "unavailable";

@@ -624,6 +624,18 @@ async function expectWebGpuConfirmationRedraw(page: Page, status: Status): Promi
   );
 }
 
+function expectNoCapabilityProbeContextLoss(page: Page): void {
+  const probeLossWarnings = (browserEventTrails.get(page) ?? []).filter(
+    (event) =>
+      event.kind === 'console' &&
+      event.text?.includes('CONTEXT_LOST_WEBGL: loseContext: context lost'),
+  );
+  expect(
+    probeLossWarnings,
+    'WebGPU startup must not explicitly lose the detached WebGL2 capability-probe context',
+  ).toEqual([]);
+}
+
 test('empty state is explicit, not blank', async ({ page }) => {
   await openApp(page, '');
   await waitForState(page, 'empty');
@@ -735,6 +747,7 @@ test('forced WebGPU reports the browser WebGPU adapter and presents pixels', asy
   );
   await expectWebGpuConfirmationRedraw(page, status);
   GOLDEN.forEach((entry, index) => expect(close(samples.guest[index], entry.rgb)).toBe(true));
+  expectNoCapabilityProbeContextLoss(page);
 });
 
 test('permanently blank or hidden canvas fails within the sampler bounds', async ({ page }, testInfo) => {
