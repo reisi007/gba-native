@@ -268,6 +268,7 @@ fn native_memory_fixture_uses_direct_widths_and_matches_hand_expected_state() {
     assert!(source.contains("cpu.set_reg(15, value & !3);"));
 
     let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
     expected_cpu.set_pc(ENTRY);
     expected_cpu.set_thumb(false);
     let mut expected_bus = Bus::new(cart.clone());

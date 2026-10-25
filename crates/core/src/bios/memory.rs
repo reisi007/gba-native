@@ -28,6 +28,15 @@ const RESET_MEMORY_MASK: u32 = 0x1F;
 const IWRAM_PRESERVED_LEN: usize = 512;
 const DISPCNT_FORCED_BLANK: u16 = 0x0080;
 
+pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
+    match service {
+        super::SERVICE_REGISTER_RAM_RESET => validate_reset_flags(cpu.reg(0)),
+        super::SERVICE_CPU_SET => validate_cpu_set(cpu, bus),
+        super::SERVICE_CPU_FAST_SET => validate_cpu_fast_set(cpu, bus),
+        _ => unreachable!("memory validator only receives memory services"),
+    }
+}
+
 /// SWI 0Bh `CpuSet`: halfword or word copy/fill.
 pub(super) fn cpu_set(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let source = cpu.reg(0);
@@ -52,6 +61,34 @@ pub(super) fn cpu_set(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let source_units = if fill { 1 } else { units };
     validate_source(bus, super::SERVICE_CPU_SET, source, source_units, width)?;
     copy_or_fill(bus, source, destination, units, width, fill)
+}
+
+fn validate_cpu_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
+    let source = cpu.reg(0);
+    let destination = cpu.reg(1);
+    let control = cpu.reg(2);
+    if control & !CPU_SET_MASK != 0 {
+        return Err(Error::Bios(BiosError::ReservedControl {
+            service: super::SERVICE_CPU_SET,
+            control,
+        }));
+    }
+    let width = if control & WORD_BIT != 0 { 4 } else { 2 };
+    require_alignment(super::SERVICE_CPU_SET, source, width)?;
+    require_alignment(super::SERVICE_CPU_SET, destination, width)?;
+    let units = control & COUNT_MASK;
+    if units == 0 {
+        return Ok(());
+    }
+    let fill = control & FILL_BIT != 0;
+    validate_destination(super::SERVICE_CPU_SET, destination, units, width)?;
+    validate_source(
+        bus,
+        super::SERVICE_CPU_SET,
+        source,
+        if fill { 1 } else { units },
+        width,
+    )
 }
 
 /// SWI 0Ch `CpuFastSet`: 32-bit copy/fill, rounded up to 8-word blocks.
@@ -81,15 +118,39 @@ pub(super) fn cpu_fast_set(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     copy_or_fill(bus, source, destination, units, 4, fill)
 }
 
+fn validate_cpu_fast_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
+    let source = cpu.reg(0);
+    let destination = cpu.reg(1);
+    let control = cpu.reg(2);
+    if control & !CPU_FAST_SET_MASK != 0 {
+        return Err(Error::Bios(BiosError::ReservedControl {
+            service: super::SERVICE_CPU_FAST_SET,
+            control,
+        }));
+    }
+    require_alignment(super::SERVICE_CPU_FAST_SET, source, 4)?;
+    require_alignment(super::SERVICE_CPU_FAST_SET, destination, 4)?;
+    let count = control & COUNT_MASK;
+    let units = if count == 0 { 0 } else { count.div_ceil(8) * 8 };
+    if units == 0 {
+        return Ok(());
+    }
+    let fill = control & FILL_BIT != 0;
+    validate_destination(super::SERVICE_CPU_FAST_SET, destination, units, 4)?;
+    validate_source(
+        bus,
+        super::SERVICE_CPU_FAST_SET,
+        source,
+        if fill { 1 } else { units },
+        4,
+    )
+}
+
 /// SWI 01h `RegisterRamReset`: clear the selected memory regions, preserve the
 /// top 512 bytes of IWRAM, and always force blank via DISPCNT=0080h.
 pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let flags = cpu.reg(0);
-    if flags & !RESET_MEMORY_MASK != 0 {
-        // Bits 5..7 are serial/sound/other-register resets. They are not
-        // implemented and must fail before any partial memory mutation.
-        return Err(Error::Bios(BiosError::UnsupportedResetFlags { flags }));
-    }
+    validate_reset_flags(flags)?;
     if flags & 0x01 != 0 {
         fill_words(bus, EWRAM_BASE, EWRAM_LEN, 0)?;
     }
@@ -110,6 +171,15 @@ pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     }
     // Always forced blank, even with flags==0, per the documented service.
     bus.write16(DISPCNT_ADDR, DISPCNT_FORCED_BLANK)?;
+    Ok(())
+}
+
+fn validate_reset_flags(flags: u32) -> Result<()> {
+    if flags & !RESET_MEMORY_MASK != 0 {
+        // Bits 5..7 are serial/sound/other-register resets. They are not
+        // implemented and must fail before any partial memory mutation.
+        return Err(Error::Bios(BiosError::UnsupportedResetFlags { flags }));
+    }
     Ok(())
 }
 

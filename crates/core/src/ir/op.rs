@@ -57,6 +57,11 @@ pub enum Op {
     Bx {
         rm: u8,
     },
+    /// ARM/Thumb software interrupt comment. ARM keeps all 24 comment bits;
+    /// Thumb keeps the encoded low byte, and service selection happens later.
+    Swi {
+        comment: u32,
+    },
     LdrLiteral {
         rd: u8,
         addr: u32,
@@ -133,7 +138,9 @@ impl Op {
         match self {
             Op::Mov { rd, .. } | Op::Add { rd, .. } | Op::Sub { rd, .. } => rd == 15,
             Op::Alu { rd, .. } => rd == Some(15),
-            Op::B { .. } | Op::Bl { .. } | Op::BlLow { .. } | Op::Bx { .. } => true,
+            Op::B { .. } | Op::Bl { .. } | Op::BlLow { .. } | Op::Bx { .. } | Op::Swi { .. } => {
+                true
+            }
             // A word load into R15 changes control flow; narrow loads into PC
             // and stores are rejected before this point. LDM/Thumb POP with PC
             // in the list also end the straight-line block.
@@ -198,6 +205,9 @@ impl Op {
             Op::ThumbBlock { load, rn, regs } => {
                 register == rn || (load && register < 8 && regs & (1 << register) != 0)
             }
+            // An HLE service may alter any documented result register and
+            // memory. Invalidate every cached register constant conservatively.
+            Op::Swi { .. } => true,
             Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => {
                 false
             }

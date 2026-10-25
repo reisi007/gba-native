@@ -134,6 +134,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   dependency on a JIT.
 - Do not silently turn unsupported instructions, I/O, PPU features or vendor
   backends into successful no-ops or nearest-neighbor fallbacks.
+- Guest SWI support is limited to the six documented HLE services. Preserve
+  explicit errors for unsupported services and SVC-origin nested SWIs; do not
+  fetch or synthesize BIOS instruction bytes. The current ascending SVC-frame
+  slot order is a bounded design policy, not a Nintendo BIOS compatibility
+  claim.
 - CPU instruction budgets are not frame or cycle timing. Do not report a
   completed budget as a booted game or a rendered frame from hardware timing.
 - The default third-party dependency set stays empty: the workspace lockfile
@@ -146,8 +151,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 
 ## Source layout
 
-- `crates/core/src/cart.rs`, `bus.rs`, `cpu.rs`: header, explicit memory map,
-  state.
+- `crates/core/src/cart.rs`, `bus.rs`, `cpu.rs`, `cpu/exception.rs`: header,
+  explicit memory map, state, documented stack initialization and framed SWI
+  exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure
@@ -155,9 +161,8 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `crates/core/src/display.rs`, `render.rs`: bitmap snapshot,
   nearest/letterbox, PPM.
 - `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
-- `crates/core/src/bios/`: six direct, documentation-driven HLE service
-  primitives (`mod.rs`, `arithmetic.rs`, `memory.rs`); no guest SWI/SVC
-  integration.
+- `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
+  `arithmetic.rs`, `memory.rs`) plus typed guest SWI framing/dispatch (`swi.rs`).
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`),
   report parsing (`report.rs`), harness build/run (`harness.rs`) and tests.
@@ -173,10 +178,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, quality-counter/script failure paths, the optional
   frontend gate contracts and the workspace compatibility contracts.
-- `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE
-  arithmetic/memory-copy/reset/dispatch tests, independent ISA golden vectors
-  and ARM/Thumb single/block/stack memory vectors.
-- `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block
+- `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
+  typed guest SWI decode/execution tests, independent ISA golden vectors and
+  ARM/Thumb single/block/stack memory vectors.
+- `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
   fixtures, the native RAM self-modification regression and the native AOT
   proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;

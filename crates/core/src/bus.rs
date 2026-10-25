@@ -353,6 +353,21 @@ impl Bus {
     pub fn vram_digest(&self) -> [u8; 32] {
         sha256::digest(&self.vram)
     }
+
+    pub(crate) fn is_work_ram_range(addr: u32, len: usize) -> bool {
+        let Some(last) = len
+            .checked_sub(1)
+            .and_then(|size| u32::try_from(size).ok())
+            .and_then(|size| addr.checked_add(size))
+        else {
+            return false;
+        };
+        [(EWRAM_BASE, EWRAM_LEN), (IWRAM_BASE, IWRAM_LEN)]
+            .iter()
+            .any(|(base, size)| {
+                offset_in(addr, *base, *size).is_some() && offset_in(last, *base, *size).is_some()
+            })
+    }
 }
 
 fn is_rom(addr: u32) -> bool {

@@ -1,11 +1,9 @@
 //! Independently implemented, documentation-driven BIOS HLE foundation.
 //!
-//! This module dispatches a small set of documented, timing-independent GBA
-//! BIOS services directly from Rust. It is **not** SWI/SVC exception entry,
-//! BIOS boot, a BIOS image reader, or playability support: the caller supplies
-//! the service number and register state, and no instruction is consumed and
-//! no PC is advanced here. A later SWI integration owns the instruction budget,
-//! next-PC update and exception framing.
+//! This module provides six direct documented HLE services and a separate typed
+//! SWI/SVC wrapper. The wrapper performs framed exception entry/return without
+//! fetching BIOS bytes; each guest SWI still costs one instruction, while its
+//! internal HLE work has no cycle/scheduler model.
 //!
 //! All service implementations are derived from the public hardware interface
 //! documented in GBATEK; see `docs/clean-room/hle-services.md`. No Nintendo
@@ -14,6 +12,9 @@
 
 mod arithmetic;
 mod memory;
+mod swi;
+
+pub use swi::execute_swi;
 
 use crate::bus::Bus;
 use crate::cpu::Cpu;
@@ -121,7 +122,8 @@ impl fmt::Display for BiosError {
 
 impl std::error::Error for BiosError {}
 
-/// Dispatch one documented BIOS service.
+/// Dispatch one documented BIOS service directly, without an instruction or
+/// exception frame. This remains useful for host-side tests and tools.
 ///
 /// This primitive interprets the service number exactly as supplied. It does
 /// not consume an instruction, advance `PC`, change CPSR/mode/T/NZCV/SPSR, or
@@ -136,6 +138,18 @@ pub fn call(service: u8, cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         SERVICE_SQRT => arithmetic::sqrt(cpu),
         SERVICE_CPU_SET => memory::cpu_set(cpu, bus),
         SERVICE_CPU_FAST_SET => memory::cpu_fast_set(cpu, bus),
+        other => Err(Error::Bios(BiosError::UnsupportedService(other))),
+    }
+}
+
+pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
+    match service {
+        SERVICE_DIV => arithmetic::validate_div(cpu.reg(0), cpu.reg(1)),
+        SERVICE_DIV_ARM => arithmetic::validate_div(cpu.reg(1), cpu.reg(0)),
+        SERVICE_SQRT => Ok(()),
+        SERVICE_REGISTER_RAM_RESET | SERVICE_CPU_SET | SERVICE_CPU_FAST_SET => {
+            memory::validate_call(service, cpu, bus)
+        }
         other => Err(Error::Bios(BiosError::UnsupportedService(other))),
     }
 }

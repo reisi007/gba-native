@@ -14,6 +14,17 @@ pub fn decode_arm(addr: u32, raw: u32) -> DecodeResult {
             "condition field 1111b is reserved on ARMv4T (unconditional/newer space)",
         )
     })?;
+    if raw & 0x0F00_0000 == 0x0F00_0000 {
+        return Ok(IrInstr {
+            addr,
+            thumb: false,
+            raw,
+            cond,
+            op: Op::Swi {
+                comment: raw & 0x00FF_FFFF,
+            },
+        });
+    }
     // BX/BXJ/BLX register occupy a fixed bits 27-8 pattern with the low byte as
     // opcode+Rn. Check it before the general opcode groups so BLX does not slip
     // into the register-shifted ALU space.

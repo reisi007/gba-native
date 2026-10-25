@@ -165,6 +165,7 @@ fn native_ram_self_modification_falls_back_four_times_and_sees_the_patch() {
     assert!(source.contains("bus.write32(address & !3, source)?;"));
 
     let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
     expected_cpu.set_pc(ENTRY);
     expected_cpu.set_thumb(false);
     let mut expected_bus = Bus::new(cart.clone());

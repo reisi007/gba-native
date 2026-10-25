@@ -134,6 +134,19 @@ pub fn discover(
                     );
                     break;
                 }
+                Op::Swi { .. } => {
+                    // Successful supported HLE returns to the known following
+                    // instruction; SWI remains a separate translated block.
+                    stats.swis += 1;
+                    enqueue(
+                        &mut queue,
+                        cart,
+                        &mut stats,
+                        instruction.next_addr(),
+                        block_thumb,
+                    );
+                    break;
+                }
                 Op::Bx { .. } => {
                     if let Some(value) = resolved_bx {
                         enqueue(&mut queue, cart, &mut stats, value & !1, value & 1 != 0);

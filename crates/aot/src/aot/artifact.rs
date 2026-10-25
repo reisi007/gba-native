@@ -44,6 +44,9 @@ pub struct DiscoveryStats {
     /// Non-branch blocks terminated by a PC write (e.g. ALU/MOV, word LDR,
     /// LDM, or POP to R15).
     pub pc_writes: usize,
+    /// Typed SWI instructions, each ending a block with a known return
+    /// continuation; these are not counted as ordinary register PC writes.
+    pub swis: usize,
     pub decode_stops: usize,
     pub external_targets: usize,
     /// Number of blocks cut at `max_block_instructions` and resumed from the

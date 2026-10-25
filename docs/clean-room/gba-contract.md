@@ -1,7 +1,8 @@
 # GBA prototype contract — first milestone
 
-Authority: S1 in `sources.md` for documented hardware behavior. Items marked
-**Design** are this prototype's bounded choices and are not hardware claims.
+Authority: S1 in `sources.md` for GBA interface behavior; S6 corroborates the
+ARM7TDMI SWI exception entry/return contract. Items marked **Design** are this
+prototype's bounded choices and are not hardware claims.
 
 This document describes what the code **actually implements and tests**. It is
 not a roadmap promise and not a retail-game compatibility statement.
@@ -17,11 +18,10 @@ not a roadmap promise and not a retail-game compatibility statement.
   word/byte/half/signed transfers, SP-relative word transfers and Thumb
   `PUSH`/`POP`/`LDMIA`/`STMIA` are implemented for the policy below. ARM7TDMI
   PSR transfers and MSR-driven register banking are implemented for this
-  subset. Exception entry/return, SWI, multiply/swap and BIOS boot remain
-  absent; Thumb `MUL` remains explicit.
-- Six documented BIOS services exist as direct, public Rust HLE primitives (see
-  below). They are not reachable from a guest SWI instruction and do not
-  execute a BIOS.
+  subset. Typed ARM/Thumb SWI reaches the six documented BIOS HLE services via
+  explicit SVC entry, a saved handler frame, SYSTEM-mode service execution and
+  architectural SWI return. Other exception classes, multiply/swap and BIOS
+  boot remain absent; Thumb `MUL` remains explicit.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. An optional,
   separate `apps/desktop` package presents the synthetic snapshot in a real
   Winit/Pixels/WGPU window; it depends directly on the std-only
@@ -57,13 +57,13 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 **Design:** the runner starts in system mode with CPSR `0x000000DF` (ARM, IRQ/FIQ
 masked), SP `0x03007F00`, PC `0x08000000`, and all other registers zero. This is
-not BIOS reset execution. There is no exception vectoring, guest SWI dispatch,
-SVC/exception framing, BIOS read path, exception return, or PSR restore through
-ALU/PC writes. A separate public Rust API implements six documented BIOS service
-primitives directly (`bios::call`, below); the interpreter does not call it and
-it consumes no instruction. The ARM7TDMI register banks and exception-mode
-SPSRs exist for MSR-driven mode switches and SPSR transfers (below); they are
-not entered through exceptions. BIOS accesses return `BiosAccess`.
+not BIOS reset execution. `Cpu::direct_entry()` remains unchanged; callers that
+execute guest SWIs initialize the documented USER/SYS, IRQ and SVC stack tops
+explicitly. The CLI guest runner and generated AOT harness do so. The
+interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
+it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
+runs the service in SYSTEM mode and returns through full CPSR restoration.
+Other exception classes, IRQ delivery and BIOS access remain unsupported.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -72,11 +72,12 @@ not entered through exceptions. BIOS accesses return `BiosAccess`.
 - The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
   timing or frame completion concept.
 
-## BIOS HLE primitives (direct, not guest SWI)
+## BIOS HLE services and guest SWI framing
 
-`gba_native::bios::call(service, &mut cpu, &mut bus)` implements exactly six
+`gba_native::bios::call(service, &mut cpu, &mut bus)` exposes exactly six
 documented, timing-independent services as direct Rust primitives derived from
-S1:
+S1. Guest ARM/Thumb SWIs dispatch to those same services through
+`bios::execute_swi`:
 
 | SWI | Service | Boundary |
 | --- | --- | --- |
@@ -87,12 +88,47 @@ S1:
 | `0Bh` | `CpuSet` | Halfword/word copy or fill with prevalidated ranges |
 | `0Ch` | `CpuFastSet` | Word copy or fill rounded up to 8-word blocks before range validation |
 
-These primitives do not consume an instruction, advance PC, enter SVC/IRQ mode,
-write SPSR, fetch a vector, count cycles or model wait states. Every other
-service number is an explicit `BiosError::UnsupportedService`; in particular
-there is no Halt/IntrWait/VBlankIntrWait, Stop/Sleep, SoftReset/HardReset or
-decompression implementation. Unsupported requests are never successful no-ops.
-See `docs/clean-room/hle-services.md` for the exact policies and tests.
+The direct `bios::call` API does not consume an instruction, advance PC, enter
+SVC/IRQ mode, write SPSR, fetch a vector, count cycles or model wait states. A
+guest SWI consumes exactly one guest instruction and performs the framed SVC
+path described below; service internals add no budget, cycle or wait-state
+accounting. Every other service number is an explicit
+`BiosError::UnsupportedService`; Halt/IntrWait/VBlankIntrWait, Stop/Sleep,
+SoftReset/HardReset and decompression are not implemented. Unsupported requests
+are never successful no-ops. See `docs/clean-room/hle-services.md` for exact
+policies and tests.
+
+### Guest SWI/SVC path
+
+ARM SWI service selection uses comment bits 23..16; Thumb SWI uses the encoded
+low byte. An executed SWI first validates the known service request, then checks
+that the SVC stack can hold an aligned four-word frame wholly inside EWRAM or
+IWRAM. Unsupported services and known service precondition errors are rejected
+before CPU or bus mutation. A supported SWI from SVC mode returns an explicit
+`SwiNesting` error before mutation because this bounded implementation cannot
+preserve an already-live `SPSR_svc`/`LR_svc` pair.
+
+For a non-SVC caller, entry saves the old CPSR in `SPSR_svc`, writes the resume
+address (ARM instruction address + 4 or Thumb address + 2) to `LR_svc`, enters
+ARM SVC mode with IRQ masked and FIQ unchanged, and sets PC to `0x00000008`.
+The handler saves four words at `SVC_SP - 16`, changes mode to SYSTEM while it
+calls the HLE primitive, then returns to SVC, restores the frame and performs
+`MOVS PC, LR` semantics, restoring the full interrupted CPSR and resume PC.
+
+**Design policy, not a hardware claim:** the ascending-address frame words are
+`SPSR`, `R11`, `R12`, `R14`, starting at `SVC_SP - 16`; the SVC SP is restored
+to its pre-entry value on success. GBATEK identifies these four saved values but
+does not establish their slot order in memory. The implementation does not claim
+to reproduce a particular Nintendo BIOS's exact frame layout. A frame SP that
+is misaligned, underflows, or is outside work RAM is rejected before framing.
+
+`Cpu::initialize_bios_stacks()` explicitly sets USER/SYS SP to `0x03007F00`, IRQ
+SP to `0x03007FA0`, and SVC SP to `0x03007FE0`. It is not implicit in
+`Cpu::direct_entry()`. The `run` command and generated AOT harness initialize
+these stack tops; synthetic direct-entry tests remain unchanged unless they opt
+in. This model has no IRQ delivery, BIOS code fetch, cycle timing, scheduler or
+wait-state accounting inside the HLE handler. A bus failure after exception
+entry is terminal and is not rolled back.
 
 ## Bus
 
@@ -163,9 +199,10 @@ Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
 unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
 sixteenth condition. A false condition is a no-op that still consumes one
 instruction and advances PC, including for a PSR transfer whose executed form
-would be restricted. Multiply, swap, SWI, coprocessor, ARMv5 `BLX`/`BXJ` and
-other newer encodings are rejected with address/state/raw word and are never
-NOPs.
+would be restricted. Multiply, swap, coprocessor, ARMv5 `BLX`/`BXJ` and other
+newer encodings are rejected with address/state/raw word and are never NOPs.
+Typed SWI is handled only by the bounded six-service path above; unsupported
+service numbers and SVC-origin nesting are explicit errors.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
@@ -174,8 +211,9 @@ NOPs.
 | Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
 | Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base, unaligned base (bounded runtime policy) |
-| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
-| Everything else | none | multiply/swap, SWI, coprocessor, unconditional/newer space |
+| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
+| Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six-service HLE dispatch and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
+| Everything else | none | multiply/swap, coprocessor, unconditional/newer space |
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -295,10 +333,9 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
-- **Boundary:** there is no exception entry/vector fetch, no guest SWI dispatch
-  or HLE call from an instruction, no banked-register save/restore by the CPU,
-  no exception return and no SPSR restore. Those remain explicit unsupported
-  behavior, not hidden successes.
+- **Boundary:** only the documented SWI-to-HLE path performs SVC entry, a bounded
+  saved frame and exception return. Other exception classes/vectoring, IRQ
+  delivery, BIOS execution and other SPSR-restoring PC writes remain unsupported.
 
 Pipeline offsets are documented. ARM operands reading R15 use
 `instruction address + 8`, or `+12` when the instruction uses a
@@ -327,7 +364,7 @@ GBATEK notes that this case is not officially defined as predictable.
 | PC-relative | `LDR` literal | — |
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
 | Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
-| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions | ARMv5 `BLX` second half, SWI, undefined `cond=14` |
+| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six documented HLE services | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
 | Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, unaligned SP/base (bounded runtime policy), ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
@@ -402,7 +439,7 @@ shift }` with `ShiftKind` and an immediate or register amount. The remaining
 ALU operations use `Op::Alu { opcode: AluOpcode, ... }`; MOV/ADD/SUB/CMP keep
 their earlier explicit variants so previously supported IR shapes and tests are
 unchanged. Branch operations are `B`, `Bl`, the two Thumb halves `BlHigh` and
-`BlLow`, and `Bx`. Memory operations are `LdrLiteral`, the preserved
+`BlLow`, `Bx` and typed `Swi { comment }`. Memory operations are `LdrLiteral`, the preserved
 pre-indexed-immediate `LdrHalf`/`StrHalf` shapes, and typed `MemSingle`
 (pre/post, width, sign, add/subtract, writeback, post `T`), `BlockTransfer`,
 `Push`, `Pop` and `ThumbBlock`. PSR operations remain `Mrs`/`Msr`. `MemOffset`
@@ -414,7 +451,7 @@ raw opcodes or run an opcode table. Shared `semantics` helpers evaluate typed
 operands, PC pipeline values, shifts and operand carry; they are used by both
 the reference interpreter and the emitter. `Msr` carries the PSR selector, the
 four field bits and a register or already-expanded immediate source. Control-flow
-metadata (`writes_pc`) marks direct branches, `BX`, the second (`BlLow`) half of
+metadata (`writes_pc`) marks direct branches, `BX`, SWI, the second (`BlLow`) half of
 Thumb `BL`, ALU/MOV writes to R15, a word `MemSingle` load into R15, an ARM
 `LDM` with PC in the list, and Thumb `POP {...,PC}`. Discovery and emission
 therefore terminate blocks consistently; a false condition still exposes the
@@ -440,6 +477,12 @@ does not write PC and does not itself end the block.
   fallthrough discoverable. The same applies to ARM `LDM` with PC and Thumb
   `POP PC`. This prevents translating instructions that are only reachable
   through a dynamic computed target. RAM is never discovered or translated.
+- A typed SWI terminates its block and queues the known next-instruction
+  continuation, because a supported HLE service returns there. `DiscoveryStats`
+  counts SWIs separately. Native emission calls the framed
+  `bios::execute_swi` path directly; generated harnesses initialize the
+  documented BIOS stack tops before dispatch. Unsupported services still return
+  explicit errors at runtime.
 - Discovery stops at dynamic `BX`, dynamic `BL` targets, unknown/unsupported
   encodings and non-ROM targets. Limits are explicit: `max_blocks` and
   `max_instructions` are global terminal budgets (default 512/8192) and set
@@ -490,7 +533,7 @@ does not write PC and does not itself end the block.
   experimental prototype, not a signature, code-signing identity or
   anti-tamper guarantee.
 - Partial coverage is explicit: `DiscoveryStats` reports blocks, translated
-  instructions, resolved/dynamic BX, ARM `BL` callees, candidate return
+  instructions, SWIs, resolved/dynamic BX, ARM `BL` callees, candidate return
   continuations queued for an ARM `BL` or the second Thumb `BL` half, dynamic
   Thumb-`BL` targets, non-branch PC-write block terminations (e.g. ALU/MOV,
   word `LDR`, `LDM`, or `POP` to PC), decode stops, external targets, per-block
@@ -514,8 +557,17 @@ does not write PC and does not itself end the block.
   visit), no RAM block in the artifact, and final `r0=2`. This #17 native
   regression is implemented and locally tested but remains pending independent
   verification and CI; the issue is not closed by the implementation alone.
-  These are fixture facts, not evidence that arbitrary retail code can be
-  statically recovered.
+  Synthetic AOT SWI fixtures collectively cover native ARM `Div`, `DivArm`,
+  `Sqrt`, `CpuSet` and `RegisterRamReset`, plus Thumb `CpuFastSet`, known return
+  continuations, initialized SVC stacks, exact guest budgets and direct HLE
+  emission without interpreter fallback. The five-call ARM fixture checks
+  hand-derived complete CPU-bank/SPSR and bus/frame oracles, not only the
+  interpreter; the ARM/Thumb fixture independently checks the complete digest,
+  including its saved Thumb CPSR. Native failure fixtures check unsupported
+  service 00h, false conditional unsupported SWI, service preconditions, invalid
+  SVC stack and SVC-origin nesting; error-path instrumentation confirms CPU and
+  bus digests are unchanged. These are fixture facts, not evidence that arbitrary
+  retail code can be statically recovered.
 
 ## CLI output and artifacts
 

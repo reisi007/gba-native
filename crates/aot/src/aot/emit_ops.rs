@@ -37,6 +37,15 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             )
             .unwrap();
         }
+        Op::Swi { comment } => {
+            writeln!(
+                out,
+                "    gba_native::bios::execute_swi(0x{comment:08X}u32, {}, 0x{:08X}u32, cpu, bus)?;",
+                site.thumb,
+                site.addr
+            )
+            .unwrap();
+        }
         Op::Mov { rd, src, set_flags } => {
             writeln!(
                 out,

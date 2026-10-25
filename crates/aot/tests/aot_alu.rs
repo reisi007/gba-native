@@ -138,6 +138,7 @@ fn fixture() -> Cartridge {
 
 fn expected_cpu() -> Cpu {
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     let registers = [
         (0u8, 0x0300_7F00),
         (1, 0x1234_0000),
@@ -223,6 +224,7 @@ fn native_alu_shift_bl_fixture_matches_hand_expected_state_and_bus() {
     assert_eq!(report.image_height, image.height);
 
     let mut reference_cpu = Cpu::direct_entry();
+    reference_cpu.initialize_bios_stacks();
     reference_cpu.set_pc(ENTRY);
     let mut reference_bus = Bus::new(cart.clone());
     let used = interpret::run_budget(&mut reference_cpu, &mut reference_bus, BUDGET)

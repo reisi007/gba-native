@@ -179,9 +179,14 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
 
     if raw & 0xF000 == 0xD000 {
         let branch_cond = (raw >> 8) & 0xF;
-        if branch_cond == 0xE || branch_cond == 0xF {
+        if branch_cond == 0xF {
+            return Ok(make(Op::Swi {
+                comment: raw & 0x00FF,
+            }));
+        }
+        if branch_cond == 0xE {
             return Err(unsupported_thumb(
-                "Thumb SWI/undefined conditional-branch encoding is not implemented",
+                "Thumb conditional-branch condition 1110b is undefined",
             ));
         }
         let cond = Cond::from_bits(branch_cond).unwrap_or(Cond::Al);

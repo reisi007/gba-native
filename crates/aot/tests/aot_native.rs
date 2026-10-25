@@ -43,6 +43,7 @@ impl Drop for TempDir {
 
 fn reference(cart: &Cartridge, budget: u64) -> (Cpu, Bus, u64) {
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     cpu.set_pc(demo::ENTRY);
     cpu.set_thumb(false);
     let mut bus = Bus::new(cart.clone());

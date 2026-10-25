@@ -151,6 +151,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     }
     let cart = Cartridge::from_path(Path::new(&path))?;
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     let mut bus = Bus::new(cart);
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     println!("status=bounded");
@@ -186,6 +187,7 @@ fn cmd_aot_proof(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
 
     let cart = demo::demo_cartridge();
     let mut reference_cpu = Cpu::direct_entry();
+    reference_cpu.initialize_bios_stacks();
     reference_cpu.set_pc(demo::ENTRY);
     reference_cpu.set_thumb(false);
     let mut reference_bus = Bus::new(cart.clone());
@@ -218,6 +220,7 @@ fn cmd_aot_proof(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("bl_returns={}", artifact.stats.bl_returns);
     println!("dynamic_bl={}", artifact.stats.dynamic_bl);
     println!("pc_writes={}", artifact.stats.pc_writes);
+    println!("swis={}", artifact.stats.swis);
     println!("decode_stops={}", artifact.stats.decode_stops);
     println!("external_targets={}", artifact.stats.external_targets);
     println!("budget_used={}", report.budget_used);
@@ -261,6 +264,7 @@ fn cmd_aot_emit(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("bl_returns={}", artifact.stats.bl_returns);
     println!("dynamic_bl={}", artifact.stats.dynamic_bl);
     println!("pc_writes={}", artifact.stats.pc_writes);
+    println!("swis={}", artifact.stats.swis);
     println!("decode_stops={}", artifact.stats.decode_stops);
     println!("output={out}");
     println!("embedded_rom_bytes=0");

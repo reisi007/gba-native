@@ -58,14 +58,13 @@ is excluded and keeps its own workspace and lockfile.
   runs a default `cargo tree` and rejects `pixels`/`winit`/`wgpu`/desktop.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-  --locked`. It pins every target, including the 200-test pre-existing
-  inventory: 155 core integration tests across 24 files, 32 core library unit
-  tests, 22 AOT integration tests across 9 files, 10 AOT library unit tests,
-  22 root integration tests across four files and 5 root binary unit tests,
-  exactly 246 tests. The 46 added tests are 38 core memory/block/stack
-  integration cases, 2 core address/alignment helper unit tests and 6 AOT
-  native memory/block/RAM/discovery/invalidation cases; no old test name or
-  oracle was removed. Bare
+  --locked`. It pins every target: 168 core integration tests across 26 files,
+  32 core library unit tests, 24 AOT integration tests across 10 files, 10 AOT
+  library unit tests, 22 root integration tests across four files and 5 root
+  binary unit tests, exactly 261 tests. The prior 246-test inventory is
+  preserved by name and oracle; framed SWI adds 13 core and 2 AOT integration
+  tests. The three workspace compatibility contracts and frontend-tree failure
+  contract add four more tests to the full `cargo test` count. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
   unrelated working directory that owns all generated output, and the quality
   counter is run through `--bin quality-counter` from the same directory.
@@ -140,15 +139,16 @@ is excluded and keeps its own workspace and lockfile.
 - Unknown backend names are preserved in `UnsupportedBackend` (`--backend foo`
   reports `foo`, never `"unknown"`).
 
-### BIOS HLE primitives
+### BIOS HLE services
 
-`crates/core/src/bios/` implements six documented, timing-independent services as direct
-Rust primitives: `RegisterRamReset` (`01h`), `Div` (`06h`), `DivArm` (`07h`),
-`Sqrt` (`08h`), `CpuSet` (`0Bh`) and `CpuFastSet` (`0Ch`). They are called only
-through `bios::call`; there is no guest SWI/SVC decode, instruction-budget
-consumption, PC update, exception entry, SPSR write or cycle/wait-state model,
-and every other service number is an explicit error. Exact policies are in
-`hle-services.md`.
+`crates/core/src/bios/` implements six documented, timing-independent services:
+`RegisterRamReset` (`01h`), `Div` (`06h`), `DivArm` (`07h`), `Sqrt` (`08h`),
+`CpuSet` (`0Bh`) and `CpuFastSet` (`0Ch`). They remain callable directly through
+`bios::call` and are reachable through typed ARM/Thumb SWIs. Guest SWI execution
+consumes one instruction, performs bounded SVC entry/frame/return, and invokes
+the service in SYSTEM mode; handler internals have no timing model. Unsupported
+services and supported SVC-origin nested calls error explicitly. Exact policies
+are in `hle-services.md`.
 
 - `crates/core/tests/bios_arithmetic.rs`: the documented division example, a signed
   division matrix, zero-divisor and `i32::MIN / -1` errors before mutation, and
@@ -163,9 +163,34 @@ and every other service number is an explicit error. Exact policies are in
   unconditional forced blank, and explicit `UnsupportedService`/unsupported
   reset-flag results that mutate nothing.
 
-These tests use synthetic RAM/ROM fixtures only and require no BIOS image,
-commercial ROM, save, network or external crate. This is not evidence for guest
-SWI/SVC dispatch, BIOS boot, arbitrary requests, cycle timing or playability.
+These tests use synthetic RAM/ROM fixtures only and require no user-supplied
+ROM, BIOS image, save, network or external crate. This is not evidence for BIOS
+boot, arbitrary requests, cycle timing, hardware conformance or playability.
+
+### Guest SWI/SVC framing
+
+- `crates/core/tests/swi_decode.rs` covers typed ARM/Thumb SWI comments and
+  instruction widths.
+- `crates/core/tests/swi_execution.rs` covers full SVC entry and return,
+  ARM/Thumb resume addresses, CPSR/mode/flag restoration, all six guest services,
+  unsupported/precondition rejection before mutation, invalid SVC stacks and
+  explicit rejection of SVC-origin nesting.
+- The frame is 16 aligned bytes in EWRAM/IWRAM, with `(SPSR, R11, R12, R14)` at
+  ascending addresses from `SVC_SP - 16`. GBATEK names the saved values but not
+  their slot order; this is an explicit HLE design policy, not a claim about
+  Nintendo BIOS frame-layout compatibility.
+- `crates/aot/tests/aot_swi.rs` checks direct ARM/Thumb Div/CpuFastSet emission,
+  known return continuations, stack initialization, independent frame/bus
+  expectations, a complete bank/SPSR digest (including the saved Thumb CPSR),
+  reference matching and exact budget stops. `aot_swi_services.rs` adds Div,
+  DivArm, Sqrt, CpuSet and RegisterRamReset in one native run with hand-derived
+  full-bank/SPSR CPU and bus/frame oracles. `aot_swi_errors.rs` checks a successful
+  conditional-false unknown SWI, ARM comment service 00h rejection, division,
+  CpuSet and reset precondition failures, invalid SVC stack and SVC-origin
+  nesting. Its test-only generated-harness instrumentation reports before/after
+  CPU and bus digests on failure to prove each rejection is pre-effect.
+- No BIOS instruction bytes are fetched. Guest-run and generated-harness stack
+  initialization is explicit; `Cpu::direct_entry()` remains unchanged.
 
 ### Independent ISA golden vectors
 
@@ -387,43 +412,26 @@ Observed at this implementation round (2026-10-25). These are recorded
 observations, not a generated inventory:
 
 - `./scripts/short.sh`: hard limit 0 oversized files, Ratchet fast 2/2 rules
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 89 ≥ 36),
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 94 ≥ 36),
   `cargo fmt --check`, Clippy with warnings denied and the fast unit tests all
   passed.
-- `./scripts/full.sh`: passed end to end, including debug and release suites,
-  the demo (230,411 instructions, image SHA-256
-  `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154`) and the
-  native AOT proof (4 blocks / 17 translated instructions, 230,411 instructions,
-  0 fallbacks, `native_vs_reference=match`). The discovery counts did not change
-  because the demo fixture does not use the expanded ALU/control or
-  memory/block/stack operations and no BIOS HLE primitive is reached by guest
-  execution.
-- `cargo test`: 250 tests passed (42 library unit tests: 32 core and 10 AOT;
-  5 CLI binary unit tests; 203 integration tests). The per-target inventory in
-  `tests/workspace_contract.rs` pins 246 tests: AOT ALU 2, AOT block 3, AOT
-  control 4, AOT halfword 1, AOT memory 2, AOT native 5, AOT PSR 3, AOT RAM 1,
-  AOT Thumb ALU 1, ARM ALU 6, ARM block 9, ARM control 9, ARM halfword 5, ARM
-  halfword-extended 8, ARM memory 8, ARM shift 4, BIOS arithmetic 6, BIOS
-  dispatch 2, BIOS memory copy 13, BIOS reset 4, bus 6, cartridge 6, CLI output
-  5, CPU 12, demo 3, display 5, frontend gates 4, ISA golden 4, PSR banking 6,
-  PSR field mask 4, PSR transfer 10, quality counter 10, scripts 3, Thumb ALU 7,
-  Thumb block 6, Thumb control 5, Thumb memory 7, plus the 32 core and 10 AOT
-  library units and 5 binary units. The remaining 4 tests are the three
-  workspace compatibility contracts and the frontend-tree failure contract,
-  which are additional and not replacements. Compared with the preserved
-  200-test baseline, 46 tests were added: 38 core memory/block/stack integration
-  cases, 2 core address/alignment unit tests and 6 AOT native
-  memory/block/RAM/discovery/invalidation cases. This is the exact integrated snapshot for this round, not a guarantee
-  of GBA completeness. The historical CPU-only snapshot was 164 tests (33
-  library unit, 5 CLI binary, 126 integration), the isolated HLE snapshot was
-  155 tests (37 library unit, 5 CLI binary, 113 integration) and the isolated
-  GPU-foundation snapshot was 127 tests (30 library unit, 5 CLI binary, 92
-  integration); none is reused as this round's count. The frontend-gate tests
-  use a fake Cargo or a deliberately minimal tool path and never fetch or build
-  the optional GPU frontend.
-- `cargo test --release`: 250 tests passed.
+- `./scripts/full.sh`: passed end to end, including debug/release suites, the
+  demo and native AOT proof. The synthetic demo still discovers 4 blocks / 17
+  translated instructions and executes 230,411 instructions with 0 fallbacks;
+  `native_vs_reference=match`, image SHA-256
+  `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154`.
+- The workspace inventory pins 267 named package tests: 168 core integration
+  tests across 26 files, 32 core library unit tests, 30 AOT integration tests
+  across 12 files, 10 AOT library unit tests, 22 root integration tests across
+  four files and 5 binary unit tests. The prior 265-test workspace inventory is
+  preserved by name and oracle; this AOT SWI round adds six tests. Three
+  workspace compatibility tests and one frontend-tree contract test bring the
+  full `cargo test` total to 271.
+- `cargo test`: 271 tests passed; `cargo test --release`: 271 tests passed.
 - Both suites were also repeated with fresh `CARGO_TARGET_DIR` directories, with
-  the same 250/250 result in debug and release.
+  271/271 passing tests in debug and release. This round's full logs are retained
+  under `output/fixround-swi-aot-e40418c-run5/` (`short.log`, `full.log`,
+  `frontend.log`, `fresh-debug.log` and `fresh-release.log`).
 - The optional `apps/desktop` package is not part of that count: its separate
   `scripts/frontend.sh` gate ran 15 frontend unit tests plus locked fmt, Clippy,
   build, a locked offline dependency-tree check and a headless `--help`, and all
@@ -434,33 +442,35 @@ observations, not a generated inventory:
   ALU/banking/BL and dynamic-PC fallback), `crates/aot/tests/aot_thumb_alu.rs` two
   (full run and exact mid-pair stop), `crates/aot/tests/aot_psr.rs` one,
   `crates/aot/tests/aot_halfword.rs` one, `crates/aot/tests/aot_memory.rs` one,
-  `crates/aot/tests/aot_block.rs` two and `crates/aot/tests/aot_ram.rs` one —
-  fourteen in total. Their
+  `crates/aot/tests/aot_block.rs` two, `crates/aot/tests/aot_ram.rs` one,
+  `crates/aot/tests/aot_swi.rs` three, `aot_swi_services.rs` one and
+  `aot_swi_errors.rs` seven — twenty-five in total. Their
   contract/invalidation tests make no generated build. `crates/aot/tests/aot_native.rs`
   additionally asserts the generated Cargo tree contains only the core package.
   `tests/cli_output.rs` runs two real default `aot proof` builds and refuses all
   redirect/invalid-path cases before Cargo starts.
 - Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 89 ≥ 36);
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 96 ≥ 36);
   `check --tier slow` = 1 rule / 0 failed (`native-consistency` 1 ≥ 1).
   A full `ratchet check` is 3 rules / 0 failed. The machine-written baseline is
   `{native-consistency: 1, oversized-rust-file: 0, rust-source-population: 36}`;
   adding files leaves the floor satisfied without editing the baseline.
-- Maintained Rust population: 89 files (including `apps/desktop/src` and the
-  workspace/frontend contract tests); maximum 481 physical lines
-  (`crates/core/src/cpu.rs`) and the next largest maintained files are
-  `tests/workspace_contract.rs` at 468 lines, `crates/core/src/bus.rs` at 449,
-  `crates/core/tests/bios_memory_copy.rs` at 447 lines and
-  `crates/aot/src/aot/emit_mem.rs` at 396 lines. The code meets the hard
-  limit without a baseline exemption or hand-edited baseline. The earlier
+- Maintained Rust population: 96 files (including `apps/desktop/src`, the
+  workspace/frontend contract tests and the new guest SWI tests); there
+  are zero files above 500 physical lines. The hard limit passes without a
+  baseline exemption or hand-edited baseline. The earlier
   501-line/nested-directory boundary tests are unchanged in
   `tests/quality_counter.rs` and cover nested `src/output/` and `tests/target/`
-  as maintained sources.
+  as maintained sources. Release testing emitted non-fatal `rust-objcopy`
+  warnings because this local toolchain could not load `libLLVM.dylib`; both
+  fresh Cargo test commands exited successfully.
 - A separate temporary untracked 501-line Rust probe with a 1-line root `lib.rs`
   in `src/output/` was reported by `oversized --root <temp> --max 500 --hard`
   with exit status 1 and stdout `1`, while root-level `target/` and `output/`
   probes were skipped; the probe was removed afterwards. `scripts/short.sh` also
-  passed when invoked from another working directory.
+  passed when invoked from another working directory. Fresh offline/locked
+  debug and release runs used separate owned `CARGO_TARGET_DIR` directories and
+  each passed all 271 tests.
 
 The historical commit 39380a3 (before the structural split) used `src/aot/`,
 `src/decode/`, `src/main.rs` and `src/cli/`. Those old paths are historical
@@ -468,32 +478,31 @@ snapshots only; the current source lives in `crates/core/src/`,
 `crates/aot/src/`, the root CLI/facade and the root `tests/` files listed above.
 The earlier very large line counts were uncommitted working-tree measurements,
 not initial HEAD sizes, and are not used as historical evidence.
-- Bounded read-only local retail observation: the existing CLI now executes the
-  previously blocking ARM single word store (base-register `STR`) family at
-  abstract address `0x08000224` and stops at abstract address `0x082FCDE8` on
-  the Thumb SWI / reserved conditional-branch (`cond=14/15`) family, which is
-  outside this CPU memory task. No retail bytes, AOT source or copied payload
-  were produced; the ROM SHA-256 remains
-  `7c599c56849efeebeb93bd71f714932ae4cdf980db51c9c1016b4431057f71d4`. A
-  completed instruction budget is still not a boot or playability claim.
-- The six direct BIOS HLE primitives are covered only by synthetic tests in this
-  integrated worktree. This snapshot is not evidence that they are wired to
-  guest SWI/SVC dispatch, executed by the interpreter/CPU, integrated with the
-  GPU/display stream, cycle-accurate, or playability evidence.
+- Historical bounded, read-only local retail observation (predates this SWI
+  implementation; not repeated during this round): the CLI stopped at abstract
+  address `0x082FCDE8` on Thumb SWI / reserved conditional-branch (`cond=14/15`)
+  after reaching ARM single word stores. No retail ROM was accessed for this
+  round. The historical observation is not a current compatibility result; its
+  former stop point does not describe the implemented synthetic SWI path.
+- The six HLE services and framed guest SWI path are covered only by synthetic
+  tests in this worktree. This is not evidence for a particular retail BIOS,
+  BIOS boot, hardware conformance, cycle timing, GPU/display integration or
+  playability.
 
 ## Not established
 
 No hardware conformance ROM suite has been run. No retail game is supported or known playable.
-No BIOS boots, exception entry/return, SWI, interrupt delivery, save
+No BIOS boots; only the bounded synthetic SWI entry/return path is tested. Other
+exception entry/return, interrupt delivery, save
 persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
 or a playable window frontend is verified. The optional synthetic
 `apps/desktop` frontend presents one static synthetic bitmap and has
 build/unit-test evidence plus one local macOS Metal smoke observation; no live
 Windows/Linux GPU run, cross-platform presentation claim, playable/input loop
 or visible-frame counter is verified. PSR-transfer and banking evidence is
-limited to the synthetic/direct-entry subset. The six direct BIOS HLE primitives
-are synthetic-test evidence for those primitives only; guest SWI/SVC dispatch,
-BIOS execution and hardware conformance remain unverified. No real GBA hardware
+limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE
+services have synthetic-test evidence only; BIOS execution and hardware
+conformance remain unverified. No real GBA hardware
 measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 

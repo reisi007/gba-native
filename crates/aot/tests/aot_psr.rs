@@ -137,6 +137,7 @@ fn psr_fixture() -> Cartridge {
 
 fn reference(cart: &Cartridge, budget: u64) -> (Cpu, Bus, u64) {
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(false);
     let mut bus = Bus::new(cart.clone());

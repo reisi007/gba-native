@@ -19,24 +19,37 @@ pub(super) fn div_arm(cpu: &mut Cpu) -> Result<()> {
 }
 
 fn divide(cpu: &mut Cpu, numerator: u32, denominator: u32) -> Result<()> {
+    validate_div(numerator, denominator)?;
     let numerator = numerator as i32;
     let denominator = denominator as i32;
-    if denominator == 0 {
-        return Err(Error::Bios(BiosError::ZeroDivisor));
-    }
     // ARM's documented signed divide truncates toward zero and the remainder
     // follows the dividend's sign. Rust's checked i32 operators use the same
     // convention and report the one unrepresentable case instead of panicking.
     let quotient = numerator
         .checked_div(denominator)
-        .ok_or(Error::Bios(BiosError::DivisionOverflow))?;
+        .expect("validated division");
     let remainder = numerator
         .checked_rem(denominator)
-        .ok_or(Error::Bios(BiosError::DivisionOverflow))?;
+        .expect("validated remainder");
     cpu.set_reg(0, quotient as u32);
     cpu.set_reg(1, remainder as u32);
     // r3 is the unsigned magnitude of the quotient, including for negatives.
     cpu.set_reg(3, quotient.unsigned_abs());
+    Ok(())
+}
+
+pub(super) fn validate_div(numerator: u32, denominator: u32) -> Result<()> {
+    let numerator = numerator as i32;
+    let denominator = denominator as i32;
+    if denominator == 0 {
+        return Err(Error::Bios(BiosError::ZeroDivisor));
+    }
+    numerator
+        .checked_div(denominator)
+        .ok_or(Error::Bios(BiosError::DivisionOverflow))?;
+    numerator
+        .checked_rem(denominator)
+        .ok_or(Error::Bios(BiosError::DivisionOverflow))?;
     Ok(())
 }
 

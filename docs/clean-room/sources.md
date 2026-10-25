@@ -24,8 +24,8 @@ Relevant anchors actually consulted for this milestone:
   valid ARM7TDMI mode values and SPSR set.
 - `#arm-cpu-register-set`: shared r0-r7, FIQ-banked r8-r12, per-mode r13/r14 and
   USER/SYSTEM sharing.
-- `#arm-cpu-exceptions`: which exception modes own an SPSR and the explicit
-  boundary that exception entry/return is not implemented.
+- `#arm-cpu-exceptions`: exception-mode SPSR ownership and the documented SWI
+  vector, entry and return behavior.
 - `#arm-opcodes-psr-transfer-mrs-msr`: MRS/MSR encoding, field bytes, USER
   restriction, SPSR availability and T-bit restriction.
 - `#arm-cpu-memory-alignments`: aligned stores, rotated ARM7 word reads,
@@ -68,11 +68,36 @@ Relevant anchors actually consulted for this milestone:
   `#swi-01h-gba---registerramreset`: documented interface and behavior for the
   direct BIOS HLE primitives (arithmetic, memory copy/fill and RAM reset). No
   BIOS image, disassembly or implementation source was used.
+- `#how-bios-processes-swis`, `#bios-function-summary`,
+  `#arm-cpu-exceptions`, `#gba-bios-ram-usage` and
+  `#bios-interrupt-handling`: SWI comment extraction, the four documented
+  handler-save values and SYSTEM-mode switch, exception entry/return flags and
+  vector, GBA stack tops, and the boundary that IRQ nesting is not modeled.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.
 The implemented subset is deliberately narrower than the document; see
 `gba-contract.md`.
+
+## S6 — ARM7TDMI Technical Reference Manual
+
+URL: <https://ww1.microchip.com/downloads/en/DeviceDoc/DDI0029G_7TDMI_R3_trm.pdf>
+
+Retrieved 2026-10-25 through the document URL above; 1,820,983 bytes, SHA-256
+`ce58f88939f4eb2a7029022cfac16724f95d7c47ed2424625e10286a66fe9078`. This
+identifies the fetched PDF, not an immutable upstream revision.
+
+Sections actually consulted:
+
+- §2.8.1 / Table 2-3: SWI return address is ARM PC+4 or Thumb PC+2 and the
+  return instruction is `MOVS PC,R14_svc`.
+- §2.8.2 and Table 2-4: exception entry saves CPSR to SPSR, enters ARM state,
+  vectors SWI to address `0x08`, sets I and leaves F unchanged.
+- §2.8.7: SWI enters Supervisor mode and `MOVS PC,R14_svc` restores PC/CPSR
+  and resumes after the SWI.
+
+These statements corroborate the public hardware contract only. No BIOS image,
+instruction bytes, disassembly or implementation source was used.
 
 ## S2 — gbadev resources
 

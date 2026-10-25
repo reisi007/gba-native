@@ -160,3 +160,32 @@ outside the portable runtime; native key codes and browser event types must not
 become CPU/AOT dependencies. Keep control settings separate from cartridge save
 data and ROM bytes. These are target requirements, not a claim that mobile
 packages, browser controls or remapping are already implemented or tested.
+
+## D13 — Full framed guest SWI HLE
+
+Decided by the owner on 2026-10-25. Reach the six existing documented GBA HLE
+primitives from typed ARM/Thumb SWI instructions using ARM7TDMI SVC exception
+entry and a non-collapsed handler frame: save the documented SPSR/R11/R12/R14
+tuple on the SVC stack, switch the HLE handler to SYSTEM mode, and return with
+the documented MOVS-PC/LR semantics. Do not fetch or reconstruct BIOS code.
+
+ `Cpu::direct_entry()` remains the unchanged synthetic baseline. Guest runs and
+ generated native harnesses explicitly initialize the documented GBA USER/SYS,
+ IRQ and SVC stack tops. The HLE services run atomically inside one guest SWI
+ step; handler/service internals have no instruction, scheduler, cycle, wait-state
+ or frame timing. IRQs cannot occur inside the handler in this model.
+
+GBATEK names the four stack-saved values but does not specify their ascending-
+address slot order. This bounded HLE design stores `(SPSR, R11, R12, R14)` at
+ascending word addresses beginning at `SVC_SP - 16`. That is an explicit
+implementation policy, not a claim about Nintendo BIOS frame-layout
+compatibility.
+
+Unknown services and known service precondition failures are rejected before
+framing mutation where possible. A SWI originating in SVC mode is explicitly
+rejected because this bounded implementation does not preserve an already-live
+SPSR_svc/LR_svc for nested entry. Unexpected bus failures after entry are
+terminal and are not rolled back. Wait, sound, reset-except-memory and
+decompression services remain explicit unsupported errors; this decision does
+not establish BIOS boot, retail playability or close the broader playability
+issues.

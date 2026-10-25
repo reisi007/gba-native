@@ -184,14 +184,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert!(
-        total >= 200,
-        "the workspace lost baseline tests: listed {total}, expected at least 200"
-    );
+    assert_eq!(total, 271, "full workspace test inventory changed");
 
-    // Full inventory. The 200-test baseline is preserved by name and oracle;
-    // the memory/block/stack round adds 38 core integration tests, 2 core
-    // memory-helper unit tests and 6 AOT integration tests (246 total).
+    // Full inventory. The prior 265-test workspace baseline is preserved by
+    // name and oracle; the AOT SWI acceptance round adds six tests (271 total).
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -216,6 +212,8 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("psr_banking", 6),
         ("psr_field_mask", 4),
         ("psr_transfer", 10),
+        ("swi_decode", 3),
+        ("swi_execution", 10),
         ("thumb_alu", 7),
         ("thumb_block", 6),
         ("thumb_control", 5),
@@ -230,6 +228,9 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("aot_native", 5),
         ("aot_psr", 3),
         ("aot_ram", 1),
+        ("aot_swi", 2),
+        ("aot_swi_errors", 5),
+        ("aot_swi_services", 1),
         ("aot_thumb_alu", 1),
     ];
     let root_targets = [
@@ -283,7 +284,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 246, "test inventory changed");
+    assert_eq!(baseline, 267, "test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.

@@ -63,6 +63,13 @@ pub enum Error {
     /// A structurally valid MRS/MSR whose documented execution is restricted
     /// (for example SPSR access in USER/SYSTEM or a T-bit change).
     Psr(&'static str),
+    /// Bounded SWI/SVC framing policy failures, reported before mutation when
+    /// the request itself is unsupported or its SVC stack cannot hold a frame.
+    SwiNesting,
+    SwiStack {
+        sp: u32,
+        reason: &'static str,
+    },
     /// An explicit BIOS HLE service failure. Unsupported, waiting and invalid
     /// requests are never reported as a successful no-op.
     Bios(crate::bios::BiosError),
@@ -152,6 +159,16 @@ impl fmt::Display for Error {
                 width = if *thumb { 4 } else { 8 }
             ),
             Error::Psr(reason) => write!(f, "PSR access: {reason}"),
+            Error::SwiNesting => write!(
+                f,
+                "SWI exception: nested entry from SVC mode is unsupported"
+            ),
+            Error::SwiStack { sp, reason } => {
+                write!(
+                    f,
+                    "SWI exception: invalid SVC stack pointer 0x{sp:08X}: {reason}"
+                )
+            }
             Error::Bios(source) => write!(f, "BIOS HLE: {source}"),
             Error::UnsupportedDisplayMode { mode } => {
                 write!(

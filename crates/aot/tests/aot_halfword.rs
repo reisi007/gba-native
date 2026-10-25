@@ -93,6 +93,7 @@ fn fixture() -> Cartridge {
 
 fn reference(cart: &Cartridge) -> (Cpu, Bus) {
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(false);
     let mut bus = Bus::new(cart.clone());

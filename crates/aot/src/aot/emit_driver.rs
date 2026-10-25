@@ -55,6 +55,7 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact) -> Result<()
     writeln!(out, "    verify_binding(&cart)?;").unwrap();
     writeln!(out, "    let mut bus = Bus::new(cart);").unwrap();
     writeln!(out, "    let mut cpu = Cpu::direct_entry();").unwrap();
+    writeln!(out, "    cpu.initialize_bios_stacks();").unwrap();
     writeln!(out, "    cpu.set_pc(ENTRY);").unwrap();
     writeln!(out, "    cpu.set_thumb(ENTRY_THUMB);").unwrap();
     writeln!(out, "    let mut budget = BUDGET;").unwrap();

@@ -36,10 +36,10 @@ lockfile contains only these three internal path packages.
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
 | ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset; Thumb MUL remains explicit |
-| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
+| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches and the bounded framed SWI entry/return path |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
 | ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
-| BIOS HLE primitives | Six documented services callable directly from Rust; no guest SWI/SVC, BIOS boot or timing |
+| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot, other exceptions or timing |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
@@ -67,8 +67,10 @@ cargo run -- aot emit <rom.gba> <generated.rs>
   instructions in the reference interpreter, snapshots the complete bitmap and
   writes a PPM. The guest itself draws the image via ARM setup, a BX to Thumb,
   a Thumb pixel loop and a Thumb BX back.
-- `run` executes a bounded number of instructions. Reaching the budget is not a
-  boot or frame claim.
+- `run` initializes the documented guest BIOS stacks and executes a bounded
+  number of instructions, including typed SWIs to the six HLE services. Other
+  services return explicit errors. Reaching the budget is not a boot or frame
+  claim.
 - `aot proof` discovers blocks in the synthetic ROM, allocates a new unique
   workspace under `output/` (an explicit `--out` must not already exist), writes
   that synthetic fixture there, emits a native Rust crate in a fresh child
@@ -196,7 +198,8 @@ honest gaps by area:
   [#18](https://github.com/reisi007/gba-native/issues/18),
   [#19](https://github.com/reisi007/gba-native/issues/19)
 
-None of these gaps is claimed as implemented by this prototype. The reference
+These issues remain open; the bounded SWI/HLE implementation and its synthetic
+tests do not close the broader CPU, playability or REA issues. The reference
 interpreter already has a committed self-modifying-RAM regression
 (`crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`).
 Issue #17 now also has the dedicated *native harness* regression
@@ -225,8 +228,9 @@ open pending independent verification and CI; local tests alone do not close it.
   per-exception r13/r14 banks with USER/SYSTEM sharing, and independent
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
-  mutation; USER/SYSTEM SPSR access errors. Exception entry/return, SWI and
-  BIOS boot are not implemented.
+  mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
+  SVC frame, six-service HLE dispatch and full CPSR return; other exception
+  classes, IRQ delivery and BIOS boot are not implemented.
 - Thumb: register ALU operations (all except `MUL`, which is explicit), shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
@@ -235,7 +239,8 @@ open pending independent verification and CI; local tests alone do not close it.
   halves of `BL`, `BX`, literal `LDR`, word/byte register and immediate
   transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
   register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
-  unconditional `B`. The ARMv5 `BLX` second half and register form are rejected;
+  unconditional `B`, and typed SWI to the six documented HLE services. The
+  ARMv5 `BLX` second half and register form are rejected;
   empty stack/block lists and unaligned SP/base are explicit errors.
 - Memory: exact EWRAM/IWRAM/palette/VRAM/OAM regions, three ROM windows,
   DISPCNT and KEYINPUT. No mirrors, open bus, DMA, timers, interrupts or saves.

@@ -1,10 +1,10 @@
-# Independently implemented BIOS HLE services (foundation)
+# Independently implemented BIOS HLE services and guest SWI path
 
-Status: implementation foundation only. This document describes six Rust
-primitives that are callable directly from synthetic tests. They are not wired
-to SWI/SVC decoding or the interpreter, do not perform exception entry, do not
-boot a BIOS and do not establish playability. `README.md` and `gba-contract.md`
-state the same boundary; guest SWI/SVC integration remains separate work.
+Status: six documented Rust HLE primitives are callable directly and from typed
+ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. No BIOS is
+fetched or booted; the implementation is not a general exception subsystem and
+does not establish playability. `README.md` and `gba-contract.md` state the same
+boundary.
 
 Decision background: **D8** in `docs/decisions.md` chooses documented BIOS HLE
 derived from public interface/hardware documentation instead of a bundled or
@@ -12,7 +12,7 @@ disassembled Nintendo BIOS. D9 (GPU presentation) is unrelated future work.
 
 ## Source anchor and identity
 
-The only hardware reference used for this module is the public GBATEK document
+The service interface and behavior are derived from the public GBATEK document
 already registered as **S1** in `docs/clean-room/sources.md`. It is a hardware
 interface reference, not an emulator implementation source.
 
@@ -31,6 +31,15 @@ interface reference, not an emulator implementation source.
   - `#bios-reset-functions`
   - `#swi-01h-gba---registerramreset`
   - `#bios-halt-functions` (explicitly not implemented here)
+  - `#how-bios-processes-swis`, `#gba-bios-ram-usage` and
+  `#arm-cpu-exceptions` for SWI comments, four handler-save values, SYSTEM-mode
+  service execution, stack tops, vector and exception return.
+
+The ARM7TDMI Technical Reference Manual (S6 in `sources.md`) corroborates the
+ARM/Thumb SWI resume-address rule, vector `0x08`, SVC entry flags and
+`MOVS PC,R14_svc` return. GBATEK does not specify the ascending-address order of
+the four BIOS-saved words; the slot order below is a bounded implementation
+choice, not a hardware-compatibility claim.
 
 No emulator implementation, game decompilation, BIOS disassembly, leaked SDK or
 REA Evidence was used. The algorithms and test vectors here are independently
@@ -56,8 +65,40 @@ primitive, not a CPU exception:
 - Every unsupported, waiting or invalid request is an explicit `Error`; none is
   a successful no-op.
 
-A later SWI integration owns the instruction budget, next-PC update and any
-exception framing. That integration is **not** part of this module.
+The direct API above remains useful to host-side tests and tools. The guest
+instruction path is separate: `bios::execute_swi(comment, thumb, addr, cpu,
+bus)` validates the call, enters SVC, saves a bounded handler frame, switches to
+SYSTEM for the HLE call, restores the frame and returns with full CPSR state.
+
+## Guest SWI/SVC framing
+
+- ARM service selection uses comment bits 23..16; Thumb uses the encoded low
+  byte. Unknown services return `BiosError::UnsupportedService`.
+- A supported non-SVC caller enters ARM SVC mode. The old CPSR is placed in
+  `SPSR_svc`; `LR_svc` receives ARM instruction address + 4 or Thumb address + 2;
+  IRQ is masked, FIQ is preserved, and PC is set to vector `0x08`. No BIOS bytes
+  are fetched.
+- The handler frame occupies 16 aligned bytes below the pre-entry SVC SP and
+  must fit entirely in EWRAM or IWRAM. Misaligned, underflowing or out-of-range
+  frames fail before mutation. The handler executes the HLE service in SYSTEM
+  mode, then returns to SVC, restores the saved values and performs
+  `MOVS PC,LR` semantics to restore the full interrupted CPSR and resume PC.
+- **Bounded design policy:** ascending word addresses from `SVC_SP - 16` hold
+  `(SPSR, R11, R12, R14)` in that order. GBATEK identifies the values but not
+  their slot order, so this does not claim to reproduce a Nintendo BIOS's exact
+  stack layout. The SVC SP is restored to its pre-entry value on success.
+- A supported SWI originating in SVC mode fails with `SwiNesting` before
+  mutation; a nested entry cannot safely preserve the already-live `SPSR_svc`
+  and `LR_svc` in this bounded model. Known service preconditions are validated
+  before exception entry. An unexpected bus failure after entry is terminal and
+  is not rolled back.
+- The SWI consumes one guest instruction. Service and handler internals do not
+  consume further instruction budget, model IRQ delivery, or account for cycles,
+  wait states, scheduling or frames.
+- `Cpu::direct_entry()` does not implicitly initialize BIOS stacks.
+  `Cpu::initialize_bios_stacks()` sets USER/SYS SP `0x03007F00`, IRQ SP
+  `0x03007FA0` and SVC SP `0x03007FE0`; the guest CLI runner and generated AOT
+  harness call it explicitly.
 
 ## Implemented services
 
@@ -153,8 +194,9 @@ or silent successes:
   other service not listed above.
 - The decompression family (`10h`..`18h`) is future work; no fake handlers are
   installed.
-- BIOS bytes, BIOS boot, exception entry/return and SWI instruction consumption
-  remain absent.
+- BIOS bytes and BIOS boot remain absent. Exceptions other than the bounded SWI
+  path, IRQ delivery, unsupported SWI services and all timing-dependent services
+  remain explicit errors or unsupported behavior.
 
 ## Tests and evidence boundary
 
@@ -177,8 +219,22 @@ implementation:
 - Reset: IWRAM-tail preservation and the unconditional forced-blank snapshot.
 - Dispatch: explicit `UnsupportedService` results that mutate nothing.
 
-They require no ROM, BIOS file, save, network or external crate. This is the
+`crates/core/tests/swi_decode.rs` checks typed ARM/Thumb comments.
+`crates/core/tests/swi_execution.rs` checks full SVC entry/return, ARM and Thumb
+resume addresses, CPSR flags/mode restoration, all six guest-reachable services,
+unsupported/precondition errors before mutation, invalid stack state and
+SVC-origin nesting. The AOT tests retain ARM Div and Thumb CpuFastSet budget
+checks; an additional five-call ARM fixture covers Div, DivArm, Sqrt, CpuSet and
+RegisterRamReset with hand-derived full-bank CPU and bus/frame oracles. The
+original ARM/Thumb fixture independently checks the complete CPU digest,
+including the saved Thumb CPSR. Native unsupported/precondition, invalid-stack
+and nesting failures are also run; test-only harness instrumentation verifies
+CPU and bus digests are identical before and after each rejected SWI. These
+remain synthetic fixture tests, not BIOS or hardware conformance evidence.
+
+They require no user-supplied ROM, BIOS file, save, network or external crate.
+This is the
 strongest independent evidence currently in the repository for these six
-documented primitives under synthetic conditions. It is not evidence for
-arbitrary requests, a particular retail BIOS, all hardware conformance, BIOS
-boot, SWI/SVC integration, retail-game compatibility or cycle timing.
+documented primitives and the bounded guest SWI path under synthetic conditions.
+It is not evidence for arbitrary requests, a particular retail BIOS, all hardware
+conformance, BIOS boot, retail-game compatibility or cycle timing.

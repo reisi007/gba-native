@@ -218,6 +218,9 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
             cpu.write_psr(psr, fields, psr_source_value(cpu, src))?;
             cpu.set_pc(instr.next_addr());
         }
+        Op::Swi { comment } => {
+            crate::bios::execute_swi(comment, instr.thumb, instr.addr, cpu, bus)?;
+        }
     }
     Ok(())
 }

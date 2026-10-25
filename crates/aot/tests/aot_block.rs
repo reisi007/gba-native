@@ -141,7 +141,9 @@ fn build_and_run(source: &str, cart: &Cartridge, tag: &str) -> (aot::NativeRepor
     let harness = NativeHarness::build(source, &temp.path().join("harness"))
         .expect("build generated harness");
     let report = harness.run(&path).expect("run generated harness");
-    (report, Cpu::direct_entry(), Bus::new(cart.clone()))
+    let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
+    (report, cpu, Bus::new(cart.clone()))
 }
 
 #[test]
@@ -212,6 +214,7 @@ fn native_arm_ldm_stm_fixture_matches_hand_expected_state() {
     assert!(source.contains("cpu.set_reg(0, new_base);"));
 
     let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
     expected_cpu.set_pc(0x0800_0000);
     expected_cpu.set_thumb(false);
     let mut expected_bus = Bus::new(cart.clone());
@@ -275,6 +278,7 @@ fn native_thumb_stack_and_block_fixture_matches_hand_expected_state() {
     assert!(source.contains("bus.write32(base.wrapping_add(0x0u32)"));
 
     let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
     expected_cpu.set_pc(0x0800_0000);
     expected_cpu.set_thumb(true);
     let mut expected_bus = Bus::new(cart.clone());

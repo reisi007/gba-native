@@ -3,18 +3,23 @@
 //! Models the ARM7TDMI register banking needed by the implemented PSR-transfer
 //! subset: r0-r7 are shared, r8-r12 are banked only for FIQ, r13/r14 are banked
 //! per exception mode (USER and SYSTEM share one bank), and FIQ/IRQ/SVC/ABT/UND
-//! each have a separate SPSR. Exceptions, vector entry, SWI and PSR restore via
-//! ALU/PC are absent. Bits reserved on the ARM7TDMI are preserved, never
+//! each have a separate SPSR. SWI exception state is implemented in the
+//! `exception` submodule; other exception classes and ALU/PC SPSR restore are
+//! absent. Bits reserved on the ARM7TDMI are preserved, never
 //! invented or silently zeroed by a field write.
 
 use crate::error::{Error, Result};
 use crate::ir::{Cond, PSR_FIELD_C, PSR_FIELD_F, PSR_FIELD_S, PSR_FIELD_X, Psr};
 use crate::sha256;
 
+mod exception;
+
 pub const DIRECT_ENTRY_CPSR: u32 = 0x0000_00DF;
 pub const MODE_MASK: u32 = 0x1F;
 pub const MODE_SYSTEM: u32 = 0x1F;
 pub const USER_STACK: u32 = 0x0300_7F00;
+pub const IRQ_STACK: u32 = 0x0300_7FA0;
+pub const SVC_STACK: u32 = 0x0300_7FE0;
 
 pub const FLAG_N: u32 = 1 << 31;
 pub const FLAG_Z: u32 = 1 << 30;

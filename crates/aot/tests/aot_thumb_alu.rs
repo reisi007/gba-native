@@ -95,6 +95,7 @@ fn fixture() -> Cartridge {
 
 fn expected_cpu() -> Cpu {
     let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
     for (index, value) in [
         (0u8, 0x0000_009A),
         (1, 0x0000_0403),
@@ -177,6 +178,7 @@ fn native_thumb_alu_shift_and_bl_halves_match_hand_expected_state() {
     assert_eq!(report.image_sha256, image.sha256_hex());
 
     let mut reference_cpu = Cpu::direct_entry();
+    reference_cpu.initialize_bios_stacks();
     reference_cpu.set_pc(ENTRY);
     reference_cpu.set_thumb(true);
     let mut reference_bus = Bus::new(cart.clone());
@@ -201,6 +203,7 @@ fn native_thumb_alu_shift_and_bl_halves_match_hand_expected_state() {
     assert_eq!(mid_report.regs[14], 0x0800_0128, "intermediate BL LR");
     assert_eq!(mid_report.fallbacks, 0);
     let mut mid_cpu = Cpu::direct_entry();
+    mid_cpu.initialize_bios_stacks();
     mid_cpu.set_pc(ENTRY);
     mid_cpu.set_thumb(true);
     let mut mid_bus = Bus::new(cart.clone());
