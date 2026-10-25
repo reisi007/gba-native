@@ -37,12 +37,25 @@ Relevant anchors actually consulted for this milestone:
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC
   alignment in ARM/Thumb state.
-- `#arm-opcodes-memory-single-data-transfer-ldr-str-pld`.
-- `#arm-opcodes-memory-halfword-doubleword-and-signed-data-transfer`.
+- `#arm-opcodes-memory-single-data-transfer-ldr-str-pld`: P/U/B/W/L fields,
+  post-index T bit, `Rn=R15 -> PC+8`, `Rd=R15 -> PC+12`, ARMv4 `LDR PC` keeps T,
+  register-offset reserved bit 4 and Rm=R0-R14.
+- `#arm-opcodes-memory-halfword-doubleword-and-signed-data-transfer`: pre/post,
+  immediate/register offsets, `1SH1` opcode space, ARMv5 LDRD/STRD boundary.
+- `#arm-opcodes-memory-block-data-transfer-ldm-stm`: IA/IB/DA/DB, ascending
+  register/memory order, ARMv4 base-in-list and empty-list quirks, `S=1`
+  boundary, PC entries.
+- `#arm-cpu-memory-alignments`: forced-aligned stores/block transfers, rotated
+  word reads, odd LDRH rotation, and ARM7 odd LDRSH = LDRSB at the odd address.
 - `#thumb-instruction-summary`.
 - `#thumb-opcodes-register-operations-alu-bx`: move-shifted register,
   add/subtract, ALU opcodes, high-register operations and BX.
-- `#thumb-opcodes-memory-loadstore-ldrstr`.
+- `#thumb-opcodes-memory-loadstore-ldrstr`: THUMB.7 register-offset word/byte,
+  THUMB.8 half/signed register forms, THUMB.9 immediate word/byte, THUMB.10
+  immediate halfword, THUMB.11 SP-relative word and the literal load.
+- `#thumb-opcodes-memory-multiple-loadstore-pushpop-and-ldmstm`: THUMB.14
+  full-descending PUSH/POP with LR/PC bit and THUMB.15 LDMIA/STMIA writeback and
+  base-in-list behavior.
 - `#thumb-opcodes-jumps-and-calls`: conditional/unconditional branches and the
   two-half BL/BLX encoding.
 - `#lcd-io-display-control`, `#lcd-vram-bitmap-bg-modes`.

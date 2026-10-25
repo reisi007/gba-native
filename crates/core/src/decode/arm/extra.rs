@@ -1,4 +1,7 @@
-use crate::ir::{Cond, DecodeResult, IrInstr, Op, Psr, PsrSrc, unsupported};
+use crate::ir::{
+    Cond, DecodeResult, IrInstr, MemOffset, MemWidth, Op, Psr, PsrSrc, Shift, ShiftKind,
+    unsupported,
+};
 
 /// ARM PSR transfer. The source/destination/fixed fields are documented in
 /// GBATEK `#arm-opcodes-psr-transfer-mrs-msr`. `f`/`s`/`x`/`c` select the four
@@ -101,7 +104,7 @@ pub(super) fn decode_arm_halfword(addr: u32, raw: u32, cond: Cond) -> DecodeResu
     let p = (raw >> 24) & 1;
     let u = (raw >> 23) & 1;
     let immediate = (raw >> 22) & 1;
-    let w = (raw >> 21) & 1;
+    let bit21 = (raw >> 21) & 1;
     let l = (raw >> 20) & 1;
     let rn = ((raw >> 16) & 0xF) as u8;
     let rd = ((raw >> 12) & 0xF) as u8;
@@ -109,45 +112,141 @@ pub(super) fn decode_arm_halfword(addr: u32, raw: u32, cond: Cond) -> DecodeResu
     let h = (raw >> 5) & 1;
     let offset_magnitude = (((raw >> 8) & 0xF) << 4) | (raw & 0xF);
 
-    if p != 1 || immediate != 1 || w != 0 {
-        return Err(unsupported(
+    // Preserve the exact previously supported IR shape: pre-indexed immediate,
+    // no writeback, unsigned halfword, R0-R14 base/destination.
+    if p == 1 && bit21 == 0 && immediate == 1 && s == 0 && h == 1 && rn != 15 && rd != 15 {
+        let offset = if u == 1 {
+            offset_magnitude as i32
+        } else {
+            -(offset_magnitude as i32)
+        };
+        let op = if l == 1 {
+            Op::LdrHalf { rd, rn, offset }
+        } else {
+            Op::StrHalf { rd, rn, offset }
+        };
+        return Ok(IrInstr {
             addr,
-            false,
+            thumb: false,
             raw,
-            "only pre-indexed immediate halfword transfers are implemented",
-        ));
+            cond,
+            op,
+        });
     }
-    if s != 0 || h != 1 {
-        return Err(unsupported(
-            addr,
-            false,
-            raw,
-            "signed halfword/byte transfers are not implemented",
-        ));
-    }
-    if rd == 15 || rn == 15 {
-        return Err(unsupported(
-            addr,
-            false,
-            raw,
-            "PC-relative halfword transfers are not implemented",
-        ));
-    }
-    let offset = if u == 1 {
-        offset_magnitude as i32
+
+    // P=0 means post-indexing with writeback always enabled. For this halfword
+    // encoding bit 21 is "not used, must be zero" (it is not the word-transfer
+    // T bit), so a set bit is a malformed encoding.
+    let (pre_index, writeback) = if p == 1 {
+        (true, bit21 == 1)
     } else {
-        -(offset_magnitude as i32)
+        if bit21 != 0 {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "ARM post-indexed halfword/signed transfer has reserved bit 21 set",
+            ));
+        }
+        (false, true)
     };
-    let op = if l == 1 {
-        Op::LdrHalf { rd, rn, offset }
+
+    let (width, signed) = match (l, s, h) {
+        // Store halfword only. L=0 with S=1 is the ARMv5 LDRD/STRD space.
+        (0, 0, 1) => (MemWidth::Half, false),
+        (0, _, _) => {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "ARM doubleword/signed store encodings are not implemented (ARMv5 LDRD/STRD)",
+            ));
+        }
+        (1, 0, 1) => (MemWidth::Half, false),
+        (1, 1, 0) => (MemWidth::Byte, true),
+        (1, 1, 1) => (MemWidth::Half, true),
+        (1, 0, 0) => {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "reserved ARM halfword/signed load opcode is not implemented",
+            ));
+        }
+        _ => unreachable!("l/s/h are single extracted bits"),
+    };
+
+    let offset = if immediate == 1 {
+        MemOffset::Imm(offset_magnitude)
     } else {
-        Op::StrHalf { rd, rn, offset }
+        // Register form: bits 11-8 are unused and must be zero.
+        if (raw >> 8) & 0xF != 0 {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "ARM halfword register offset has nonzero reserved bits 11-8",
+            ));
+        }
+        let rm = (raw & 0xF) as u8;
+        if rm == 15 {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "ARM halfword offset register is PC, which is not an implemented encoding",
+            ));
+        }
+        MemOffset::RegShift {
+            rm,
+            shift: Shift::Imm {
+                kind: ShiftKind::Lsl,
+                amount: 0,
+            },
+        }
     };
+
+    if rn == 15 && writeback {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM halfword/signed transfer with PC as base and writeback is not implemented",
+        ));
+    }
+    if l == 1 && writeback && rd == rn {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM halfword/signed load with Rd=Rn and writeback is not implemented (unpredictable)",
+        ));
+    }
+    if l == 1 && rd == 15 {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM narrow load into PC is not implemented",
+        ));
+    }
+
     Ok(IrInstr {
         addr,
         thumb: false,
         raw,
         cond,
-        op,
+        op: Op::MemSingle {
+            load: l == 1,
+            width,
+            signed,
+            rd,
+            rn,
+            offset,
+            add: u == 1,
+            pre_index,
+            writeback,
+            user_access: false,
+        },
     })
 }

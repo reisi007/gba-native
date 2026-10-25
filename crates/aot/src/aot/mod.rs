@@ -11,6 +11,7 @@ mod artifact;
 mod discover;
 mod emit;
 mod emit_driver;
+mod emit_mem;
 mod emit_ops;
 mod harness;
 mod report;

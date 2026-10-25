@@ -47,6 +47,13 @@ pub enum Error {
     NonExecutable {
         addr: u32,
     },
+    /// Bounded policy for block/stack transfers: the low bits of the base would
+    /// be ignored by hardware, but the documented writeback source is not
+    /// established, so no access or writeback is performed.
+    UnalignedBlockBase {
+        addr: u32,
+        thumb: bool,
+    },
     UnsupportedInstruction {
         addr: u32,
         thumb: bool,
@@ -128,6 +135,11 @@ impl fmt::Display for Error {
                     "instruction fetch from non-executable memory at 0x{addr:08X}"
                 )
             }
+            Error::UnalignedBlockBase { addr, thumb } => write!(
+                f,
+                "unaligned {} block-transfer base 0x{addr:08X}; this prototype rejects it before any access",
+                if *thumb { "Thumb" } else { "ARM" }
+            ),
             Error::UnsupportedInstruction {
                 addr,
                 thumb,

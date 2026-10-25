@@ -2,6 +2,8 @@ use super::sign_extend;
 use crate::ir::{Cond, DecodeResult, IrInstr, Op, Src, unsupported};
 
 mod alu;
+mod block;
+mod memory;
 
 pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     let raw = raw & 0xFFFF;
@@ -97,14 +99,10 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     }
 
     if raw & 0xF000 == 0x5000 {
-        return Err(unsupported_thumb(
-            "Thumb register-offset word transfers are not implemented",
-        ));
+        return memory::decode_register_offset(addr, raw);
     }
     if raw & 0xE000 == 0x6000 {
-        return Err(unsupported_thumb(
-            "Thumb immediate-offset word transfers are not implemented",
-        ));
+        return memory::decode_immediate(addr, raw);
     }
 
     if raw & 0xF000 == 0x8000 {
@@ -121,9 +119,7 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     }
 
     if raw & 0xF000 == 0x9000 {
-        return Err(unsupported_thumb(
-            "Thumb SP-relative transfers are not implemented",
-        ));
+        return memory::decode_sp_relative(addr, raw);
     }
 
     if raw & 0xF000 == 0xA000 {
@@ -175,10 +171,10 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     }
 
     if raw & 0xF000 == 0xB000 {
-        return Err(unsupported_thumb("Thumb PUSH/POP are not implemented"));
+        return block::decode_push_pop(addr, raw);
     }
     if raw & 0xF000 == 0xC000 {
-        return Err(unsupported_thumb("Thumb LDM/STM are not implemented"));
+        return block::decode_ldm_stm(addr, raw);
     }
 
     if raw & 0xF000 == 0xD000 {

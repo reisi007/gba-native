@@ -148,8 +148,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 
 - `crates/core/src/cart.rs`, `bus.rs`, `cpu.rs`: header, explicit memory map,
   state.
-- `crates/core/src/ir.rs`, `decode/`, `interpret.rs`: typed IR, independent
-  ARM/Thumb decode (`arm.rs`, `thumb.rs`, tests) and reference semantics.
+- `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
+  `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
+  memory/block submodules, tests), reference semantics and shared pure
+  address/width/sign-extension helpers.
 - `crates/core/src/display.rs`, `render.rs`: bitmap snapshot,
   nearest/letterbox, PPM.
 - `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
@@ -157,9 +159,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   primitives (`mod.rs`, `arithmetic.rs`, `memory.rs`); no guest SWI/SVC
   integration.
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
-  (`artifact.rs`), Rust emission (`emit.rs`), report parsing (`report.rs`),
-  harness build/run (`harness.rs`) and tests. This package depends on
-  `gba-native-core` under the `gba_native` alias.
+  (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`),
+  report parsing (`report.rs`), harness build/run (`harness.rs`) and tests.
+  This package depends on `gba-native-core` under the `gba_native` alias.
 - Root `src/lib.rs`: compatibility facade re-exporting the core modules and
   `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands and
   safe `output/` writes.
@@ -172,10 +174,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `tests/`: root CLI-output, quality-counter/script failure paths, the optional
   frontend gate contracts and the workspace compatibility contracts.
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE
-  arithmetic/memory-copy/reset/dispatch tests and independent ISA golden
-  vectors.
-- `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU fixtures and the
-  native AOT proof.
+  arithmetic/memory-copy/reset/dispatch tests, independent ISA golden vectors
+  and ARM/Thumb single/block/stack memory vectors.
+- `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block
+  fixtures, the native RAM self-modification regression and the native AOT
+  proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality

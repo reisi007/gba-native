@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use gba_native::{aot, bios, bus, cart, cpu, decode, demo, display, error, interpret, ir, render};
-use gba_native::{semantics, sha256};
+use gba_native::{memory, semantics, sha256};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
@@ -81,6 +81,8 @@ fn root_facade_preserves_legacy_paths_and_error_identity() {
         op_of(raw)
     );
     assert_eq!(semantics::aligned_pc(demo::ENTRY + 1, false), demo::ENTRY);
+    assert_eq!(memory::word_load(0x1122_3344, 1), 0x4411_2233);
+    assert_eq!(memory::signed_byte(0x80), 0xFFFF_FF80);
     let rebuilt = cart::Cartridge::from_bytes(demo::demo_cartridge().bytes().to_vec())
         .expect("facade cartridge");
     assert_eq!(sha256::hex(&rebuilt.sha256()), rebuilt.sha256_hex());
@@ -187,8 +189,9 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "the workspace lost baseline tests: listed {total}, expected at least 200"
     );
 
-    // Baseline inventory, labelled separately from this round's new contracts.
-    // Each moved integration target and unit group keeps its exact old count.
+    // Full inventory. The 200-test baseline is preserved by name and oracle;
+    // the memory/block/stack round adds 38 core integration tests, 2 core
+    // memory-helper unit tests and 6 AOT integration tests (246 total).
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -196,7 +199,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("arm_alu", 6),
         ("arm_control", 9),
         ("arm_halfword", 5),
+        ("arm_halfword_extended", 8),
+        ("arm_memory", 8),
         ("arm_shift", 4),
+        ("arm_block", 9),
         ("bios_arithmetic", 6),
         ("bios_dispatch", 2),
         ("bios_memory_copy", 13),
@@ -211,14 +217,19 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("psr_field_mask", 4),
         ("psr_transfer", 10),
         ("thumb_alu", 7),
+        ("thumb_block", 6),
         ("thumb_control", 5),
+        ("thumb_memory", 7),
     ];
     let aot_targets = [
         ("aot_alu", 2),
+        ("aot_block", 3),
         ("aot_control", 4),
         ("aot_halfword", 1),
+        ("aot_memory", 2),
         ("aot_native", 5),
         ("aot_psr", 3),
+        ("aot_ram", 1),
         ("aot_thumb_alu", 1),
     ];
     let root_targets = [
@@ -261,7 +272,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
             expected,
         );
     }
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 30);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 32);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 10);
     baseline += assert_target_count(
         &root,
@@ -272,7 +283,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 200, "baseline test inventory changed");
+    assert_eq!(baseline, 246, "test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.

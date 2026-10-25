@@ -8,6 +8,8 @@ use crate::error::Result;
 use crate::ir::{AluOpcode, IrInstr, Op, PsrSrc, Src};
 use crate::semantics;
 
+mod memory;
+
 pub fn decode_at(bus: &Bus, addr: u32, thumb: bool) -> Result<IrInstr> {
     if thumb {
         decode_thumb(addr, bus.fetch16(addr)? as u32)
@@ -179,6 +181,33 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
             let effective = cpu.reg(rn).wrapping_add(offset as u32);
             bus.write16(effective & !1, cpu.reg(rd) as u16)?;
             cpu.set_pc(instr.next_addr());
+        }
+        Op::MemSingle {
+            load,
+            width,
+            signed,
+            rd,
+            rn,
+            offset,
+            add,
+            pre_index,
+            writeback,
+            user_access: _,
+        } => memory::execute_mem_single(
+            cpu, bus, instr, load, width, signed, rd, rn, offset, add, pre_index, writeback,
+        )?,
+        Op::BlockTransfer {
+            load,
+            rn,
+            regs,
+            pre_index,
+            add,
+            writeback,
+        } => memory::execute_block(cpu, bus, instr, load, rn, regs, pre_index, add, writeback)?,
+        Op::Push { regs, lr } => memory::execute_push(cpu, bus, instr, regs, lr)?,
+        Op::Pop { regs, pc } => memory::execute_pop(cpu, bus, instr, regs, pc)?,
+        Op::ThumbBlock { load, rn, regs } => {
+            memory::execute_thumb_block(cpu, bus, instr, load, rn, regs)?
         }
         Op::Mrs { rd, psr } => {
             let value = cpu.read_psr(psr)?;

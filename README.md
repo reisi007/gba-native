@@ -38,6 +38,7 @@ lockfile contains only these three internal path packages.
 | ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset; Thumb MUL remains explicit |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
+| ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
 | BIOS HLE primitives | Six documented services callable directly from Rust; no guest SWI/SVC, BIOS boot or timing |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
@@ -197,9 +198,11 @@ honest gaps by area:
 
 None of these gaps is claimed as implemented by this prototype. The reference
 interpreter already has a committed self-modifying-RAM regression
-(`crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`). Issue #17
-covers the *native harness* regression, which is still missing and stays open
-until implemented and independently verified.
+(`crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`).
+Issue #17 now also has the dedicated *native harness* regression
+(`crates/aot/tests/aot_ram.rs`): four fresh RAM fallbacks across two visits, no
+RAM block in the artifact, and the patched `MOV r0,#2` observed. It remains
+open pending independent verification and CI; local tests alone do not close it.
 
 ## Supported subset (short version)
 
@@ -210,10 +213,14 @@ until implemented and independently verified.
   Documented PC reads (`+8`, or `+12` for register-specified shifts), ALU PC
   writes with `S=0`, and PC wrapping are implemented. `S=1` with `Rd=PC`
   requires an SPSR restore and stays an explicit error; ARMv5/newer exchange
-  encodings are rejected. `MRS`/`MSR`, literal `LDR` and immediate
-  `LDRH`/`STRH` remain as before. Condition fields 0..14 are evaluated; field
-  1111b is reserved and rejected explicitly. Immediate payloads are classified
-  by bit 25 and independently swept over all imm8/rotation values.
+  encodings are rejected. `MRS`/`MSR` remain as before. Single word/byte
+  `LDR`/`STR` support immediate-12 or shifted-register offsets, pre/post
+  indexing, writeback and the documented PC base/source rules; `LDRH`/`STRH`/
+  `LDRSB`/`LDRSH` add pre/post immediate or unshifted register offsets; ARM
+  `LDM`/`STM` cover IA/IB/DA/DB with PC entries and ARMv4 base-in-list
+  semantics. Condition fields 0..14 are evaluated; field 1111b is reserved and
+  rejected explicitly. Immediate payloads are classified by bit 25 and
+  independently swept over all imm8/rotation values.
 - CPU state: the seven ARM7TDMI modes, shared r0-r7, FIQ-only r8-r12 banking,
   per-exception r13/r14 banks with USER/SYSTEM sharing, and independent
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
@@ -225,8 +232,11 @@ until implemented and independently verified.
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
   `MOV`/`CMP` are an explicit **Design** extension beyond the documented
   high-register encodings), `ADR`, `ADD PC/SP`, `ADD`/`SUB SP,#imm`, both
-  halves of `BL`, `BX`, literal `LDR`, `LDRH`/`STRH`, and conditional or
-  unconditional `B`. The ARMv5 `BLX` second half and register form are rejected.
+  halves of `BL`, `BX`, literal `LDR`, word/byte register and immediate
+  transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
+  register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
+  unconditional `B`. The ARMv5 `BLX` second half and register form are rejected;
+  empty stack/block lists and unaligned SP/base are explicit errors.
 - Memory: exact EWRAM/IWRAM/palette/VRAM/OAM regions, three ROM windows,
   DISPCNT and KEYINPUT. No mirrors, open bus, DMA, timers, interrupts or saves.
 - Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.

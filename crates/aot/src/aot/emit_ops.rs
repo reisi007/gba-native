@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 
+use super::emit_mem;
 use gba_native::ir::{AluOpcode, IrInstr, Op, Shift, Src};
 
 #[derive(Clone, Copy)]
@@ -111,6 +112,11 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             .unwrap();
             writeln!(out, "    bus.write16(address & !1, cpu.reg({rd}) as u16)?;").unwrap();
         }
+        Op::MemSingle { .. }
+        | Op::BlockTransfer { .. }
+        | Op::Push { .. }
+        | Op::Pop { .. }
+        | Op::ThumbBlock { .. } => out.push_str(&emit_mem::instruction_body(instruction)),
         Op::B { .. } | Op::Bl { .. } | Op::BlLow { .. } | Op::Bx { .. } => unreachable!(),
     }
     out

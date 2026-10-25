@@ -12,9 +12,13 @@ not a roadmap promise and not a retail-game compatibility statement.
 - No BIOS is supplied or executed; direct entry is a test policy.
 - The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
   `B`/`BL`/`BX` and the corresponding Thumb ALU/high-register/long-branch
-  subset are implemented and independently tested. ARM7TDMI PSR transfers and
-  MSR-driven register banking are implemented for this subset. Exception
-  entry/return, SWI and BIOS boot remain absent; Thumb `MUL` remains explicit.
+  subset are implemented and independently tested. ARM word/byte single data
+  transfers, extended halfword/signed transfers, ARM `LDM`/`STM`, Thumb
+  word/byte/half/signed transfers, SP-relative word transfers and Thumb
+  `PUSH`/`POP`/`LDMIA`/`STMIA` are implemented for the policy below. ARM7TDMI
+  PSR transfers and MSR-driven register banking are implemented for this
+  subset. Exception entry/return, SWI, multiply/swap and BIOS boot remain
+  absent; Thumb `MUL` remains explicit.
 - Six documented BIOS services exist as direct, public Rust HLE primitives (see
   below). They are not reachable from a guest SWI instruction and do not
   execute a BIOS.
@@ -122,16 +126,36 @@ Implemented regions and widths:
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
   and unmapped addresses are errors.
 - CPU data-transfer rules actually implemented and tested:
-  - A word load aligns down and rotates right by `(address & 3) * 8`; literal
-    `LDR` supports this path.
-  - A halfword load aligns down; odd addresses rotate the 32-bit halfword
-    result right by 8 (ARM7 behavior). Signed halfword/byte loads are not
-    implemented.
-  - Halfword stores force-align down.
-  - Byte stores to palette/VRAM duplicate the byte in both halves of the
-    addressed halfword. Byte stores to OAM are ignored. These rules are tested.
+  - A byte load/store uses `read8`/`write8` and the byte's exact address. It is
+    never emulated as a wider access plus extraction. Byte stores to
+    palette/VRAM duplicate the byte in both halves of the addressed halfword;
+    byte stores to OAM are ignored; byte reads from palette/VRAM/OAM return the
+    addressed byte.
+  - A halfword load reads `address & !1`; an odd LDRH rotates the 32-bit
+    zero-extended halfword right by 8 (ARM7 behavior). An odd LDRSH is a signed
+    byte read at the odd address itself, not a rotated halfword. LDRSB is a
+    signed byte at the exact address. Halfword stores force-align down.
+  - A word load reads `address & !3` and rotates right by `(address & 3) * 8`;
+    a word store force-aligns down. The preserved literal-`LDR` path follows the
+    same rule.
+  - ARM single transfers implement pre/post indexing, add/subtract, an
+    immediate-12 or shifted-register offset (immediate shifts only; bit 4 must
+    be zero and the offset register may not be PC), optional pre-index
+    writeback and post-index writeback. The post-index `T` bit selects forced
+    user access on hardware; this prototype has no MMU/privilege split, so the
+    same checked GBA bus is used and CPU mode is unchanged (Design).
+  - PC as a base reads instruction address + 8 and is rejected with writeback.
+    PC as a stored source writes instruction address + 12. A word `LDR pc`
+    force-aligns to `!3` and keeps ARM state (ARMv4, no exchange). Narrow loads
+    into PC are explicit unsupported encodings.
+  - Stores read the old source/base before any writeback. Writeback is
+    committed only after the checked access succeeded; a bus error performs no
+    writeback. A load whose destination aliases a written-back base is
+    rejected before execution as unpredictable.
 - Bus errors are terminal for that execution run. A partially completed
-  multi-access operation is not promised to be atomic.
+  multi-access operation is not promised to be atomic: registers or memory
+  words already transferred remain changed, later accesses are not attempted,
+  and no writeback is fabricated.
 
 ## Implemented ARM subset
 
@@ -139,18 +163,19 @@ Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
 unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
 sixteenth condition. A false condition is a no-op that still consumes one
 instruction and advances PC, including for a PSR transfer whose executed form
-would be restricted. Multiply, swap, block transfer, SWI, coprocessor, ARMv5
-`BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
-and are never NOPs.
+would be restricted. Multiply, swap, SWI, coprocessor, ARMv5 `BLX`/`BXJ` and
+other newer encodings are rejected with address/state/raw word and are never
+NOPs.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
 | Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands and `S=0` PC destinations | `S=1` with `Rd=PC` (needs SPSR restore), ARMv2 P-variant test ops, ARMv5/newer |
 | Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
-| Word load | `LDR` literal only, including ARM7 rotated unaligned literal read | `LDR`/`STR` with base register, register offset, writeback |
-| Halfword | pre-indexed immediate `LDRH`/`STRH`, ±offset, no writeback | `LDRSB`, `LDRSH`, post-index, register offset, writeback |
+| Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
+| Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
+| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base, unaligned base (bounded runtime policy) |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
-| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, unconditional/newer space |
+| Everything else | none | multiply/swap, SWI, coprocessor, unconditional/newer space |
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -182,6 +207,55 @@ immediate-form MSR has bit 25 set, so the classes are mutually exclusive and no
 raw-word whitelist is needed. An unsupported encoding, including an MSR with an
 empty field mask, is still rejected before condition evaluation; a false
 condition only suppresses execution of a successfully decoded instruction.
+
+### Memory-transfer bounded policies
+
+Implemented from GBATEK `#arm-cpu-memory-alignments`,
+`#arm-opcodes-memory-single-data-transfer-ldr-str-pld`,
+`#arm-opcodes-memory-halfword-doubleword-and-signed-data-transfer`,
+`#arm-opcodes-memory-block-data-transfer-ldm-stm`,
+`#thumb-opcodes-memory-loadstore-ldrstr` and
+`#thumb-opcodes-memory-multiple-loadstore-pushpop-and-ldmstm`. The following are
+explicit bounded choices where the public document does not establish a result
+this prototype is willing to generalize:
+
+- ARM `LDR`/`STR`/`LDRB`/`STRB` register offsets use immediate shifts only; bit
+  4 must be zero and the offset register may not be PC. RRX uses the old C but
+  never updates a flag. Post-index `T=1` is accepted but does not change CPU
+  mode because this bus has no privilege/MMU distinction.
+- PC as a single-transfer base reads `address + 8`; PC with writeback is
+  rejected. PC as a stored source writes `address + 12` for word, byte and
+  halfword stores. A word load into PC clears the low two bits and leaves the T
+  bit unchanged. Byte/half/signed loads into PC are rejected.
+- A load destination equal to the written-back base register is rejected at
+  decode. Stores may use the same register for source and base: the old source
+  is stored, then writeback commits.
+- ARM halfword register offsets are unshifted and require reserved bits 11-8 to
+  be zero. `L=0,S=1` is the ARMv5 doubleword space and is rejected, not treated
+  as `STRH`. Odd `LDRH` rotates the 32-bit halfword result; odd `LDRSH` is a
+  signed byte at the odd address.
+- ARM `LDM`/`STM` implement IA/IB/DA/DB, non-empty lists, `W`, and PC entries.
+  `S=1`, PC as base and empty lists are explicit errors. Registers always move
+  in ascending address order. With writeback and the base in the list, STM
+  stores the old base when it is the first (lowest) entry and the new base
+  otherwise; LDM has no additional writeback and the loaded base value wins
+  (documented ARMv4 behavior).
+- Block/stack base alignment is a **Design** policy: GBATEK says low bits are
+  ignored for LDM/STM/PUSH/POP, but it does not establish whether writeback is
+  derived from the original or the aligned base. This prototype rejects an
+  unaligned base before any access or writeback instead of choosing one result.
+  The same policy applies to Thumb SP and `LDMIA`/`STMIA` bases.
+- Thumb implements word/byte register-offset forms, half/signed
+  register-offset forms, immediate word/byte transfer forms, the existing
+  immediate halfword form, SP-relative word transfers and the preserved literal
+  PC-relative load. `PUSH`/`POP` use full-descending SP with ascending memory
+  order and the LR/PC bit; `POP PC` clears bit 0 and keeps Thumb state.
+  `LDMIA`/`STMIA` use the ARMv4 base-in-list special documented for Thumb:
+  STM stores the old base if it is the first entry, otherwise the new base;
+  LDM's loaded base wins. Empty lists are explicit errors.
+- No CPU data-abort exception is modeled. A bus error ends the run; a partial
+  multi-access leaves earlier transfers visible, performs no writeback and
+  never claims atomicity.
 
 ### PSR transfers and register banking
 
@@ -249,11 +323,12 @@ GBATEK notes that this case is not officially defined as predictable.
 | Immediate | `MOV`, `CMP`, `ADD`, `SUB` with 8-bit immediate | — |
 | ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`; shift amount from register low byte | `MUL` remains explicit |
 | High register | documented high-register `ADD`, `CMP`, `MOV` (at least one of `Rd`/`Rs` high) and `BX` including PC; low/low `MOV`/`CMP` as an explicit **Design** extension | low/low `ADD` (documented reserved encoding), ARMv5 `BLX` register |
-| Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm` | SP-relative loads/stores |
+| Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm`; SP-relative word `LDR`/`STR` | — |
 | PC-relative | `LDR` literal | — |
-| Halfword | immediate `LDRH`/`STRH` | signed/register-offset forms |
+| Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
+| Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
 | Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions | ARMv5 `BLX` second half, SWI, undefined `cond=14` |
-| Block/stack | none | `PUSH`/`POP`, `LDM`/`STM` |
+| Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, unaligned SP/base (bounded runtime policy), ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
 alignment. `BX` alone changes ARM/Thumb state. High-register `ADD`/`MOV` never
@@ -327,8 +402,12 @@ shift }` with `ShiftKind` and an immediate or register amount. The remaining
 ALU operations use `Op::Alu { opcode: AluOpcode, ... }`; MOV/ADD/SUB/CMP keep
 their earlier explicit variants so previously supported IR shapes and tests are
 unchanged. Branch operations are `B`, `Bl`, the two Thumb halves `BlHigh` and
-`BlLow`, and `Bx`. Memory/PSR operations remain `LdrLiteral`, `LdrHalf`,
-`StrHalf`, `Mrs`, `Msr`.
+`BlLow`, and `Bx`. Memory operations are `LdrLiteral`, the preserved
+pre-indexed-immediate `LdrHalf`/`StrHalf` shapes, and typed `MemSingle`
+(pre/post, width, sign, add/subtract, writeback, post `T`), `BlockTransfer`,
+`Push`, `Pop` and `ThumbBlock`. PSR operations remain `Mrs`/`Msr`. `MemOffset`
+carries either a decoded immediate or a typed shifted register, and `MemWidth`
+keeps byte/halfword/word access distinct.
 
 The reference interpreter executes these operations and does not dispatch on
 raw opcodes or run an opcode table. Shared `semantics` helpers evaluate typed
@@ -336,9 +415,13 @@ operands, PC pipeline values, shifts and operand carry; they are used by both
 the reference interpreter and the emitter. `Msr` carries the PSR selector, the
 four field bits and a register or already-expanded immediate source. Control-flow
 metadata (`writes_pc`) marks direct branches, `BX`, the second (`BlLow`) half of
-Thumb `BL`, and ALU/MOV writes to R15, so discovery and emission terminate blocks
-consistently. The first (`BlHigh`) half writes only the intermediate LR and falls
-through: it does not write PC and does not itself end the block.
+Thumb `BL`, ALU/MOV writes to R15, a word `MemSingle` load into R15, an ARM
+`LDM` with PC in the list, and Thumb `POP {...,PC}`. Discovery and emission
+therefore terminate blocks consistently; a false condition still exposes the
+fallthrough. `writes_register` accounts for every destination and writeback
+base, so no constant survives a load, block list, stack transfer or writeback.
+The first (`BlHigh`) half writes only the intermediate LR and falls through: it
+does not write PC and does not itself end the block.
 
 ## Hybrid AOT
 
@@ -352,10 +435,11 @@ through: it does not write PC and does not itself end the block.
   A `BX` target is followed only when local constant propagation (literal `LDR`
   or immediate `MOV`, same block, no intervening write) resolves it. This is
   intentionally not general static recovery.
-- A write to R15 through MOV/ALU terminates the current block and is not followed
-  statically; a false condition still makes its fallthrough discoverable. This
-  prevents translating instructions that are only reachable through a dynamic
-  computed target.
+- A write to R15 through MOV/ALU or a word memory load terminates the current
+  block and is not followed statically; a false condition still makes its
+  fallthrough discoverable. The same applies to ARM `LDM` with PC and Thumb
+  `POP PC`. This prevents translating instructions that are only reachable
+  through a dynamic computed target. RAM is never discovered or translated.
 - Discovery stops at dynamic `BX`, dynamic `BL` targets, unknown/unsupported
   encodings and non-ROM targets. Limits are explicit: `max_blocks` and
   `max_instructions` are global terminal budgets (default 512/8192) and set
@@ -375,17 +459,25 @@ through: it does not write PC and does not itself end the block.
   shared typed operand/shift helpers for registers and PC pipeline values, and
   `cpu.read_psr`/`cpu.write_psr` for PSR transfers; it does not call the decoder
   or interpreter for a known instruction. Each new ALU/control operation has a
-  direct emission path.
+  direct emission path. `MemSingle`, `BlockTransfer`, `Push`, `Pop` and
+  `ThumbBlock` emit explicit address/value statements, width-correct
+  `bus.read8`/`read16`/`read32`/`write8`/`write16`/`write32` calls, and
+  writeback only after the checked access. Block and stack register lists are
+  unrolled in ascending memory order; there is no decoder, interpreter step or
+  whole-IR memory wrapper in a translated block.
 - A CPSR control-field MSR can change the active register bank, so bounded
   discovery invalidates cached r8-r14 constants across it. It never carries a
   stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
-  do not invalidate the bank cache. Every register a new ALU/control instruction
-  can write is invalidated conservatively; only immediate/MOV and literal loads
-  introduce constants.
+  do not invalidate the bank cache. Every register any decoded instruction can
+  write is invalidated conservatively, including single-load destinations,
+  block-list registers, Thumb stack results, SP and writeback bases; only
+  immediate/MOV and literal loads introduce constants.
 - Each translated instruction decrements the budget exactly once, including
-  condition-false instructions, both sides of a conditional branch, and each
-  half of a Thumb `BL`. Reaching zero stops before the next instruction in either
-  reference or native execution.
+  condition-false instructions, both sides of a conditional branch, each half of
+  a Thumb `BL`, and a whole `LDM`/`STM`/`PUSH`/`POP`/Thumb block transfer. The
+  budget is one per guest instruction, never one per transferred register and
+  never a cycle or frame count. Reaching zero stops before the next instruction
+  in either reference or native execution.
 - The artifact records ROM length and SHA-256. Emission re-decodes every IR
   instruction from the current cartridge and refuses a mismatch. The generated
   harness deliberately contains **no ROM byte array and no raw copy of the
@@ -400,8 +492,9 @@ through: it does not write PC and does not itself end the block.
 - Partial coverage is explicit: `DiscoveryStats` reports blocks, translated
   instructions, resolved/dynamic BX, ARM `BL` callees, candidate return
   continuations queued for an ARM `BL` or the second Thumb `BL` half, dynamic
-  Thumb-`BL` targets, ALU PC-write terminations, decode stops, external targets,
-  per-block splits and whether a global limit was reached. A queued return
+  Thumb-`BL` targets, non-branch PC-write block terminations (e.g. ALU/MOV,
+  word `LDR`, `LDM`, or `POP` to PC), decode stops, external targets, per-block
+  splits and whether a global limit was reached. A queued return
   continuation is a candidate address, not proof of ROM-resident code; the same
   address is counted as an external target when it is not a ROM address. The
   native report reports runtime fallback instructions and a CPU-state digest
@@ -412,8 +505,17 @@ through: it does not write PC and does not itself end the block.
   Separate synthetic fixtures exercise the expanded ALU with banked state and an
   ARM `BL`, Thumb ALU/`BL` halves with three fresh fallbacks for the dynamic
   callee, a dynamic MOV-to-PC fallback, and the existing fallback fixture
-  (2 interpreter steps). These are fixture facts, not evidence that arbitrary
-  retail code can be statically recovered.
+  (2 interpreter steps). Memory fixtures exercise direct native word/byte/
+  half/signed transfers, a dynamic word `LDR pc` target (one fallback), ARM
+  `STM`/`LDM` and Thumb `PUSH`/`POP`/`LDM`/`STM` with hand-derived final CPU and
+  bus state. A dedicated native-RAM fixture (issue #17) writes `MOV r0,#1` /
+  `BX lr` to EWRAM, calls it, patches it to `MOV r0,#2`, calls it again, and
+  ends with exactly four fresh reference fallbacks (two RAM instructions per
+  visit), no RAM block in the artifact, and final `r0=2`. This #17 native
+  regression is implemented and locally tested but remains pending independent
+  verification and CI; the issue is not closed by the implementation alone.
+  These are fixture facts, not evidence that arbitrary retail code can be
+  statically recovered.
 
 ## CLI output and artifacts
 

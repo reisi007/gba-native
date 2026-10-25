@@ -145,6 +145,34 @@ impl Src {
     }
 }
 
+/// Access width of a single data transfer. `Byte` stores/loads must use the
+/// byte bus width rather than extracting a byte from a wider access.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemWidth {
+    Byte,
+    Half,
+    Word,
+}
+
+impl MemWidth {
+    pub fn name(self) -> &'static str {
+        match self {
+            MemWidth::Byte => "byte",
+            MemWidth::Half => "halfword",
+            MemWidth::Word => "word",
+        }
+    }
+}
+
+/// Offset applied by a single data transfer. ARM shifted-register offsets use
+/// only immediate shifts (the documented bit-4-is-zero form); Thumb register
+/// offsets are an unshifted register, represented as an LSL #0 immediate shift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemOffset {
+    Imm(u32),
+    RegShift { rm: u8, shift: Shift },
+}
+
 /// Program status register selected by an ARM MRS/MSR encoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Psr {
@@ -264,121 +292,8 @@ impl AluOpcode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Op {
-    Mov {
-        rd: u8,
-        src: Src,
-        set_flags: bool,
-    },
-    Add {
-        rd: u8,
-        rn: u8,
-        rhs: Src,
-        set_flags: bool,
-    },
-    Sub {
-        rd: u8,
-        rn: u8,
-        rhs: Src,
-        set_flags: bool,
-    },
-    Cmp {
-        rn: u8,
-        rhs: Src,
-    },
-    /// The remaining ARM data-processing operations, plus the register forms
-    /// shared with Thumb. `rd` is `None` for TST/TEQ/CMN.
-    Alu {
-        opcode: AluOpcode,
-        rd: Option<u8>,
-        rn: u8,
-        rhs: Src,
-        set_flags: bool,
-    },
-    /// Conditional or unconditional direct branch. The target is already
-    /// aligned and relative to the documented pipeline offset.
-    B {
-        target: u32,
-    },
-    /// ARM `BL`: stores the return address in LR and branches to the callee.
-    Bl {
-        target: u32,
-    },
-    /// First half of a Thumb long branch: only LR is updated. It never branches
-    /// by itself, so discovery and the instruction budget treat it as one
-    /// ordinary instruction.
-    BlHigh {
-        lr: u32,
-    },
-    /// Second half of a Thumb long branch: the target is computed from the
-    /// current LR, LR is set to the return address, and control transfers.
-    BlLow {
-        offset: u32,
-    },
-    Bx {
-        rm: u8,
-    },
-    LdrLiteral {
-        rd: u8,
-        addr: u32,
-    },
-    LdrHalf {
-        rd: u8,
-        rn: u8,
-        offset: i32,
-    },
-    StrHalf {
-        rd: u8,
-        rn: u8,
-        offset: i32,
-    },
-    /// ARM `MRS Rd, CPSR|SPSR_<current mode>`.
-    Mrs {
-        rd: u8,
-        psr: Psr,
-    },
-    /// ARM `MSR CPSR|SPSR_<current mode>{_fields}, Rm|#imm`.
-    Msr {
-        psr: Psr,
-        fields: u8,
-        src: PsrSrc,
-    },
-}
-
-impl Op {
-    /// A direct branch, an exchange, a long branch half, or any ALU/MOV write
-    /// to R15 ends the current straight-line block.
-    pub fn writes_pc(self) -> bool {
-        match self {
-            Op::Mov { rd, .. } | Op::Add { rd, .. } | Op::Sub { rd, .. } => rd == 15,
-            Op::Alu { rd, .. } => rd == Some(15),
-            Op::B { .. } | Op::Bl { .. } | Op::BlLow { .. } | Op::Bx { .. } => true,
-            Op::BlHigh { .. }
-            | Op::Cmp { .. }
-            | Op::LdrLiteral { .. }
-            | Op::LdrHalf { .. }
-            | Op::StrHalf { .. }
-            | Op::Mrs { .. }
-            | Op::Msr { .. } => false,
-        }
-    }
-
-    pub fn writes_register(self, register: u8) -> bool {
-        match self {
-            Op::Mov { rd, .. } | Op::Add { rd, .. } | Op::Sub { rd, .. } => rd == register,
-            Op::Alu { rd, .. } => rd == Some(register),
-            Op::BlHigh { .. } | Op::Bl { .. } => register == 14,
-            Op::LdrLiteral { rd, .. } | Op::LdrHalf { rd, .. } | Op::Mrs { rd, .. } => {
-                rd == register
-            }
-            Op::BlLow { .. } => register == 14 || register == 15,
-            Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => {
-                false
-            }
-        }
-    }
-}
+mod op;
+pub use op::Op;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IrInstr {

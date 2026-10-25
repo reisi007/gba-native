@@ -90,7 +90,21 @@ fn arm_immediate_payload_is_never_reinterpreted_as_extra_transfer() {
 #[test]
 fn rejects_arm_multiply_and_block_space() {
     assert!(decode_arm(0, 0xE000_0091).is_err());
-    assert!(decode_arm(0, 0xE92D_4000).is_err());
+    // A plain STMDB sp!,{lr} is now implemented; the still-unsupported S=1
+    // user-bank form and an empty list stay explicit errors.
+    assert!(matches!(
+        decode_arm(0, 0xE92D_4000).expect("STMDB sp!,{lr}").op,
+        Op::BlockTransfer {
+            load: false,
+            rn: 13,
+            regs: 0x4000,
+            pre_index: true,
+            add: false,
+            writeback: true,
+        }
+    ));
+    assert!(decode_arm(0, 0xE96D_4000).is_err());
+    assert!(decode_arm(0, 0xE92D_0000).is_err());
     // SWP shares the 00010b/bit20=0 shape with PSR transfers but must be
     // reported as multiply/swap, never as a malformed MRS.
     let swp = decode_arm(0, 0xE100_0091).expect_err("SWP rejected");

@@ -41,7 +41,8 @@ pub struct DiscoveryStats {
     pub bl_returns: usize,
     /// Thumb long-branch second halves whose callee is a dynamic LR target.
     pub dynamic_bl: usize,
-    /// Straight-line blocks terminated by an ALU/MOV write to R15.
+    /// Non-branch blocks terminated by a PC write (e.g. ALU/MOV, word LDR,
+    /// LDM, or POP to R15).
     pub pc_writes: usize,
     pub decode_stops: usize,
     pub external_targets: usize,

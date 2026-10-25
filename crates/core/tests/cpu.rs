@@ -226,7 +226,9 @@ fn unsupported_encodings_are_rejected_without_state_progress() {
         Err(Error::UnsupportedInstruction { .. })
     ));
 
-    let (mut cpu, mut bus) = arm(&[0xE59F_F000]); // LDR pc,[pc]
+    // A word LDR PC is implemented; the narrow byte form into PC stays an
+    // explicit unsupported encoding.
+    let (mut cpu, mut bus) = arm(&[0xE5DF_F000]); // LDRB pc,[pc]
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })
