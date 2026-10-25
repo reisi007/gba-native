@@ -225,7 +225,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("cli_output", 5),
         ("frontend_gates", 4),
         ("quality_counter", 10),
-        ("scripts", 3),
+        ("scripts", 4),
     ];
     let mut baseline = 0;
     for (name, expected) in core_targets {
@@ -272,7 +272,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 200, "baseline test inventory changed");
+    assert_eq!(baseline, 201, "baseline test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.

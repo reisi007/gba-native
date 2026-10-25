@@ -105,3 +105,18 @@ fn full_fails_closed_when_cargo_is_missing() {
         stderr(&output)
     );
 }
+
+#[test]
+fn web_bootstrap_self_test_runs_before_clean_checkout_provisioning() {
+    let output = Command::new("bash")
+        .arg(repo_root().join("tests/bootstrap-web-tools-clean-checkout.sh"))
+        .current_dir(repo_root())
+        .output()
+        .expect("run clean-checkout bootstrap regression");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

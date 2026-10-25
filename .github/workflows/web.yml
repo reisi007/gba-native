@@ -1,0 +1,42 @@
+name: Web foundation
+
+# Optional isolated browser workflow. The default std-only CI/frontend workflows
+# are untouched. This job compiles and tests the synthetic WASM/WebGPU/WebGL2
+# foundation only; it does not claim retail playability, physical-GPU rendering
+# or gameplay. The functional E2E requires both forced WebGPU and forced WebGL2
+# to succeed on the provisioned software adapter.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web foundation (synthetic, software GPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v7.0.1, verified from the official tag:
+      # https://api.github.com/repos/actions/checkout/git/ref/tags/v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Rust 1.98.0 with wasm32
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      # Owned Node/wasm-bindgen/npm tooling plus the pinned Playwright Chromium
+      # and its Linux dependencies. No global tool installation is performed by
+      # the repository scripts other than the documented Chromium cache and the
+      # runner's distribution packages required by Chromium.
+      - name: Provision browser toolchain
+        run: bash scripts/web-browsers-install.sh
+
+      # The same gate a developer runs locally. WebGPU is exercised with the
+      # public SwiftShader flags; the UI reports the observed adapter honestly.
+      - name: Browser foundation gate
+        run: bash scripts/web.sh --ci

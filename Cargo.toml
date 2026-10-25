@@ -1,7 +1,7 @@
 [workspace]
 members = ["crates/core", "crates/aot"]
 default-members = [".", "crates/core", "crates/aot"]
-exclude = ["apps/desktop"]
+exclude = ["apps/desktop", "apps/web"]
 resolver = "3"
 
 [package]
