@@ -158,8 +158,10 @@ or silent successes:
 
 ## Tests and evidence boundary
 
-`tests/bios_arithmetic.rs`, `tests/bios_memory_copy.rs`,
-`tests/bios_reset.rs` and `tests/bios_dispatch.rs` use synthetic RAM/ROM
+`crates/core/tests/bios_arithmetic.rs`,
+`crates/core/tests/bios_memory_copy.rs`,
+`crates/core/tests/bios_reset.rs` and
+`crates/core/tests/bios_dispatch.rs` use synthetic RAM/ROM
 fixtures only. Their expected values are written independently of the
 implementation:
 

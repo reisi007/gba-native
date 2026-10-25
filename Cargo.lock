@@ -5,3 +5,18 @@ version = 4
 [[package]]
 name = "gba-native"
 version = "0.1.0"
+dependencies = [
+ "gba-native-aot",
+ "gba-native-core",
+]
+
+[[package]]
+name = "gba-native-aot"
+version = "0.1.0"
+dependencies = [
+ "gba-native-core",
+]
+
+[[package]]
+name = "gba-native-core"
+version = "0.1.0"

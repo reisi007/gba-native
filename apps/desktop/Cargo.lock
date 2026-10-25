@@ -457,14 +457,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "gba-native"
+name = "gba-native-core"
 version = "0.1.0"
 
 [[package]]
 name = "gba-native-desktop"
 version = "0.1.0"
 dependencies = [
- "gba-native",
+ "gba-native-core",
  "pixels",
  "winit",
 ]

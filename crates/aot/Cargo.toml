@@ -1,0 +1,17 @@
+[package]
+name = "gba-native-aot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Bounded hybrid AOT discovery, emission and native harness tooling"
+publish = false
+
+[lib]
+name = "gba_native_aot"
+path = "src/lib.rs"
+
+[dependencies]
+# The generated native source and the AOT crate itself use the `gba_native`
+# namespace for runtime types. Aliasing the core package here keeps that
+# namespace stable without making the host-side AOT crate part of the core.
+gba-native = { package = "gba-native-core", path = "../core" }

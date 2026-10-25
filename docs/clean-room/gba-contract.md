@@ -20,8 +20,10 @@ not a roadmap promise and not a retail-game compatibility statement.
   execute a BIOS.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. An optional,
   separate `apps/desktop` package presents the synthetic snapshot in a real
-  Winit/Pixels/WGPU window; it is not a playable/retail frontend, adds no core
-  dependency and is not part of the default CLI, which stays headless PPM.
+  Winit/Pixels/WGPU window; it depends directly on the std-only
+  `gba-native-core` package and is not a playable/retail frontend, adds no new
+  runtime dependency and is not part of the default CLI, which stays headless
+  PPM.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
 - Instruction counts are budgets, not cycles or frames.
@@ -434,8 +436,10 @@ workspace and is not a core CLI output format. See `docs/gpu-frontend.md`.
   runs and user-owned output files are never erased or reused.
 - `NativeHarness::build` requires a fresh crate directory, creates it with
   `create_dir`/`create_new`, and refuses pre-existing directories, files or
-  links. The harness exposes no recursive cleanup API; callers own and remove
-  only the directory they created.
+  links. The generated manifest depends only on the sibling `gba-native-core`
+  package (under the `gba_native` alias), never on the AOT crate or root facade.
+  The harness exposes no recursive cleanup API; callers own and remove only the
+  directory they created.
 - These are ownership and consistency checks, not a claim of race-freedom
   against an actively hostile process mutating the filesystem concurrently.
 

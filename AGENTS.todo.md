@@ -17,7 +17,7 @@ recorded in Git.
 #17 (committed *native-harness* self-modifying-RAM regression) stays open until
 it is implemented and independently verified. The reference interpreter already
 has a committed regression in
-`tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`; only the
+`crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`; only the
 native differential case is missing.
 
 An issue is a record, not a commission. Work still needs an explicit user

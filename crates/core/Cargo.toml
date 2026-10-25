@@ -1,0 +1,13 @@
+[package]
+name = "gba-native-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Std-only GBA runtime core, typed IR, decoder, interpreter and display"
+publish = false
+
+[lib]
+name = "gba_native_core"
+path = "src/lib.rs"
+
+[dependencies]

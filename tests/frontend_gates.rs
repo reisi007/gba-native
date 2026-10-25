@@ -93,6 +93,14 @@ case \" $* \" in
       exit 1
     fi
     ;;
+  *\" tree \"*)
+    printf 'gba-native-desktop v0.1.0 (/fake/apps/desktop)\\n'
+    printf '|-- gba-native-core v0.1.0 (/fake/crates/core)\\n'
+    case \"${FRONTEND_TEST_TREE:-core}\" in
+      aot) printf '|-- gba-native-aot v0.1.0 (/fake/crates/aot)\\n' ;;
+      root) printf '|-- gba-native v0.1.0 (/fake/root)\\n' ;;
+    esac
+    ;;
 esac
 exit 0
 ";
@@ -162,6 +170,7 @@ fn frontend_gate_resolves_root_and_owns_its_target_from_any_cwd() {
         "args=clippy",
         "args=test",
         "args=build",
+        "args=tree",
         "args=run",
         "-- --help",
     ] {

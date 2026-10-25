@@ -13,6 +13,6 @@ name = "gba-native-desktop"
 path = "src/main.rs"
 
 [dependencies]
-gba-native = { path = "../.." }
+gba-native = { package = "gba-native-core", path = "../../crates/core" }
 pixels = "=0.17.2"
 winit = "=0.30.13"

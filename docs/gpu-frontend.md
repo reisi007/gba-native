@@ -14,10 +14,12 @@ WebGPU target. Existing core non-claims still apply.
 
 - its own `apps/desktop/Cargo.toml` with an empty `[workspace]` table;
 - its own `apps/desktop/Cargo.lock`;
-- a relative-path dependency on the root `gba-native` library;
+- a relative-path dependency on `crates/core` (`gba-native-core`), aliased to
+  the `gba_native` source namespace; it does not depend on the host-side AOT
+  crate or the root compatibility facade;
 - optional Winit/Pixels/WGPU dependencies that never enter the root default
   workspace or the root dependency graph;
-- no changes to `src/`, root `Cargo.toml`, the core `scripts/short.sh` /
+- no changes to the core/AOT crates, the root CLI, the core `scripts/short.sh` /
   `scripts/full.sh` gates, existing CI or baselines. The optional
   `scripts/frontend.sh` gate, `.github/workflows/frontend.yml` and this document
   are separate and are never required by the std-only core.
@@ -35,7 +37,7 @@ Direct frontend dependencies are exact-pinned and locked:
 | --- | --- | --- | --- |
 | `pixels` | 0.17.2 | MIT | GPU pixel buffer, surface presentation, custom-shader hook |
 | `winit` | 0.30.13 | Apache-2.0 | Native window and `ApplicationHandler` lifecycle |
-| `gba-native` | 0.1.0 | repository license undecided | std-only core via relative path |
+| `gba-native-core` | 0.1.0 | repository license undecided | std-only runtime core via relative path, aliased to `gba_native` |
 
 `pixels` 0.17.2 resolves `wgpu` 29.0.4 (`MIT OR Apache-2.0`), not the unrelated
 newest `wgpu` 30.0.1 release. It also resolves `raw-window-handle` 0.6.2
@@ -128,9 +130,11 @@ It resolves the repository root from any working directory, requires Cargo and
 Rust 1.98.0, and overrides `CARGO_TARGET_DIR` to the root-level ignored
 `<repo>/target/frontend` before any frontend Cargo command. It then runs the
 root hard 500-line counter (including `apps/desktop/src`), `cargo fmt --check`,
-locked Clippy with warnings denied, the locked unit tests, a locked build and a
-headless `--help` invocation. It does not require Ratchet, never opens a GPU
-window and is not called by `scripts/short.sh` or `scripts/full.sh`.
+locked Clippy with warnings denied, the locked unit tests, a locked build, a
+locked offline dependency-tree check (the core package must be present and the
+AOT crate/root facade absent) and a headless `--help` invocation. It does not
+require Ratchet, never opens a GPU window and is not called by
+`scripts/short.sh` or `scripts/full.sh`.
 
 All generated frontend build artifacts stay under `<repo>/target/frontend`.
 `target/` is ignored only directly at the repository root. A nested
@@ -151,7 +155,11 @@ cargo fmt --manifest-path apps/desktop/Cargo.toml --check
 cargo clippy --locked --manifest-path apps/desktop/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path apps/desktop/Cargo.toml
 cargo build --locked --manifest-path apps/desktop/Cargo.toml
+cargo tree --locked --offline --manifest-path apps/desktop/Cargo.toml
 ```
+
+The tree must show `gba-native-core` and must not show `gba-native-aot` or the
+root `gba-native` facade.
 
 Headless CLI checks (with the export above):
 

@@ -115,11 +115,48 @@ presentation alone is still neither AI reconstruction nor vendor upscaling.
 
 ## D10 — Separate runtime, AOT and application crates
 
-Decided by the owner on 2026-10-25. After the in-flight implementation rounds,
-split the portable runtime (including typed IR and HLE), AOT tooling and CLI
-into separate crates, with the GPU frontend remaining isolated. Frontends must
-not need to depend on host-side AOT build/process tooling just to execute the
-runtime. Preserve existing public import paths through a compatibility facade
-where practical. Core/default validation must remain std-only and usable
-offline without resolving the frontend's external dependencies. This records
-the chosen target structure, not a claim that the split already exists.
+Decided by the owner on 2026-10-25. The portable runtime (including typed IR
+and HLE), AOT tooling and CLI are separate crates: `gba-native-core` in
+`crates/core`, `gba-native-aot` in `crates/aot`, and the root `gba-native` CLI
+plus compatibility facade. The GPU frontend remains isolated in `apps/desktop`,
+excluded from the root workspace and depending directly on the core package.
+Frontends must not need to depend on host-side AOT build/process tooling just to
+execute the runtime. The root facade preserves the existing
+`gba_native::{bus, cpu, cart, decode, demo, display, error, interpret, ir, bios,
+render, semantics, sha256, aot}` import paths where practical. Core/default
+validation remains std-only and usable offline without resolving the frontend's
+external dependencies: the root workspace lockfile contains only the three
+internal path packages, and the default third-party dependency set is empty.
+Implementation, independent verification and CI evidence are tracked in issue
+#23. This decision records the architecture, not a playability or compatibility
+claim.
+
+## D11 — Per-ROM applications, Web as a target, multiple save profiles
+
+Reaffirmed by the owner on 2026-10-25. The end product is a ROM-specific build
+containing translated code, runtime and the target frontend, not merely a
+generic ROM-player window. Native deliverables and a WASM/browser build are
+target variants of that same goal. Web is a first-class target, superseding
+the earlier wording that it was only a possibility. Browser presentation must
+address WebGPU and a WebGL2 compatibility path with explicit capability limits;
+neither browser backend is claimed implemented yet.
+
+Each ROM must support multiple persistent save profiles/slots across supported
+environments, with a portable data format and platform-specific persistence.
+Save management belongs in the application; mutable save data remains separate
+from compiled code. Native files and browser storage are implementation targets,
+not existing features. This does not authorize embedding or publishing the
+original ROM or existing user saves: the current external, read-only,
+SHA-256/length-bound ROM contract and data-preservation boundaries still apply.
+
+## D12 — Mobile targets and configurable controls
+
+Clarified by the owner on 2026-10-25. Android and iOS are additional native
+target candidates. Browser and phone applications must include on-screen touch
+controls, runtime-switchable control modes and user-remappable key bindings.
+Bindings/settings must be persistent and must not require recompiling the
+ROM-specific application. Platform input is mapped to logical GBA actions
+outside the portable runtime; native key codes and browser event types must not
+become CPU/AOT dependencies. Keep control settings separate from cartridge save
+data and ROM bytes. These are target requirements, not a claim that mobile
+packages, browser controls or remapping are already implemented or tested.

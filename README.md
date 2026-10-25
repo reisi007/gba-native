@@ -14,6 +14,22 @@ blocks into native Rust. The end-to-end proof uses only an entirely synthetic
 guest that draws a deterministic 240x160 mode-3 image through executed
 instructions.
 
+The code is split into three internal packages in one Cargo workspace:
+
+```text
+gba-native (root)        CLI, safe output/ writes, compatibility facade, quality counter
+├── gba-native-core      std-only runtime: cart/bus/CPU, typed IR, decode, interpreter, HLE, display
+└── gba-native-aot       host-side discovery, emission, artifact binding and native harness
+    └── gba-native-core  dependency under the historical `gba_native` alias
+```
+
+The root facade re-exports the core modules and `gba_native_aot::aot`, so the
+historical `gba_native::{bus, cpu, ..., aot}` paths keep working. The AOT crate
+depends on the core package under the `gba_native` alias; the optional
+`apps/desktop` package depends directly on the core package and remains outside
+this workspace. The default third-party dependency set is empty — the workspace
+lockfile contains only these three internal path packages.
+
 ## Status
 
 | Area | State |
@@ -71,7 +87,10 @@ cargo run -- aot emit <rom.gba> <generated.rs>
   letterboxing. Vendor backends are rejected with a clear error.
 
 The optional frontend is a separate package (`apps/desktop/`, its own Cargo
-workspace and lockfile) and is not part of the default std-only core graph:
+workspace and lockfile). It depends directly on `crates/core`
+(`gba-native-core`, aliased to the `gba_native` source namespace), never on the
+host-side AOT crate or the root facade, and is not part of the default std-only
+core graph:
 
 ```text
 ./scripts/frontend.sh   # optional: hard line gate, fmt, clippy, unit tests, build, --help
@@ -88,10 +107,21 @@ The gate never opens a GPU window. GUI smoke and the exact artifact rules are in
 ./scripts/frontend.sh  # optional separate package: no Ratchet, no live GPU window
 ```
 
+Per-package commands are available when a smaller loop is useful:
+
+```text
+cargo test -p gba-native-core
+cargo test -p gba-native-aot
+cargo test -p gba-native
+cargo run --bin quality-counter -- oversized --root . --max 500 --hard
+```
+
 The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and
-`cargo test --release`. Ratchet is pinned to release `v0.5.0` of
-`all-the-rest/ratchet-cli` (peeled commit
+`cargo test --release`. The root workspace lists the root package,
+`crates/core` and `crates/aot` in `default-members`, so those bare commands
+select all three; `apps/desktop` is explicitly excluded. Ratchet is pinned to
+release `v0.5.0` of `all-the-rest/ratchet-cli` (peeled commit
 `99c25b1e18331a1473d43091d37e23f23bc1c30d`, tag object
 `1feb7b5fae653272a922ed9f0479660ecde22ed2`); CI installs it with the official
 action pinned to the commit. Locally the scripts use `RATCHET_BIN` or
@@ -126,8 +156,13 @@ quality-scan exemption.
 The native integration test requires only the installed Cargo/rustc. It creates
 a fresh generated crate in an owned temporary directory, uses `--offline` and a
 separate `CARGO_TARGET_DIR`, and removes that directory afterwards. The harness
-builder accepts only a non-existing crate directory and creates its files with
-`create_new`. No network, third-party crate, commercial ROM or BIOS is needed.
+builder accepts only a non-existing crate directory, creates its files with
+`create_new`, and generates a manifest that depends only on the sibling
+`gba-native-core` package (never the AOT crate or root facade). The workspace
+contract tests additionally list the complete baseline test inventory in a fresh
+target directory with an empty `CARGO_HOME`, and execute the bare CLI commands
+from an unrelated working directory. No network, third-party crate, commercial
+ROM or BIOS is needed.
 
 ## Open work
 
@@ -162,7 +197,7 @@ honest gaps by area:
 
 None of these gaps is claimed as implemented by this prototype. The reference
 interpreter already has a committed self-modifying-RAM regression
-(`tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`). Issue #17
+(`crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`). Issue #17
 covers the *native harness* regression, which is still missing and stays open
 until implemented and independently verified.
 
