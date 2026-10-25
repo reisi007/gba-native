@@ -1,0 +1,46 @@
+[workspace]
+
+[package]
+name = "gba-native-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Isolated synthetic WebGPU/WebGL2 browser foundation for the gba-native core"
+publish = false
+
+[lib]
+name = "gba_native_web"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gba-native-web-serve"
+path = "src/bin/web_serve.rs"
+
+[dependencies]
+gba-native = { package = "gba-native-core", path = "../../crates/core" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "=0.3.106"
+web-sys = { version = "=0.3.106", features = [
+  "CanvasRenderingContext2d",
+  "Document",
+  "DomRect",
+  "Element",
+  "Event",
+  "EventTarget",
+  "HtmlCanvasElement",
+  "HtmlElement",
+  "Navigator",
+  "Performance",
+  "ResizeObserver",
+  "ResizeObserverEntry",
+  "ResizeObserverSize",
+  "WebGlContextEvent",
+  "Window",
+] }
+web-time = "=1.1.0"
+pixels = "=0.17.2"
+winit = "=0.30.13"

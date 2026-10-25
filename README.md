@@ -2,9 +2,10 @@
 
 **Experimental, documentation-driven hybrid GBA-to-native prototype.** This is
 not a playable emulator. It does not boot a BIOS or retail cartridges and has no
-vendor upscaling integration. An optional, separate desktop package can present
-the static synthetic bitmap through a real Pixels/WGPU window; that window is
-not a playable frontend. There is no successful REA native-analysis evidence.
+vendor upscaling integration. Optional, separate desktop and browser packages
+present the static synthetic bitmap through Pixels/WGPU and WASM/WebGPU/WebGL2;
+neither is a playable or per-ROM frontend. There is no successful REA
+native-analysis evidence.
 It is **not** a certified separate-team legal clean-room project.
 
 The repository currently contains a small, deliberately bounded ARMv4T subset,
@@ -26,9 +27,10 @@ gba-native (root)        CLI, safe output/ writes, compatibility facade, quality
 The root facade re-exports the core modules and `gba_native_aot::aot`, so the
 historical `gba_native::{bus, cpu, ..., aot}` paths keep working. The AOT crate
 depends on the core package under the `gba_native` alias; the optional
-`apps/desktop` package depends directly on the core package and remains outside
-this workspace. The default third-party dependency set is empty — the workspace
-lockfile contains only these three internal path packages.
+`apps/desktop` and `apps/web` packages each depend directly on the core and
+remain outside this workspace. The browser package has a separate pinned
+toolchain and dependency lock. The default third-party dependency set is empty —
+the root workspace lockfile contains only these three internal path packages.
 
 ## Status
 
@@ -46,6 +48,7 @@ lockfile contains only these three internal path packages.
 | Runtime fallback | Reference interpreter; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
+| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2, static synthetic demo only; no ROM/AOT/input/audio/save; browser functional E2E locally observed, visual review pending |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
@@ -89,8 +92,8 @@ cargo run -- aot emit <rom.gba> <generated.rs>
 - Scaling is integer nearest-neighbor only, with exact 3:2 centering and black
   letterboxing. Vendor backends are rejected with a clear error.
 
-The optional frontend is a separate package (`apps/desktop/`, its own Cargo
-workspace and lockfile). It depends directly on `crates/core`
+The optional desktop frontend is a separate package (`apps/desktop/`, its own
+Cargo workspace and lockfile). It depends directly on `crates/core`
 (`gba-native-core`, aliased to the `gba_native` source namespace), never on the
 host-side AOT crate or the root facade, and is not part of the default std-only
 core graph:
@@ -102,12 +105,27 @@ core graph:
 The gate never opens a GPU window. GUI smoke and the exact artifact rules are in
 [`docs/gpu-frontend.md`](docs/gpu-frontend.md).
 
+The browser foundation is a separate package and gate:
+
+```text
+./scripts/bootstrap-web-tools.sh  # pinned Node/wasm-bindgen/npm tooling in target/
+./scripts/web.sh                  # full browser gate (requires wasm32 and Chromium)
+./scripts/web.sh --build-only     # partial build checks without browser E2E
+./scripts/web-screenshots.sh      # optional UI-review captures; not a gate
+```
+
+It runs the synthetic demo through the std-only core and presents one static
+image using WebGPU or WebGL2. It is not a per-ROM browser application. Build
+details, observed browser results, explicit gaps and the pending visual review
+are in [`docs/web-frontend.md`](docs/web-frontend.md).
+
 ## Build and test
 
 ```text
 ./scripts/short.sh     # fast: hard 500-line gate, Ratchet fast, fmt, clippy, fast tests
 ./scripts/full.sh      # short + debug/release tests, demo, native proof, Ratchet slow
-./scripts/frontend.sh  # optional separate package: no Ratchet, no live GPU window
+./scripts/frontend.sh  # optional desktop package: no Ratchet, no live GPU window
+./scripts/web.sh --ci  # optional browser package and fail-closed Chromium E2E
 ```
 
 Per-package commands are available when a smaller loop is useful:
@@ -123,7 +141,7 @@ The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and
 `cargo test --release`. The root workspace lists the root package,
 `crates/core` and `crates/aot` in `default-members`, so those bare commands
-select all three; `apps/desktop` is explicitly excluded. Ratchet is pinned to
+select all three; `apps/desktop` and `apps/web` are explicitly excluded. Ratchet is pinned to
 release `v0.5.0` of `all-the-rest/ratchet-cli` (peeled commit
 `99c25b1e18331a1473d43091d37e23f23bc1c30d`, tag object
 `1feb7b5fae653272a922ed9f0479660ecde22ed2`); CI installs it with the official
@@ -141,20 +159,21 @@ any working directory. The pinned source can be built from the `v0.5.0` tag of
 
 Every maintained Rust source/test file is limited to 500 physical lines
 (blank and comment lines included, a trailing newline adds no phantom line).
-That population includes `apps/desktop/src` and the frontend tests. The
+That population includes `apps/desktop/src`, `apps/web/src` and frontend tests. The
 root-level `target/`, `output/` and `.git` directories hold generated
 build/runtime or version-control artifacts and are not part of the maintained
 source population. The exemption is positional: a nested directory with one of
 those names, such as `src/output/` or `apps/desktop/target/`, is scanned like
-any other source directory. `scripts/short.sh`, `scripts/frontend.sh` and CI run
-the hard limit directly, so the zero-debt Ratchet baseline cannot be edited to
+any other source directory. `scripts/short.sh`, `scripts/frontend.sh`,
+`scripts/web.sh` and CI run the hard limit directly, so the zero-debt Ratchet baseline cannot be edited to
 dilute it.
 
-`scripts/frontend.sh` overrides `CARGO_TARGET_DIR` to the root-level ignored
-`target/frontend` before any frontend Cargo command. Do not run frontend Cargo
-directly inside `apps/desktop/` without setting a root-level target: the
-checked-in `apps/desktop/.gitignore` hides generated files from Git but is not a
-quality-scan exemption.
+The frontend gates override `CARGO_TARGET_DIR` to root-level ignored locations
+before frontend Cargo commands. The desktop gate uses `target/frontend`; the web
+gate uses `target/web` and keeps Node/npm/wasm-bindgen tools under `target/tools`
+and `target/web-tools`. Do not run frontend Cargo directly inside either app
+without a root-level target: nested generated files are scanned as maintained
+sources. `apps/web/node_modules` is not created.
 
 The native integration test requires only the installed Cargo/rustc. It creates
 a fresh generated crate in an owned temporary directory, uses `--offline` and a
@@ -182,10 +201,11 @@ honest gaps by area:
   [#3](https://github.com/reisi007/gba-native/issues/3),
   [#7](https://github.com/reisi007/gba-native/issues/7),
   [#8](https://github.com/reisi007/gba-native/issues/8)
-- Desktop frontend, standalone builds, Android/iOS —
+- Desktop/browser frontend, standalone builds, Android/iOS —
   [#9](https://github.com/reisi007/gba-native/issues/9),
   [#10](https://github.com/reisi007/gba-native/issues/10),
-  [#11](https://github.com/reisi007/gba-native/issues/11)
+  [#11](https://github.com/reisi007/gba-native/issues/11),
+  [#24](https://github.com/reisi007/gba-native/issues/24)
 - REA evidence and retail compatibility —
   [#12](https://github.com/reisi007/gba-native/issues/12),
   [#14](https://github.com/reisi007/gba-native/issues/14)

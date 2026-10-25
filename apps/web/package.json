@@ -1,0 +1,10 @@
+{
+  "name": "gba-native-web-tools",
+  "private": true,
+  "description": "Build/test-only tooling for apps/web; never shipped with the browser bundle",
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@tailwindcss/cli": "4.3.3",
+    "daisyui": "5.7.50"
+  }
+}

@@ -1,11 +1,5 @@
-//! Substantive contracts for the three-package workspace split.
-//!
-//! These tests exercise the actual Cargo metadata, lockfile and test inventory
-//! in an owned, fresh target directory with an empty owned `CARGO_HOME`, so a
-//! cached registry cannot accidentally satisfy a dependency. They also execute
-//! the real bare CLI commands from an unrelated working directory. The optional
-//! GPU frontend is checked statically here and exercised by `scripts/frontend.sh`;
-//! it is never resolved by the default root graph.
+//! Contracts for the three-package default workspace and isolated frontends.
+//! Uses fresh offline metadata/inventories and checks CLI behavior from an unrelated cwd.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -46,8 +40,7 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn root_facade_preserves_legacy_paths_and_error_identity() {
-    // Every legacy module is reachable through the root facade, and core/AOT
-    // error values are one identity rather than separate incompatible types.
+    // The root facade preserves legacy module paths and shared core/AOT error identity.
     fn accepts_core_error(_: gba_native_core::Error) {}
     accepts_core_error(error::Error::Aot("facade".to_string()));
     accepts_core_error(error::Error::Native("facade".to_string()));
@@ -128,15 +121,29 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         .expect("metadata has workspace_default_members");
     let defaults = &metadata[default_start..];
     let defaults = &defaults[..defaults.find(']').expect("default members array ends")];
-    for member in ["/crates/core#", "/crates/aot#", "gba-native#0.1.0"] {
+    for member in ["/crates/core#", "/crates/aot#"] {
         assert!(
             defaults.contains(member),
             "default-members are missing {member}: {defaults}"
         );
     }
+    let root_id = metadata
+        .split("\"name\":\"gba-native\"")
+        .nth(1)
+        .and_then(|package| package.split("\"id\":\"").nth(1))
+        .and_then(|id| id.split('\"').next())
+        .expect("metadata has the root package ID");
+    assert!(
+        defaults.contains(root_id),
+        "root package ID is not a default member: {root_id}"
+    );
     assert!(
         !defaults.contains("apps/desktop"),
         "the default workspace must exclude apps/desktop"
+    );
+    assert!(
+        !defaults.contains("apps/web"),
+        "the default workspace must exclude apps/web"
     );
 
     let lock = std::fs::read_to_string(root.join("Cargo.lock")).expect("root lockfile");
@@ -168,7 +175,15 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     for package in ["gba-native-core", "gba-native-aot"] {
         assert!(tree.contains(package), "tree is missing {package}");
     }
-    for frontend in ["pixels", "winit", "wgpu", "apps/desktop"] {
+    for frontend in [
+        "pixels",
+        "winit",
+        "wgpu",
+        "wasm-bindgen",
+        "web-sys",
+        "apps/desktop",
+        "apps/web",
+    ] {
         assert!(
             !tree.contains(frontend),
             "default tree must not resolve {frontend}"
@@ -184,10 +199,9 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 271, "full workspace test inventory changed");
+    assert_eq!(total, 272, "full workspace test inventory changed");
 
-    // Full inventory. The prior 265-test workspace baseline is preserved by
-    // name and oracle; the AOT SWI acceptance round adds six tests (271 total).
+    // Exact inventory retains prior families and adds only the clean-checkout bootstrap test.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -237,7 +251,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("cli_output", 5),
         ("frontend_gates", 4),
         ("quality_counter", 10),
-        ("scripts", 3),
+        ("scripts", 4),
     ];
     let mut baseline = 0;
     for (name, expected) in core_targets {
@@ -284,7 +298,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 267, "test inventory changed");
+    assert_eq!(baseline, 268, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.
@@ -445,7 +459,7 @@ fn assert_target_count(
 }
 
 #[test]
-fn desktop_manifest_and_lock_are_core_only_static_contract() {
+fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     let root = repo_root();
     let manifest =
         std::fs::read_to_string(root.join("apps/desktop/Cargo.toml")).expect("desktop manifest");
@@ -466,4 +480,21 @@ fn desktop_manifest_and_lock_are_core_only_static_contract() {
     assert!(lock.contains("name = \"pixels\"\nversion = \"0.17.2\""));
     assert!(lock.contains("name = \"winit\"\nversion = \"0.30.13\""));
     assert!(lock.contains("name = \"wgpu\"\nversion = \"29.0.4\""));
+
+    let web_manifest =
+        std::fs::read_to_string(root.join("apps/web/Cargo.toml")).expect("browser manifest");
+    assert!(web_manifest.contains("name = \"gba-native-web\""));
+    assert!(
+        web_manifest.contains(
+            "gba-native = { package = \"gba-native-core\", path = \"../../crates/core\" }"
+        )
+    );
+    assert!(!web_manifest.contains("gba-native-aot"));
+    assert!(!web_manifest.contains("package = \"gba-native\""));
+
+    let web_lock = std::fs::read_to_string(root.join("apps/web/Cargo.lock")).expect("browser lock");
+    assert!(web_lock.contains("name = \"gba-native-core\""));
+    assert!(web_lock.contains("name = \"gba-native-web\""));
+    assert!(!web_lock.contains("name = \"gba-native-aot\"\n"));
+    assert!(!web_lock.contains("name = \"gba-native\"\n"));
 }

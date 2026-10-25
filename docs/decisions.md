@@ -149,6 +149,11 @@ not existing features. This does not authorize embedding or publishing the
 original ROM or existing user saves: the current external, read-only,
 SHA-256/length-bound ROM contract and data-preservation boundaries still apply.
 
+Implementation note (2026-10-25): `apps/web` now provides an isolated synthetic
+WASM presentation foundation with WebGPU and WebGL2 paths. It does not execute a
+user ROM, implement browser AOT, input, or persistence, and does not satisfy the
+per-ROM application or save-profile targets above.
+
 ## D12 — Mobile targets and configurable controls
 
 Clarified by the owner on 2026-10-25. Android and iOS are additional native

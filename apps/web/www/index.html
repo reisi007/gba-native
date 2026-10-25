@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta
+      name="description"
+      content="Experimental synthetic browser GPU foundation for the gba-native project. No playable ROM, saves or game input."
+    />
+    <title>gba-native browser GPU foundation (synthetic only)</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body class="min-h-screen max-w-full overflow-x-hidden">
+    <a
+      class="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-base-100 focus:px-3 focus:py-2 focus:shadow"
+      href="#main"
+      >Skip to the synthetic demo</a
+    >
+
+    <header class="border-b border-base-300">
+      <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+        <h1 class="text-base font-semibold sm:text-lg">gba-native · browser GPU foundation</h1>
+        <span class="badge badge-warning">Experimental synthetic demo</span>
+        <span id="state-badge" class="badge badge-ghost" data-state="empty">Not started</span>
+      </div>
+    </header>
+
+    <main id="main" class="mx-auto grid w-full min-w-0 max-w-5xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <section class="card min-w-0 max-w-full bg-base-200 shadow-sm" aria-labelledby="screen-heading">
+        <div class="card-body gap-3 p-3 sm:p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="screen-heading" class="card-title text-base">Synthetic 240×160 output</h2>
+            <span id="present-badge" class="badge badge-sm badge-ghost"
+              >0 render acknowledgements</span
+            >
+          </div>
+
+          <div id="screen-slot" class="screen-slot" aria-busy="false">
+            <canvas
+              id="gba-canvas"
+              class="screen-canvas"
+              width="240"
+              height="160"
+              aria-label="Synthetic 240 by 160 demo bitmap presented with nearest-neighbour scaling"
+            ></canvas>
+            <div id="screen-overlay" class="screen-overlay">
+              <span
+                id="overlay-spinner"
+                class="loading loading-spinner loading-lg hidden"
+                aria-hidden="true"
+              ></span>
+              <p id="overlay-title" class="font-medium">No frame displayed yet</p>
+              <p id="overlay-hint" class="max-w-sm text-xs opacity-80">
+                Press “Start synthetic demo”. Nothing is executed or drawn before that.
+              </p>
+            </div>
+          </div>
+
+          <p class="text-xs opacity-70">
+            One execution of the existing synthetic fixture, then a static bitmap. Black bars are
+            the nearest-neighbour letterbox; this is not a live frame stream, not an emulated frame
+            rate and not a cycle claim.
+          </p>
+        </div>
+      </section>
+
+      <aside class="grid min-w-0 max-w-full content-start gap-4">
+        <section class="card min-w-0 max-w-full bg-base-200 shadow-sm" aria-labelledby="start-heading">
+          <div class="card-body gap-3 p-4">
+            <h2 id="start-heading" class="card-title text-base">Start</h2>
+            <label class="text-sm font-medium" for="backend-select">GPU backend</label>
+            <select id="backend-select" class="select w-full" aria-describedby="backend-hint">
+              <option value="auto">Auto — WebGPU, else WebGL2</option>
+              <option value="webgpu">WebGPU (forced)</option>
+              <option value="webgl2">WebGL2 compatibility (forced)</option>
+            </select>
+            <p id="backend-hint" class="text-xs opacity-70">
+              The backend is chosen once, before the canvas context exists. A selection applies on
+              Start or Restart.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button id="start-button" class="btn btn-primary" type="button">
+                Start synthetic demo
+              </button>
+              <button id="restart-button" class="btn btn-outline" type="button" hidden>
+                Restart with selected backend
+              </button>
+            </div>
+            <p class="text-xs opacity-70">
+              Restart reloads the page with the selected backend (fresh canvas). At most three
+              restarts are attempted per 30 seconds; nothing reloads automatically except one
+              bounded WebGPU→WebGL2 compatibility retry.
+            </p>
+          </div>
+        </section>
+
+        <section class="card min-w-0 max-w-full bg-base-200 shadow-sm" aria-labelledby="status-heading">
+          <div class="card-body gap-2 p-4">
+            <h2 id="status-heading" class="card-title text-base">Status</h2>
+            <p id="status-message" class="break-words text-sm" role="status" aria-live="polite">
+              Not started. No GPU context has been created.
+            </p>
+            <div id="status-alert" class="alert alert-error hidden" role="alert">
+              <span id="status-detail" class="text-xs break-all"></span>
+            </div>
+            <dl
+              id="report"
+              class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs"
+            ></dl>
+          </div>
+        </section>
+      </aside>
+
+      <section class="card min-w-0 max-w-full bg-base-200 shadow-sm lg:col-span-2" aria-labelledby="limits-heading">
+        <div class="card-body gap-2 p-4">
+          <h2 id="limits-heading" class="card-title text-base">Capabilities and honest limits</h2>
+          <ul class="list-disc space-y-1 pl-5 text-sm">
+            <li>
+              <code>navigator.gpu</code> property:
+              <strong id="probe-gpu">checking…</strong> (presence alone is not proof of a usable
+              WebGPU adapter).
+            </li>
+            <li>
+              Detached-canvas WebGL2 context: <strong id="probe-gl">checking…</strong>.
+            </li>
+            <li id="source-line" class="break-all">
+              Source: the synthetic fixture has not been executed in this page yet.
+            </li>
+            <li>
+              Auto prefers WebGPU and reports the WebGL2 compatibility path explicitly. Forced
+              backends never silently degrade to another backend or a CPU/Canvas2D path.
+            </li>
+            <li>
+              Nearest/pixel-perfect integer scaling with black letterbox. No CSS blur, no
+              FSR/DLSS/AI upscaling, no vendor SDK. GLSL compute/storage-buffer features are not
+              available on WebGL2; none are claimed.
+            </li>
+            <li>
+              No playable ROM, cartridge picker, save data, audio or game input in this foundation.
+              Touch controls, remapping and Android/iOS packages remain open work (#25).
+            </li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mx-auto max-w-5xl px-4 pb-6 text-xs opacity-70">
+      <p class="font-medium">
+        Experimental synthetic GPU demo; no playable ROM, saves or game input yet.
+      </p>
+      <p>
+        Adapter values are what this browser instance reported. A software rasterizer such as
+        SwiftShader is shown by its adapter info and never presented as a physical GPU.
+      </p>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

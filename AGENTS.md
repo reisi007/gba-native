@@ -6,7 +6,8 @@ Experimental hybrid GBA-to-native prototype in Rust 2024, std-only. It is not a
 playable emulator, not a retail-game compatibility claim, not a vendor-GPU/FSR/
 DLSS integration, and not a formal two-team legal clean-room. REA native
 analysis remains blocked and no REA Evidence exists. Read
-`docs/clean-room/protocol.md` and `gba-contract.md` before changing behavior.
+`docs/clean-room/protocol.md` and `docs/clean-room/gba-contract.md` before
+changing behavior.
 
 ## Issue tracker
 
@@ -22,8 +23,8 @@ and CI pass, with the issue reference in the change. Lasting decisions live in
 The workspace has three internal packages: the root `gba-native` CLI plus
 compatibility facade, `crates/core` (`gba-native-core`, std-only runtime) and
 `crates/aot` (`gba-native-aot`, host-side AOT tooling). The root
-`[workspace]` lists all three in `default-members`; `apps/desktop` is excluded.
-A bare `cargo test` therefore runs core, AOT and root tests, while a bare
+`[workspace]` lists all three in `default-members`; `apps/desktop` and `apps/web`
+are excluded. A bare `cargo test` therefore runs core, AOT and root tests, while a bare
 `cargo run` uses the root package's `default-run = "gba-native"` binary.
 Per-package loops are `cargo test -p gba-native-core`, `cargo test -p
 gba-native-aot` and `cargo test -p gba-native`; the workspace lockfile is shared.
@@ -35,7 +36,7 @@ The documented entry points are:
 ./scripts/full.sh    # short + debug/release tests, demo, native proof, Ratchet slow
 ```
 
-The optional synthetic GPU frontend is a separate package and gate:
+The optional synthetic desktop GPU frontend is a separate package and gate:
 
 ```text
 ./scripts/frontend.sh
@@ -47,8 +48,23 @@ a GPU window. It overrides `CARGO_TARGET_DIR` to the root-level ignored
 from inside `apps/desktop/` without a root-level target: generated
 `apps/desktop/target/*.rs` files would enter the maintained-source scan.
 
-CI runs the same two scripts. The optional frontend workflow runs
-`scripts/frontend.sh` separately. The underlying gates remain:
+The synthetic browser GPU foundation is also a separate package and gate:
+
+```text
+./scripts/web.sh          # full browser gate, including WASM and functional E2E
+./scripts/web.sh --ci     # same fail-closed browser checks with CI GPU flags
+./scripts/web.sh --build-only  # partial gate, skips browser E2E
+```
+
+`apps/web` has its own Cargo/npm locks, depends directly on `crates/core`, and is
+not a ROM, input, audio or save surface. The gate uses repository-owned pinned
+tools under root `target/`; do not install global tools or run Cargo inside
+`apps/web/` without a root-level `CARGO_TARGET_DIR`. It is independent of
+`short.sh`/`full.sh` and the default three-package workspace.
+
+CI runs the same two scripts. The optional desktop and browser workflows run
+`scripts/frontend.sh` and `scripts/web.sh --ci` separately. The underlying root
+gates remain:
 
 ```text
 cargo fmt --check
@@ -144,8 +160,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - The default third-party dependency set stays empty: the workspace lockfile
   contains only the three internal path packages. Tests must not require network
   access, commercial ROMs, BIOS files or external crates. The optional
-  `apps/desktop` package has its own lockfile and registry dependencies and is
-  excluded from the default graph.
+  `apps/desktop` and `apps/web` packages have their own locks and are excluded
+  from the default graph; browser registry dependencies and Node/npm tools stay
+  outside the root lock and root build.
 - AOT is restricted to immutable ROM bytes. RAM/self-modifying code must always
   go through the reference interpreter with a fresh fetch/decode.
 
@@ -174,10 +191,14 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   package with its own workspace/lockfile. It depends directly on
   `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
   crate or the root facade, and has no ROM surface.
+- `apps/web/`: optional, separately excluded synthetic WASM/WebGPU/WebGL2
+  package with its own Cargo/npm locks. It depends directly on `crates/core`,
+  not the AOT crate or root facade; it accepts no ROM, save, audio or game input.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
-- `tests/`: root CLI-output, quality-counter/script failure paths, the optional
-  frontend gate contracts and the workspace compatibility contracts.
+- `tests/`: root CLI-output, quality-counter/script failure paths, optional
+  frontend gate contracts, web-tool bootstrap regression and workspace
+  compatibility contracts.
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.
@@ -186,6 +207,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
+- `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
+  `scripts/bootstrap-web-tools.sh`: isolated browser build/E2E/review flow and
+  pinned repository-owned tooling.
 - `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality
   rules and baseline.
 

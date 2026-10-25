@@ -38,7 +38,7 @@ The window runs at nearest/pixel-perfect integer scale, 3:2, black letterbox.
 Close with Escape or the window close control. The default event loop waits.
 
 Runtime: Winit 0.30 with Pixels 0.17/WGPU 29, portable native window target.
-A browser/WebGPU target is a documented future possibility, not implemented.
+A separate browser/WebGPU synthetic foundation is available; it is not per-ROM.
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,5 +255,6 @@ mod tests {
         assert!(USAGE.contains("synthetic GPU presentation only"));
         assert!(USAGE.contains("not a playable retail emulator"));
         assert!(USAGE.contains("no --rom"));
+        assert!(USAGE.contains("browser/WebGPU synthetic foundation is available"));
     }
 }

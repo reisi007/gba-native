@@ -42,29 +42,32 @@ blank and comment lines, and a trailing newline adds no phantom line.
 
 ### Workspace split and compatibility contracts
 
-The repository is one Cargo workspace with three internal packages: the root
-`gba-native` CLI/compatibility facade, `crates/core` (`gba-native-core`) and
-`crates/aot` (`gba-native-aot`). The root package remains a package (not a
-virtual workspace) because `CARGO_BIN_EXE_*`, manifest resolution and
-`default-run` depend on it. All three are in `default-members`; `apps/desktop`
-is excluded and keeps its own workspace and lockfile.
+The default repository graph is one Cargo workspace with three internal
+packages: the root `gba-native` CLI/compatibility facade, `crates/core`
+(`gba-native-core`) and `crates/aot` (`gba-native-aot`). The root package remains
+a package (not a virtual workspace) because `CARGO_BIN_EXE_*`, manifest
+resolution and `default-run` depend on it. All three are in `default-members`;
+`apps/desktop` and `apps/web` are excluded and keep their own workspaces and
+lockfiles.
 
 - `tests/workspace_contract.rs` exercises the actual workspace, not manifest
   text. It imports every legacy facade module, performs a real discover/emit,
   and proves that core `Error` and the AOT/root error spellings are one identity.
   It runs `cargo metadata --offline --no-deps` and checks the three
-  `default-members` and the desktop exclusion; it checks the root lockfile has
+  `default-members` and both frontend exclusions; it checks the root lockfile has
   exactly the three internal packages and no registry `source`/`checksum`; it
-  runs a default `cargo tree` and rejects `pixels`/`winit`/`wgpu`/desktop.
+  runs a default `cargo tree` and rejects desktop/browser dependencies,
+  including Pixels/Winit/WGPU and wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
   --locked`. It pins every target: 168 core integration tests across 26 files,
-  32 core library unit tests, 24 AOT integration tests across 10 files, 10 AOT
-  library unit tests, 22 root integration tests across four files and 5 root
-  binary unit tests, exactly 261 tests. The prior 246-test inventory is
-  preserved by name and oracle; framed SWI adds 13 core and 2 AOT integration
-  tests. The three workspace compatibility contracts and frontend-tree failure
-  contract add four more tests to the full `cargo test` count. Bare
+  32 core library unit tests, 30 AOT integration tests across 12 files, 10 AOT
+  library unit tests, 23 root integration tests across four files and 5 root
+  binary unit tests, exactly 268 selected package tests. The three workspace
+  compatibility contracts and frontend-tree failure contract add four tests to
+  the full `cargo test` count (272 total). The web clean-checkout bootstrap test
+  is included in the root integration targets; no prior core, AOT or root tests
+  are removed. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
   unrelated working directory that owns all generated output, and the quality
   counter is run through `--bin quality-counter` from the same directory.
@@ -80,6 +83,11 @@ is excluded and keeps its own workspace and lockfile.
   manifest/lock contract is in `tests/workspace_contract.rs`; the real frontend
   gate performs the locked offline tree check against the actual registry
   resolution.
+- The web frontend is isolated in `apps/web`, with its own Cargo/npm lockfiles
+  and direct core dependency. `scripts/web.sh` runs the hard source-size check,
+  core wasm32 check, host tests/Clippy, wasm build and dependency-tree checks,
+  pinned local bundle tooling, and functional browser E2E. It is separate from
+  the default gates and does not change the root three-package dependency graph.
 
 ### Cartridge
 
@@ -472,6 +480,37 @@ observations, not a generated inventory:
   debug and release runs used separate owned `CARGO_TARGET_DIR` directories and
   each passed all 271 tests.
 
+### Browser foundation integration (2026-10-25)
+
+- The root integration preserves the SWI-era core/AOT inventory and adds one
+  clean-checkout bootstrap regression: 268 selected package tests plus four
+  workspace/frontend contract tests, 272 total. The exact workspace inventory
+  assertion, including the root package ID and all core/AOT targets, passed.
+- `scripts/short.sh` and `scripts/full.sh` passed with Ratchet v0.5.0; the hard
+  source gate found no oversized Rust files. Maintained Rust population is 106.
+  `scripts/full.sh` retained the expected synthetic image digest
+  `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154` and native
+  proof (4 blocks, 17 translated instructions, budget 230411, zero fallbacks,
+  `native_vs_reference=match`).
+- Fresh `cargo test --offline --locked` and
+  `cargo test --offline --locked --release` runs each passed all 272 tests with
+  separate, new target directories. The integration logs are retained under
+  `output/integration-web-unique/` (`short.log`, `full.log`, `frontend.log`,
+  `web.log`, `fresh-debug.log`, `fresh-release.log`).
+- The optional desktop gate passed its 15 tests. The separate browser gate
+  passed its core wasm32 check and WASM release build; it ran 15 Rust library
+  tests, one loopback server test, five lifecycle tests and all 15 functional
+  browser E2E tests. It used pinned Node 24.22.1 and wasm-bindgen 0.2.129 in
+  root-level ignored tool directories; the root lockfile remained at exactly
+  three internal packages.
+- Browser E2E was run locally on macOS arm64: forced WebGPU reported the browser
+  WebGPU backend and forced WebGL2 presented through ANGLE/Metal. The Linux
+  SwiftShader GitHub workflow was inspected but not run; no external CI push was
+  performed. No screenshots were recaptured, and UI approval remains pending;
+  the existing capture inventory is 24 state/viewport combinations and 97 PNGs.
+- Release test commands emitted non-fatal `rust-objcopy` warnings because this
+  host toolchain cannot load `libLLVM.dylib`; both test processes exited zero.
+
 The historical commit 39380a3 (before the structural split) used `src/aot/`,
 `src/decode/`, `src/main.rs` and `src/cli/`. Those old paths are historical
 snapshots only; the current source lives in `crates/core/src/`,
@@ -485,21 +524,22 @@ not initial HEAD sizes, and are not used as historical evidence.
   round. The historical observation is not a current compatibility result; its
   former stop point does not describe the implemented synthetic SWI path.
 - The six HLE services and framed guest SWI path are covered only by synthetic
-  tests in this worktree. This is not evidence for a particular retail BIOS,
-  BIOS boot, hardware conformance, cycle timing, GPU/display integration or
-  playability.
+  tests. This is not evidence for a particular retail BIOS, BIOS boot, hardware
+  conformance, cycle timing or playability.
 
 ## Not established
 
-No hardware conformance ROM suite has been run. No retail game is supported or known playable.
-No BIOS boots; only the bounded synthetic SWI entry/return path is tested. Other
-exception entry/return, interrupt delivery, save
-persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
-or a playable window frontend is verified. The optional synthetic
-`apps/desktop` frontend presents one static synthetic bitmap and has
-build/unit-test evidence plus one local macOS Metal smoke observation; no live
-Windows/Linux GPU run, cross-platform presentation claim, playable/input loop
-or visible-frame counter is verified. PSR-transfer and banking evidence is
+No hardware conformance ROM suite has been run. No retail game is supported or
+known playable. No BIOS boots; only the bounded synthetic SWI entry/return path
+is tested. Other exception entry/return, interrupt delivery, save persistence,
+audio, input interaction, DMA, cycle timing, tile/sprite rendering or a playable
+frontend is verified. The optional synthetic `apps/desktop` frontend presents
+one static bitmap and has build/unit-test evidence plus one local macOS Metal
+smoke observation. The separate `apps/web` foundation presents that synthetic
+fixture through browser WebGPU/WebGL2 and has local build/functional-E2E evidence;
+visual approval remains pending. Neither frontend is a per-ROM playable/input
+loop. No Windows/Linux physical-GPU run, cross-platform presentation claim or
+visible-frame counter is verified. PSR-transfer and banking evidence is
 limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE
 services have synthetic-test evidence only; BIOS execution and hardware
 conformance remain unverified. No real GBA hardware

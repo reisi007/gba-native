@@ -41,10 +41,11 @@ standalone emulator and not a game packager.
 No JIT or executable writable memory is required. iOS JIT constraints therefore
 do not block the current portable-core design. Standalone per-game packaging,
 Android/iOS packaging, GPU vendor upscaling and retail-game compatibility are
-later work and are not claimed. An isolated optional `apps/desktop` frontend may
-present the synthetic snapshot through Winit/Pixels/WGPU; it remains outside
-the std-only core, accepts no cartridge and is not a playable or vendor-upscaled
-frontend (`docs/gpu-frontend.md`).
+later work and are not claimed. Isolated optional `apps/desktop` and `apps/web`
+frontends present the same synthetic snapshot through native Winit/Pixels/WGPU
+and browser WebGPU/WebGL2 respectively. They remain outside the std-only core,
+accept no cartridge and are not playable or vendor-upscaled frontends
+(`docs/gpu-frontend.md`, `docs/web-frontend.md`).
 
 ## Artifacts
 
@@ -54,6 +55,8 @@ frontend (`docs/gpu-frontend.md`).
   hardware behavior.
 - `gpu-frontend.md`: optional synthetic Winit/Pixels/WGPU window boundary,
   dependency pins, gate/artifact rules and observed limits.
+- `web-frontend.md`: isolated synthetic WASM/browser presentation boundary,
+  pinned-tool bootstrap, gates/artifacts and observed limits.
 - `rea-status.md`: actual tool observations, including blockers. No Evidence ID
   exists for this investigation.
 - `verification.md`: executable acceptance criteria and test boundaries.
@@ -85,11 +88,12 @@ retail cartridges**.
 - No BIOS boot, no retail-game playability, no save/audio/input interaction.
 - No cycle timing, frame timing, DMA, IRQ, tile/sprite PPU or playable window
   frontend.
-- No GPU vendor SDK, FSR, DLSS, ML model, shader or upscaling integration.
+- No GPU vendor SDK, FSR, DLSS, ML model or custom upscaling shader/integration.
 - No successful REA analysis or native Evidence record.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and
   stops at unknown/indirect control flow.
 - The native proof is a developer test harness, not a shipped game build.
-- The optional `apps/desktop` Winit/Pixels window is plain GPU presentation of
-  the static synthetic bitmap. It is not a playable/retail frontend, not a
-  WebGPU/browser build and not vendor upscaling or frame/cycle timing.
+- The optional `apps/desktop` Winit/Pixels window and `apps/web` WebGPU/WebGL2
+  page present only the static synthetic bitmap. Neither is a playable/retail
+  frontend, per-ROM application or vendor upscaler; neither establishes
+  frame/cycle timing.

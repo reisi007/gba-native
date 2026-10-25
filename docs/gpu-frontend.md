@@ -6,8 +6,9 @@ claim and not evidence of FSR, DLSS, AI reconstruction or vendor upscaling.
 
 Decision context: `docs/decisions.md` D9 selects an isolated GPU frontend and a
 std-only default core. D11 makes Web a first-class target with WebGPU/WebGL2
-presentation; no browser implementation is claimed yet. Existing core
-non-claims still apply.
+presentation. The separate `apps/web` package now presents the synthetic demo
+only; it does not implement per-ROM browser execution. Existing core non-claims
+still apply.
 
 ## Boundary
 
@@ -106,7 +107,8 @@ surfaces.
 
 A later custom-shader path can use `Pixels::render_with` and its
 `CommandEncoder`/render target/`PixelsContext`; it is not implemented here.
-The first-class browser target still needs a separate implementation:
+The first-class browser target has a separate synthetic-only implementation in
+`apps/web` (see `docs/web-frontend.md`). It does not yet provide:
 
 - Pixels offers async construction for Web targets, but this crate uses the
   native blocking path;
@@ -114,10 +116,11 @@ The first-class browser target still needs a separate implementation:
 - core input (`KEYINPUT`) is still not integrated by this frontend and remains
   documented released-only in the core;
 - native AOT harnesses cannot be assumed to run unchanged in a browser;
-- browser scaling would need its own evaluation and is not an FSR/DLSS label.
+- per-ROM browser execution or browser AOT; browser scaling is not an FSR/DLSS
+  label.
 
-None of those gaps is claimed as working. There is no ROM mode until a real
-runtime/frontend integration exists.
+None of those gaps is claimed as working. The static browser demo does not add a
+ROM mode or make the frontend playable.
 
 ## Gate and artifacts
 
@@ -185,9 +188,11 @@ A local observation on 2026-10-25 used `Apple M5 Pro`, backend `Metal`,
 `IntegratedGpu`, `Bgra8UnormSrgb`, `AutoVsync`, scale 3 and
 `presented=5 requested=5` at 720x480. That is one host observation, not a
 cross-platform GPU claim. No live GPU smoke has been run on Windows or Linux,
-and no browser/WebGPU build exists. A headless host without a window server
-cannot provide live GPU evidence; `scripts/frontend.sh` deliberately does not
-attempt one.
+and no physical-GPU cross-platform claim is made. The separate synthetic browser
+WASM/WebGPU/WebGL2 build and functional E2E have local evidence; see
+`docs/web-frontend.md`. A headless host without a window server cannot provide
+native live-GPU evidence; `scripts/frontend.sh` deliberately does not attempt
+one.
 
 ## Continuous integration
 
@@ -207,6 +212,7 @@ default root tests never fetch or build the frontend package.
   an emulated frame stream.
 - Nearest/pixel-perfect scaling is not AI upscaling, FSR, DLSS or a vendor
   backend.
-- No input, audio, save, BIOS, cartridge, retail-derived source, WebGPU build or
-  browser frontend is implemented.
+- No input, audio, save, BIOS, cartridge, retail-derived source, per-ROM browser
+  execution or browser game frontend is implemented. The separate synthetic
+  WebGPU/WebGL2 foundation is documented in `docs/web-frontend.md`.
 - No GPU vendor SDK integration, no GPU timing claim and no performance claim.

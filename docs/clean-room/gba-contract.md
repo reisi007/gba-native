@@ -22,12 +22,12 @@ not a roadmap promise and not a retail-game compatibility statement.
   explicit SVC entry, a saved handler frame, SYSTEM-mode service execution and
   architectural SWI return. Other exception classes, multiply/swap and BIOS
   boot remain absent; Thumb `MUL` remains explicit.
-- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. An optional,
-  separate `apps/desktop` package presents the synthetic snapshot in a real
-  Winit/Pixels/WGPU window; it depends directly on the std-only
-  `gba-native-core` package and is not a playable/retail frontend, adds no new
-  runtime dependency and is not part of the default CLI, which stays headless
-  PPM.
+- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
+  `apps/desktop` and `apps/web` packages present the same static synthetic
+  snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
+  depend directly on the std-only `gba-native-core` package, accept no cartridge
+  or save data, are not playable/per-ROM frontends, and stay outside the default
+  CLI and its headless PPM output.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
 - Instruction counts are budgets, not cycles or frames.
@@ -428,7 +428,10 @@ names return `UnsupportedBackend`. The optional, separate `apps/desktop` package
 presents the same static synthetic snapshot through Pixels/WGPU with
 pixel-perfect integer scaling and a black letterbox; it is not part of the
 std-only core or this PPM backend and is not a vendor upscaler. Its exact
-boundary is in `docs/gpu-frontend.md`.
+boundary is in `docs/gpu-frontend.md`. The optional, separate `apps/web` package
+executes the synthetic demo through WASM and presents its static snapshot through
+browser WebGPU or WebGL2; it is not per-ROM execution, not part of the root
+dependency graph, and not a vendor upscaler (`docs/web-frontend.md`).
 
 ## Typed IR and interpreter
 
@@ -573,9 +576,11 @@ does not write PC and does not itself end the block.
 
 `info`, `demo`, `run`, `aot proof` and `aot emit` are documented in `README.md`.
 PPM is the only image output of the core CLI. The optional, separate
-`apps/desktop` package can present the static synthetic snapshot in a
-Winit/Pixels window; it accepts no cartridge path, is not built by the default
-workspace and is not a core CLI output format. See `docs/gpu-frontend.md`.
+`apps/desktop` package presents the static synthetic snapshot in a Winit/Pixels
+window, while `apps/web` presents the same synthetic image in a browser through
+WASM/WebGPU or WebGL2. Neither accepts a cartridge or is built by the default
+workspace; neither is a core CLI output format. See `docs/gpu-frontend.md` and
+`docs/web-frontend.md`.
 
 - Generated files are restricted to `<cwd>/output/...`. Relative paths resolve
   against the process working directory; absolute paths are accepted only when
