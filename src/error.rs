@@ -53,6 +53,9 @@ pub enum Error {
         raw: u32,
         reason: &'static str,
     },
+    /// A structurally valid MRS/MSR whose documented execution is restricted
+    /// (for example SPSR access in USER/SYSTEM or a T-bit change).
+    Psr(&'static str),
     UnsupportedDisplayMode {
         mode: u16,
     },
@@ -133,6 +136,7 @@ impl fmt::Display for Error {
                 if *thumb { "Thumb" } else { "ARM" },
                 width = if *thumb { 4 } else { 8 }
             ),
+            Error::Psr(reason) => write!(f, "PSR access: {reason}"),
             Error::UnsupportedDisplayMode { mode } => {
                 write!(
                     f,

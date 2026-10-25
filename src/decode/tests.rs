@@ -1,4 +1,4 @@
-use crate::ir::{Cond, Op, Src};
+use crate::ir::{Cond, Op, Psr, PsrSrc, Src};
 
 use crate::decode::{decode_arm, decode_thumb};
 
@@ -74,10 +74,58 @@ fn arm_immediate_payload_is_never_reinterpreted_as_extra_transfer() {
 }
 
 #[test]
-fn rejects_arm_multiply_and_psr_like_space() {
+fn rejects_arm_multiply_and_block_space() {
     assert!(decode_arm(0, 0xE000_0091).is_err());
-    assert!(decode_arm(0, 0xE10F_0000).is_err());
     assert!(decode_arm(0, 0xE92D_4000).is_err());
+    // SWP shares the 00010b/bit20=0 shape with PSR transfers but must be
+    // reported as multiply/swap, never as a malformed MRS.
+    let swp = decode_arm(0, 0xE100_0091).expect_err("SWP rejected");
+    assert!(format!("{swp}").contains("multiply/swap"));
+}
+
+#[test]
+fn decodes_psr_transfer_forms_and_rejects_malformed_fixed_bits() {
+    assert_eq!(
+        decode_arm(0, 0xE10F_0000).expect("MRS r0,CPSR").op,
+        Op::Mrs {
+            rd: 0,
+            psr: Psr::Cpsr
+        }
+    );
+    assert_eq!(
+        decode_arm(0, 0xE14F_2000).expect("MRS r2,SPSR").op,
+        Op::Mrs {
+            rd: 2,
+            psr: Psr::Spsr
+        }
+    );
+    assert_eq!(
+        decode_arm(0, 0xE129_F000).expect("MSR CPSR_fc,r0").op,
+        Op::Msr {
+            psr: Psr::Cpsr,
+            fields: 0b1001,
+            src: PsrSrc::Reg(0)
+        }
+    );
+    assert_eq!(
+        decode_arm(0, 0xE321_F01F).expect("MSR CPSR_f,#0x1F").op,
+        Op::Msr {
+            psr: Psr::Cpsr,
+            fields: 0b0001,
+            src: PsrSrc::Imm(0x1F)
+        }
+    );
+    // Fixed/unused fields are validation, not aliases for other instructions.
+    for raw in [
+        0xE10F_F000, // MRS PC
+        0xE10F_0001, // MRS low bits nonzero
+        0xE11F_0000, // MRS fixed Rn != 1111
+        0xE12F_0000, // MSR fixed Rd-field != 1111
+        0xE129_F010, // register MSR bits 11-4 nonzero
+        0xE129_F00F, // MSR from PC
+    ] {
+        assert!(decode_arm(0, raw).is_err(), "raw 0x{raw:08X} must fail");
+    }
 }
 
 #[test]

@@ -5,7 +5,7 @@ use crate::bus::Bus;
 use crate::cpu::{Cpu, add_flags, condition_holds, sub_flags};
 use crate::decode::{decode_arm, decode_thumb};
 use crate::error::Result;
-use crate::ir::{IrInstr, Op, Src};
+use crate::ir::{IrInstr, Op, PsrSrc, Src};
 
 pub fn decode_at(bus: &Bus, addr: u32, thumb: bool) -> Result<IrInstr> {
     if thumb {
@@ -99,8 +99,24 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
             bus.write16(effective & !1, cpu.reg(rd) as u16)?;
             cpu.set_pc(instr.next_addr());
         }
+        Op::Mrs { rd, psr } => {
+            let value = cpu.read_psr(psr)?;
+            cpu.set_reg(rd, value);
+            cpu.set_pc(instr.next_addr());
+        }
+        Op::Msr { psr, fields, src } => {
+            cpu.write_psr(psr, fields, psr_source_value(cpu, src))?;
+            cpu.set_pc(instr.next_addr());
+        }
     }
     Ok(())
+}
+
+fn psr_source_value(cpu: &Cpu, src: PsrSrc) -> u32 {
+    match src {
+        PsrSrc::Reg(index) => cpu.reg(index),
+        PsrSrc::Imm(value) => value,
+    }
 }
 
 pub fn source_value(cpu: &Cpu, src: Src) -> u32 {

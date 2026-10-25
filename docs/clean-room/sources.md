@@ -20,7 +20,14 @@ Relevant anchors actually consulted for this milestone:
 - `#gba-cartridge-header`: 192-byte header, fields, complement checksum.
 - `#gba-cartridge-rom`: ROM bus, wait-state background, backup IDs.
 - `#gba-memory-map`: memory sizes, buses, little-endian data representation.
-- `#arm-cpu-flags--condition-field-cond`: conditions and CPSR flags.
+- `#arm-cpu-flags--condition-field-cond`: conditions, CPSR flags, control bits,
+  valid ARM7TDMI mode values and SPSR set.
+- `#arm-cpu-register-set`: shared r0-r7, FIQ-banked r8-r12, per-mode r13/r14 and
+  USER/SYSTEM sharing.
+- `#arm-cpu-exceptions`: which exception modes own an SPSR and the explicit
+  boundary that exception entry/return is not implemented.
+- `#arm-opcodes-psr-transfer-mrs-msr`: MRS/MSR encoding, field bytes, USER
+  restriction, SPSR availability and T-bit restriction.
 - `#arm-cpu-memory-alignments`: aligned stores, rotated ARM7 word reads,
   odd-address LDRH rotation and LDRSH/LDRSB note.
 - `#arm-opcodes-branch-and-branch-with-link-b-bl-bx-blx-swi-bkpt`.

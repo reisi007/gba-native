@@ -65,8 +65,24 @@ blank and comment lines, and a trailing newline adds no phantom line.
   no-op, PC advance, direct branches, BX ARM↔Thumb round trip.
 - ARM7 odd-address LDRH rotation, STRH forced alignment, unaligned literal LDR
   rotation.
-- Rejected encodings (multiply, PSR-like, block, PC writes, Thumb PUSH/shift)
-  report the raw word/state and leave PC unchanged.
+- ARM halfword classification and signed offsets (`tests/arm_halfword.rs`):
+  independently composed pre-indexed immediate `LDRH`/`STRH` with `U=0` zero,
+  positive and negative magnitudes, all 15 condition codes, true/false
+  conditional execution, and no memory write on a false condition. The exact
+  regression words `0xE14322B0`, `0xE14000B0` and `0xE15322B0` are covered, and
+  the same suite re-checks MRS/MSR for all R0-R14, all 16 immediate rotations and
+  malformed fixed fields so halfword precedence cannot regress PSR decoding.
+- ARM PSR transfers: CPSR/SPSR MRS, register and rotated-immediate MSR, field
+  masks, empty-mask rejection, reserved-bit preservation, USER control-write
+  ignoring, invalid mode/T-bit rejection before mutation, USER/SYSTEM SPSR
+  errors, conditional no-op, and CPSR/Thumb coherence. See
+  `tests/psr_transfer.rs`, `tests/psr_field_mask.rs` and
+  `tests/psr_banking.rs`.
+- Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
+  r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
+  digests that include inactive banks.
+- Rejected encodings (multiply, block, PC writes, malformed PSR fixed fields,
+  Thumb PUSH/shift) report the raw word/state and leave PC unchanged.
 - Unaligned/nonexecutable fetches fail explicitly.
 - Unknown backend names are preserved in `UnsupportedBackend` (`--backend foo`
   reports `foo`, never `"unknown"`).
@@ -85,6 +101,10 @@ expectations, not from the decoder/interpreter:
   `STRH`).
   Rejected alias candidates leave guest memory and PC unchanged.
 - Arm immediate classification happens by bit 25 before inspecting bits 7..4.
+- PSR-transfer vectors compose MRS/MSR words from the documented field table
+  and check typed IR, all 16 immediate rotations, mask bytes, preservation and
+  explicit error cases. They also verify that the earlier bit-25 immediate
+  regression still holds (`MOV`/`CMP` immediates are not reclassified).
 
 ### Display and presentation
 
@@ -120,9 +140,10 @@ expectations, not from the decoder/interpreter:
   (`output/aot-proof/Cargo.toml`, `main.rs`, `src`, `target`), an existing
   `--out`, repeated default proofs, outside/traversal paths, and symlinked or
   dangling paths inside `output/`.
-- Compares PC, CPSR/flags, all 16 registers, VRAM digest, whole-bus digest,
-  full-image SHA-256 and exact used instruction budget against the reference
-  interpreter: 230,411 instructions, 0 fallbacks.
+- Compares PC, CPSR/flags, all 16 registers, the full CPU-state digest
+  (including inactive banks and SPSRs), VRAM digest, whole-bus digest, full-image
+  SHA-256 and exact used instruction budget against the reference interpreter:
+  230,411 instructions, 0 fallbacks.
 - Runs the harness with the exact bound ROM path (accepted) and with a different
   valid synthetic ROM (rejected with `ROM mismatch`, exit 3).
 - Fallback fixture: 5 blocks / 12 instructions discovered, dynamic target left
@@ -131,6 +152,20 @@ expectations, not from the decoder/interpreter:
   problematic immediates (`0xB0`, `0x09`, `0x0B`, `0x0D`). The native report is
   compared against hand-derived register values, final CPSR `0x600000DF`, exact
   budget and a bus digest whose only change is the explicit DISPCNT store.
+- PSR/banking fixture (`tests/aot_psr.rs`): a synthetic ROM switches
+  SYSTEM -> IRQ -> SYSTEM -> IRQ -> SYSTEM via MSR, writes and re-reads
+  SPSR_irq, reads banked SP/LR on both entries and ends in a self-branch. It
+  asserts zero fallbacks, a direct-AOT block section with no interpreter call,
+  exact hand-derived registers/CPSR/PC/budget, and a CPU digest that includes
+  inactive banks. Discovery unit fixtures verify that CPSR control writes clear
+  cached r8-r14 BX constants while flags-only MSR does not.
+- Negative-halfword fixture (`tests/aot_halfword.rs`): literal `LDR` initialises
+  an EWRAM base and value, `STRH r1,[r0,#-0x20]` is translated directly (the
+  generated block contains the `0xFFFFFFE0` displacement and no interpreter
+  call), a DISPCNT store initialises mode 3, and `LDRH r4,[r0,#-0x20]` reads the
+  value back. The report is compared with the reference and with an
+  independently constructed bus that has exactly the negative-offset target and
+  the DISPCNT write, not the positive-offset alias; runtime fallbacks are 0.
 - Emitter refuses an artifact bound to a different cartridge and refuses an
   artifact containing an empty block (before any generated loop could run).
 - Harness build/run leaves caller-owned sentinel files untouched; the harness
@@ -192,7 +227,7 @@ explicitly to the harness, and prints `proof=ok` plus
 
 ## Gate evidence
 
-Observed at this implementation round (2026-10-24). These are recorded
+Observed at this implementation round (2026-10-25). These are recorded
 observations, not a generated inventory:
 
 - `./scripts/short.sh`: hard limit 0 oversized files, Ratchet fast 2/2 rules,
@@ -203,31 +238,35 @@ observations, not a generated inventory:
   `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154`) and the
   native AOT proof (4 blocks / 17 translated instructions, 230,411 instructions,
   0 fallbacks, `native_vs_reference=match`).
-- `cargo test`: 91 tests passed (27 library unit tests, 5 CLI binary unit
-  tests, 59 integration tests: AOT 5, bus 6, cartridge 6, CLI output 5, CPU 12,
-  demo 3, display 5, ISA golden 4, quality counter 10, scripts 3). This is an
-  exact snapshot for this round, not a guarantee of GBA completeness.
-- `cargo test --release`: 91 tests passed.
+- `cargo test`: 123 tests passed (30 library unit tests, 5 CLI binary unit
+  tests, 88 integration tests: AOT halfword 1, AOT native 5, AOT PSR 3, ARM
+  halfword 5, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, ISA
+  golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality counter 10,
+  scripts 3). This is an exact snapshot for this round, not a guarantee of GBA
+  completeness.
+- `cargo test --release`: 123 tests passed.
 - Both suites were also repeated with fresh `CARGO_TARGET_DIR` directories, with
-  the same 91/91 result.
+  the same 123/123 result.
 - `tests/aot_native.rs` builds and runs four generated harnesses (demo,
-  mid-budget, immediate regression, fallback); its two contract tests make no
-  generated build. `tests/cli_output.rs` runs two real default `aot proof`
-  builds and refuses all redirect/invalid-path cases before Cargo starts.
+  mid-budget, immediate regression, fallback), `tests/aot_psr.rs` builds one
+  PSR/banking harness, and `tests/aot_halfword.rs` builds one negative-halfword
+  harness. Their contract/invalidation tests make no generated build.
+  `tests/cli_output.rs` runs two real default `aot proof` builds and refuses all
+  redirect/invalid-path cases before Cargo starts.
 - Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 37 ≥ 36);
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 44 ≥ 36);
   `check --tier slow` = 1 rule / 0 failed (`native-consistency` 1 ≥ 1).
   A full `ratchet check` is 3 rules / 0 failed. The machine-written baseline is
   `{native-consistency: 1, oversized-rust-file: 0, rust-source-population: 36}`;
-  adding a file leaves the floor satisfied without editing the baseline.
+  adding files leaves the floor satisfied without editing the baseline.
 - A temporary untracked 501-line Rust probe with a 1-line root `lib.rs` in
   `src/output/` was reported by `oversized --root <temp> --max 500 --hard` with
   exit status 1 and stdout `1`, while root-level `target/` and `output/` probes
   were skipped; the probe was removed afterwards. The same boundary is covered
   by `tests/quality_counter.rs` for nested `src/output/` and `tests/target/`.
   `scripts/short.sh` also passed when invoked from another working directory.
-- Maintained Rust population: 37 files; maximum 449 physical lines
-  (`src/bus.rs`). The code meets the hard limit without a baseline exemption.
+- Maintained Rust population: 44 files; maximum 459 physical lines
+  (`src/cpu.rs`). The code meets the hard limit without a baseline exemption.
   The pre-refactor worktree was split into `src/aot/`, `src/decode/`,
   `src/main.rs` and `src/cli/`; the earlier very large line counts were
   uncommitted working-tree measurements, not initial HEAD sizes, and are not
@@ -236,9 +275,10 @@ observations, not a generated inventory:
 ## Not established
 
 No hardware conformance ROM suite has been run. No retail game is supported or known playable.
-No BIOS boots, save persistence, audio, input interaction, DMA, IRQ, cycle timing,
-tile/sprite rendering or window frontend is verified. No real GBA hardware
-measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
+No BIOS boots, exception entry/return, SWI, interrupt delivery, save
+persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
+or window frontend is verified. PSR-transfer and banking evidence is limited to
+the synthetic/direct-entry subset. No real GBA hardware measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 
 The discovery/native proof applies only to the synthetic fixtures. It is not

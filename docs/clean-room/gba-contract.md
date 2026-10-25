@@ -10,6 +10,8 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 - Experimental prototype; no retail game is supported or known playable.
 - No BIOS is supplied or executed; direct entry is a test policy.
+- ARM7TDMI PSR transfers and MSR-driven register banking are implemented for
+  this subset. Exception entry/return, SWI and BIOS boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
@@ -40,8 +42,11 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 **Design:** the runner starts in system mode with CPSR `0x000000DF` (ARM, IRQ/FIQ
 masked), SP `0x03007F00`, PC `0x08000000`, and all other registers zero. This is
-not BIOS reset execution. There is no exception vectoring, banked register file,
-SWI/HLE service, or BIOS read path. BIOS accesses return `BiosAccess`.
+not BIOS reset execution. There is no exception vectoring, SWI/HLE service, BIOS
+read path, exception return, or PSR restore through ALU/PC writes. The ARM7TDMI
+register banks and exception-mode SPSRs exist for MSR-driven mode switches and
+SPSR transfers (below); they are not entered through exceptions. BIOS accesses
+return `BiosAccess`.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -96,11 +101,12 @@ Implemented regions and widths:
 ## Implemented ARM subset
 
 All 16 condition codes are evaluated from NZCV. A false condition is a no-op
-that still consumes one instruction and advances PC. PC reads as an ordinary
+that still consumes one instruction and advances PC, including for a PSR
+transfer whose executed form would be restricted. PC reads as an ordinary
 register operand are rejected; control flow is only via `B`/`BX`. Writes to PC
-via ALU/load are rejected. BL, multiply, swap, PSR transfer, block transfer,
-SWI, coprocessor and newer ARM encodings are rejected with address/state/raw
-word and are never NOPs.
+via ALU/load are rejected. BL, multiply, swap, block transfer, SWI,
+coprocessor and newer ARM encodings are rejected with address/state/raw word
+and are never NOPs.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
@@ -108,7 +114,8 @@ word and are never NOPs.
 | Branch | conditional/unconditional `B`; `BX` register | `BL`, `BX PC`, `BLX` |
 | Word load | `LDR` literal only, including ARM7 rotated unaligned literal read | `LDR`/`STR` with base register, register offset, writeback |
 | Halfword | pre-indexed immediate `LDRH`/`STRH`, ±offset, no writeback | `LDRSB`, `LDRSH`, post-index, register offset, writeback |
-| Everything else | none | multiply/swap, PSR/MRS/MSR, LDM/STM, SWI, coprocessor, unconditional/newer space |
+| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
+| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, unconditional/newer space |
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -118,6 +125,58 @@ not `LDRH r0,[r0]`; unsupported `BIC`-class immediates error instead of aliasing
 independent test sweeps all 256 imm8 values × 16 rotations for `MOV`/`ADD`/`SUB`
 with `S=0/1` and for `CMP`, checking typed IR, results, NZCV and memory
 immutability against separately written ISA expectations.
+
+Extra halfword transfers are classified before the PSR-transfer shape. A
+pre-indexed negative `STRH` (`P=1`, `U=0`, `L=0`) has the same coarse
+`bits 24-23 = 10b`/`bit 20 = 0` signature as MRS/MSR, for example
+`0xE14322B0` = `STRH r2,[r3,#-0x20]`. Valid MRS and register-form MSR encodings
+have bits 11-4 zero, while the halfword pattern `1SH1` keeps bit 7 set and
+immediate-form MSR has bit 25 set, so the classes are mutually exclusive and no
+raw-word whitelist is needed. An unsupported encoding, including an MSR with an
+empty field mask, is still rejected before condition evaluation; a false
+condition only suppresses execution of a successfully decoded instruction.
+
+### PSR transfers and register banking
+
+Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
+`#arm-cpu-register-set`, `#arm-cpu-flags--condition-field-cond` and
+`#arm-cpu-exceptions`:
+
+- `MRS Rd,CPSR` and `MRS Rd,SPSR_<current mode>` write the selected PSR to
+  R0-R14. `Rd = R15` and non-zero unused/fixed bits are rejected at decode.
+- `MSR` accepts the documented field bytes `f` (bits 31-24), `s` (23-16), `x`
+  (15-8), `c` (7-0). The byte selection is wider than the ARM7TDMI writable
+  mask: within `f` only N/Z/C/V (bits 31-28) can change and reserved bits 27-24
+  are preserved; `s` and `x` address reserved ARM7TDMI bytes and change nothing;
+  within `c` only I/F/T/M4-M0 (the low byte) can change and reserved bits 15-8
+  are preserved. No write fabricates or zeroes a reserved bit.
+- An MSR encoding whose field mask is zero is rejected at decode and by the
+  public `Cpu::write_psr`, because GBATEK states that at least one field bit must
+  be set and an empty mask is unpredictable. This is a **Design** error-first
+  choice, not a claim about the result on any particular hardware unit.
+- Register source is R0-R14; immediate source is `imm8 ROR (2 * rotation)`.
+  Fixed bits (bit 20, bits 24-23, MRS bits 19-16/11-0, MSR bits 15-12 and
+  register-form bits 11-4) are validated. Malformed encodings error without
+  execution.
+- In USER mode only the condition-code byte can change. A control-field write
+  succeeds as a documented no-op instead of inventing a privilege fault. SYSTEM
+  is privileged and may change I/F/mode.
+- The T bit is CPSR bit 5 and the single ARM/Thumb state source; `BX` changes
+  it. An MSR that would change T is rejected before mutation, for CPSR and for
+  SPSR control writes.
+- Only the current exception mode's SPSR is accessible. USER and SYSTEM have no
+  SPSR; MRS/MSR SPSR there returns `Error::Psr` instead of a fabricated value.
+  Exception-mode SPSRs start at zero in the direct-entry design state.
+- Valid modes are USER `0x10`, FIQ `0x11`, IRQ `0x12`, SVC `0x13`, ABT `0x17`,
+  UND `0x1B` and SYSTEM `0x1F`. Other values, including the old 26-bit
+  compatibility modes, are rejected before mutation.
+- R0-R7 are shared. R8-R12 are shared by every non-FIQ mode and banked only for
+  FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
+  FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
+  switches the visible bank atomically with the mode bits.
+- **Boundary:** there is no exception entry/vector fetch, no SWI/HLE, no
+  banked-register save/restore by the CPU, no exception return and no SPSR
+  restore. Those remain explicit unsupported behavior, not hidden successes.
 
 Pipeline offsets are documented: ARM `PC = instruction address + 8`. Direct
 branch targets are forced to 4-byte alignment.
@@ -179,8 +238,10 @@ temporal FSR, ML-FSR and DLSS names return `UnsupportedBackend`.
 
 `ir::IrInstr` contains the instruction address, width/state, raw encoding,
 condition and one typed operation (`Mov`, `Add`, `Sub`, `Cmp`, `B`, `Bx`,
-`LdrLiteral`, `LdrHalf`, `StrHalf`). The reference interpreter executes these
-operations; it does not dispatch on raw opcodes or run an opcode table.
+`LdrLiteral`, `LdrHalf`, `StrHalf`, `Mrs`, `Msr`). The reference interpreter
+executes these operations; it does not dispatch on raw opcodes or run an opcode
+table. `Msr` carries the PSR selector, the four field bits and a register or
+already-expanded immediate source.
 
 ## Hybrid AOT
 
@@ -200,8 +261,13 @@ operations; it does not dispatch on raw opcodes or run an opcode table.
 - Every computed branch target is dispatched by `(PC, ARM/Thumb)`; the two states
   are distinct keys.
 - The emitter consumes typed IR and writes direct Rust statements for known
-  operations. It calls bus helpers for memory and flag helpers for arithmetic;
-  it does not call the decoder or interpreter for a known instruction.
+  operations. It calls bus helpers for memory, flag helpers for arithmetic and
+  `cpu.read_psr`/`cpu.write_psr` for PSR transfers; it does not call the decoder
+  or interpreter for a known instruction.
+- A CPSR control-field MSR can change the active register bank, so bounded
+  discovery invalidates cached r8-r14 constants across it. It never carries a
+  stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
+  do not invalidate the bank cache.
 - Each translated instruction decrements the budget exactly once, including
   condition-false instructions and both sides of a conditional branch. Reaching
   zero stops before the next instruction in either reference or native execution.
@@ -222,7 +288,8 @@ operations; it does not dispatch on raw opcodes or run an opcode table.
 - Partial coverage is explicit: `DiscoveryStats` reports blocks, translated
   instructions, resolved/dynamic BX, decode stops, external targets, per-block
   splits and whether a global limit was reached. The native report reports
-  runtime fallback instructions.
+  runtime fallback instructions and a CPU-state digest covering inactive
+  register banks and SPSRs, not only the visible register snapshot.
 - **Design, not a general claim:** the synthetic demo discovers 4 blocks / 17
   instructions and executes 230,411 guest instructions with 0 fallbacks. The
   fallback fixture deliberately leaves the dynamic target undiscovered and takes

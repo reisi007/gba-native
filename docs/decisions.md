@@ -75,3 +75,40 @@ exist. `NativeHarness::build` accepts only a non-existing crate directory and
 creates its contents with `create_dir`/`create_new`. Earlier output is never
 erased or reused. This is an ownership and consistency contract, not a claim of
 race-freedom against an actively hostile concurrent process.
+
+## D7 — PSR transfers and banking stay explicit
+
+Decided 2026-10-25. ARM7TDMI MRS/MSR support is deliberately narrow and
+error-first: documented field bytes are applied, reserved CPSR/SPSR bits are
+preserved, USER-mode control writes are ignored, USER/SYSTEM SPSR access is an
+explicit error, and invalid mode or T-bit changes are rejected before mutation.
+MSR-driven mode changes swap the documented register banks, but exception
+entry/return, SWI, vector fetch and PSR restore remain unimplemented. An MSR
+with no field bit set is rejected at decode and in the public write path instead
+of being accepted as a successful no-op. Bounded AOT discovery invalidates cached
+r8-r14 constants across CPSR control writes.
+The native report includes a full CPU-state digest so banked state, not only the
+visible register snapshot, participates in the differential.
+
+## D8 — Documented HLE for the playability milestone
+
+Decided by the owner on 2026-10-25. Continue toward Emerald playability using
+independently implemented BIOS-service HLE derived from public interface and
+hardware documentation, not a bundled or disassembled Nintendo BIOS. This is a
+chosen implementation strategy, not evidence that HLE services already exist.
+Missing services must fail explicitly; direct entry is not BIOS reset execution.
+Title/new-game interaction, a controllable overworld and save/load validation
+are the gameplay acceptance milestones; an exhausted instruction budget is not
+playability. ROMs and existing saves remain local, unmodified test inputs and
+are never published.
+
+## D9 — GPU presentation, with a possible WebGPU target
+
+Decided by the owner on 2026-10-25. Interactive presentation must use a GPU
+backend, rather than making a software-only window the frontend foundation.
+Use an isolated frontend crate with Winit and Pixels/WGPU as the desktop
+direction; the default portable runtime/AOT core remains std-only. Investigate
+a WebGPU browser target where feasible, without claiming it is already built
+or that native AOT harnesses run unchanged in a browser. Later browser scaling
+needs its own evaluated implementation, not an FSR/DLSS label. Nearest/pixel
+presentation alone is still neither AI reconstruction nor vendor upscaling.

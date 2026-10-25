@@ -10,6 +10,7 @@
 mod artifact;
 mod discover;
 mod emit;
+mod emit_driver;
 mod harness;
 mod report;
 

@@ -163,6 +163,12 @@ fn enqueue(
 }
 
 fn update_constants(constants: &mut [Option<u32>; 16], instruction: IrInstr, cart: &Cartridge) {
+    // A CPSR control write can switch the active bank, so cached r8-r14 values
+    // no longer describe the registers of the following instruction. r0-r7 and
+    // PC are not banked.
+    if instruction.writes_cpsr_control() {
+        constants[8..=14].fill(None);
+    }
     if instruction.cond != Cond::Al {
         if let Some(rd) = written_register(instruction) {
             constants[rd as usize] = None;
@@ -183,7 +189,8 @@ fn update_constants(constants: &mut [Option<u32>; 16], instruction: IrInstr, car
                 .map(|word| word.rotate_right((addr & 3) * 8));
         }
         Op::LdrHalf { rd, .. } => constants[rd as usize] = None,
-        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } => {}
+        Op::Mrs { rd, .. } => constants[rd as usize] = None,
+        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => {}
     }
 }
 
@@ -193,7 +200,8 @@ fn written_register(instruction: IrInstr) -> Option<u8> {
         | Op::Add { rd, .. }
         | Op::Sub { rd, .. }
         | Op::LdrLiteral { rd, .. }
-        | Op::LdrHalf { rd, .. } => Some(rd),
-        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } => None,
+        | Op::LdrHalf { rd, .. }
+        | Op::Mrs { rd, .. } => Some(rd),
+        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => None,
     }
 }

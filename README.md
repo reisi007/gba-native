@@ -18,6 +18,7 @@ instructions.
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
 | ARM/Thumb subset + NZCV + BX state exchange | Implemented and tested |
+| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
@@ -145,9 +146,17 @@ until implemented and independently verified.
 ## Supported subset (short version)
 
 - ARM: `MOV`, `ADD`, `SUB`, `CMP` (register/immediate, no shifts), `B`, `BX`,
-  literal `LDR` and immediate `LDRH`/`STRH`, with all 16 conditions. Immediate
-  payloads are classified by bit 25 and independently swept over all imm8/rotation
-  values; unsupported immediate families error rather than aliasing a transfer.
+  `MRS`/`MSR` for CPSR/SPSR with the documented field bytes (an empty field mask
+  is rejected), literal `LDR` and immediate `LDRH`/`STRH` with positive or
+  negative pre-indexed offsets, with all 16 conditions. Immediate payloads are
+  classified by bit 25 and independently swept over all imm8/rotation values;
+  unsupported immediate families error rather than aliasing a transfer.
+- CPU state: the seven ARM7TDMI modes, shared r0-r7, FIQ-only r8-r12 banking,
+  per-exception r13/r14 banks with USER/SYSTEM sharing, and independent
+  FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
+  are ignored as documented; invalid modes and T-bit changes error before
+  mutation; USER/SYSTEM SPSR access errors. Exception entry/return, SWI and
+  BIOS boot are not implemented.
 - Thumb: `ADD`/`SUB` register and immediate forms, `MOV`/`CMP` immediate,
   register `CMP`, high-register `MOV`/`CMP`, `BX`, literal `LDR`,
   `LDRH`/`STRH`, conditional and unconditional `B`.

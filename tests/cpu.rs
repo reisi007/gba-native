@@ -232,19 +232,13 @@ fn unsupported_encodings_are_rejected_without_state_progress() {
         Err(Error::UnsupportedInstruction { .. })
     ));
 
-    let (mut cpu, mut bus) = arm(&[0xE129_F000]); // MSR-class encoding
+    let (mut cpu, mut bus) = arm(&[0xE10F_F000]); // MRS pc,CPSR is malformed
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })
     ));
 
-    let (mut cpu, mut bus) = arm(&[0xE10F_0000]); // MRS
-    assert!(matches!(
-        interpret::step(&mut cpu, &mut bus),
-        Err(Error::UnsupportedInstruction { .. })
-    ));
-
-    let (mut cpu, mut bus) = arm(&[0xE321_F01F]); // MSR immediate
+    let (mut cpu, mut bus) = arm(&[0xE129_0000]); // MSR fixed Rd-field != 1111
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })
