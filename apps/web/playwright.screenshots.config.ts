@@ -16,7 +16,10 @@ if (!outputDir) throw new Error('WEB_REVIEW_OUT is required');
 const channel = process.env.WEB_E2E_CHANNEL || 'chromium';
 const launchArgs = (
   process.env.WEB_E2E_LAUNCH_ARGS ??
-  '--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader'
+  '--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader ' +
+    '--enable-dawn-features=allow_unsafe_apis --disable-dawn-features=use_dxc ' +
+    '--enable-webgpu-developer-features --use-gpu-in-tests ' +
+    '--enable-accelerated-2d-canvas'
 )
   .split(/\s+/)
   .filter(Boolean);

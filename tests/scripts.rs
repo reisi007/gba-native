@@ -120,3 +120,81 @@ fn web_bootstrap_self_test_runs_before_clean_checkout_provisioning() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn browser_gpu_launch_args_are_platform_specific_and_shared_by_both_paths() {
+    let root = repo_root();
+    let helper = root.join("scripts/web-gpu-launch-args.sh");
+    let metadata = std::fs::metadata(&helper).expect("WebGPU launch-args helper exists");
+    assert!(metadata.is_file());
+    use std::os::unix::fs::PermissionsExt;
+    assert_ne!(
+        metadata.permissions().mode() & 0o111,
+        0,
+        "launch-args helper must be executable"
+    );
+
+    let common = [
+        "--enable-unsafe-webgpu",
+        "--use-webgpu-adapter=swiftshader",
+        "--enable-dawn-features=allow_unsafe_apis",
+        "--disable-dawn-features=use_dxc",
+        "--enable-webgpu-developer-features",
+        "--use-gpu-in-tests",
+        "--enable-accelerated-2d-canvas",
+    ];
+    let linux = Command::new(&helper)
+        .arg("Linux")
+        .output()
+        .expect("run Linux launch-args contract");
+    assert!(linux.status.success());
+    let linux_args: Vec<_> = String::from_utf8(linux.stdout)
+        .expect("UTF-8 launch args")
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        linux_args,
+        common
+            .into_iter()
+            .chain([
+                "--enable-features=Vulkan",
+                "--use-angle=vulkan",
+                "--use-vulkan=swiftshader",
+                "--disable-vulkan-surface",
+            ])
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    );
+
+    for platform in ["Darwin", "MINGW64_NT-10.0"] {
+        let output = Command::new(&helper)
+            .arg(platform)
+            .output()
+            .expect("run non-Linux launch-args contract");
+        assert!(output.status.success());
+        let args: Vec<_> = String::from_utf8(output.stdout)
+            .expect("UTF-8 launch args")
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(args, common, "platform {platform}");
+    }
+
+    for script in ["web-e2e.sh", "web-screenshots.sh"] {
+        let contents = std::fs::read_to_string(root.join("scripts").join(script))
+            .expect("read browser launch script");
+        assert!(
+            contents.contains("$ROOT/scripts/web-gpu-launch-args.sh"),
+            "{script} must use the shared platform-aware launch preset"
+        );
+        assert!(
+            contents.contains("${WEB_E2E_LAUNCH_ARGS:-$DEFAULT_LAUNCH_ARGS}"),
+            "{script} must preserve non-empty user override semantics"
+        );
+        assert!(
+            contents.contains("WEB_E2E_LAUNCH_ARGS=\"$LAUNCH_ARGS\""),
+            "{script} must pass its final launch args to Playwright"
+        );
+    }
+}

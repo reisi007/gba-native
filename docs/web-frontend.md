@@ -171,20 +171,30 @@ viewport and the acknowledgement count.
 - WebGL2 has no compute/storage-buffer or shader-fragment-interlock path for a
   future upscaler; nothing beyond nearest presentation is claimed.
 
+The functional and screenshot runners share `scripts/web-gpu-launch-args.sh`.
+Its common Chromium preset follows the official WebGPU/SwiftShader flag-specific
+configuration: `--enable-unsafe-webgpu`, `--use-webgpu-adapter=swiftshader`,
+`--enable-dawn-features=allow_unsafe_apis`,
+`--disable-dawn-features=use_dxc`, `--enable-webgpu-developer-features`,
+`--use-gpu-in-tests` and `--enable-accelerated-2d-canvas`. On Linux only, the
+helper adds `--enable-features=Vulkan --use-angle=vulkan
+--use-vulkan=swiftshader --disable-vulkan-surface` to explicitly select the
+headless software Vulkan route. macOS and Windows do not receive those
+Linux-specific switches. A non-empty `WEB_E2E_LAUNCH_ARGS` remains a complete
+user override (it replaces the preset); unset or empty values use the
+platform-aware default. Playwright still reports forced WebGPU failures and
+device loss; these switches do not introduce fallback or relaxed assertions.
+
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
 pixelated`, no CSS blur. The surface is deferred until a non-zero canvas size;
 the design cap is 8192 per edge and 16,777,216 pixels (labelled as an application
 cap, not a queried adapter maximum). The core bitmap is declared sRGB for the
 WebGL2 path and kept raw non-sRGB with an `rgba8unorm` WebGPU
-pixel/render/surface path. The RGBA surface matches the preferred format
-reported by Linux SwiftShader in the CI investigation; preferred formats vary
-by browser/device. The changed code has not yet been verified on Linux, so its
-warning/device-loss outcome there is unknown. The local macOS SwiftShader
-browser instead reports `bgra8unorm`, so the local test still reports the
-corresponding extra-copy warning. The WebGPU path does not configure an invalid
-sRGB canvas format or apply a gamma conversion; WebGL2 retains its sRGB
-decode/encode round-trip.
+pixel/render/surface path. The RGBA surface matched Linux Chromium's preferred
+format in the recorded CI investigation; preferred formats vary by
+browser/device. The WebGPU path does not configure an invalid sRGB canvas format
+or apply a gamma conversion; WebGL2 retains its sRGB decode/encode round-trip.
 
 Canvas physical geometry is computed from the live CSS content rectangle times
 `devicePixelRatio`, rounded to the nearest backing pixel. Winit's resize event
@@ -236,10 +246,14 @@ Local runs on 2026-10-25 with this repository, Playwright Chromium
 | headful system Chrome 156.0.8078.47 (before the RGBA surface change) | `webgpu` | ready, `backend=BrowserWebGpu`, adapter details redacted, sampled pixels exact; not re-run for the changed format |
 | headless Chromium without WebGPU flags | `webgpu` | explicit “requested explicitly … no WebGPU adapter” error; no fallback |
 | Playwright page with `Navigator.prototype.gpu` removed | `auto` then `webgpu` | auto ready on WebGL2 with `Auto compatibility path: yes`; forced WebGPU typed error |
+| Linux CI run 40236292333, before the Vulkan launch switches (only the two original SwiftShader flags) | `auto`/`webgpu` | WebGPU initialized with `Rgba8Unorm` render/surface and acknowledged two presents, then reported `WebGPU device lost (Destroyed): Device was destroyed.`; four tests failed and 15 passed. The WebGL2 path passed. |
 
 Adapter names/device types are browser-redacted in some WebGPU runs; they are
-reported as “(not exposed by this browser)”. CI uses Chromium with the
-SwiftShader WebGPU flag — API/software evidence, not a physical-GPU claim. A
+reported as “(not exposed by this browser)”. Chromium is now configured to select
+the SwiftShader Vulkan software path on Linux, but the post-change Linux result
+has not yet been observed. The earlier Linux run established WebGPU API
+initialization and the RGBA format, not a stable device or successful test run.
+This is software-backend configuration/evidence, not a physical-GPU claim. A
 browser without the required backend fails the forced-backend test; the suite
 does not skip it.
 
@@ -289,15 +303,17 @@ approval.
 The fresh local normal and `--ci` gates on 2026-10-25 passed the core wasm32
 check, WASM release build, pinned bundle build, 16 Rust library tests, one
 loopback-server test, five lifecycle tests and all 19 functional browser E2E
-tests. Both ran on macOS arm64 with SwiftShader WebGPU flags. Real PNG samples
-matched all five RGB goldens exactly; source SHA-256 and the 230,411-instruction
-budget were unchanged. This host reports preferred `bgra8unorm`, so the
-preferred-format extra-copy warning remains locally despite the configured
-`Rgba8Unorm` target. These runs are not Linux CI evidence and do not establish
-whether the device-loss failure from Linux run 40234092808 is fixed. Logs and
-captured E2E PNGs are in
-`output/web-linux-format-xyJBkfLLOd/`; the earlier integrated run remains in
-`output/integration-web-unique/web.log`. Screenshot review remains pending.
+tests using the expanded common SwiftShader preset. Both ran on macOS arm64;
+`--ci` correctly did not receive Linux Vulkan switches. Chromium reported
+`BrowserWebGpu` with adapter `SwiftShader Device (LLVM 10.0.0)` and
+`Rgba8Unorm`; real PNG samples matched all five RGB goldens exactly, with source
+SHA-256 and the 230,411-instruction budget unchanged. macOS prefers
+`bgra8unorm`, so its preferred-format extra-copy warning remains. These runs are
+not Linux CI evidence and do not establish whether the device-loss failure from
+Linux run 40236292333 is fixed. The new logs are in
+`output/web-linux-flags-macos.tGT2wY/web-normal.log` and
+`output/web-linux-flags-macos.tGT2wY/web-ci.log`; prior format logs remain in
+`output/web-linux-format-xyJBkfLLOd/`. Screenshot review remains pending.
 
 ## Remaining gaps (explicitly not implemented)
 

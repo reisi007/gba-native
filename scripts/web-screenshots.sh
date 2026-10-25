@@ -62,7 +62,8 @@ cp apps/web/tests/screenshots/ui-review.config.ts apps/web/tests/screenshots/ui-
 
 CHANNEL="${WEB_E2E_CHANNEL:-chromium}"
 HEADLESS="${WEB_E2E_HEADLESS:-1}"
-LAUNCH_ARGS="${WEB_E2E_LAUNCH_ARGS:---enable-unsafe-webgpu --use-webgpu-adapter=swiftshader}"
+DEFAULT_LAUNCH_ARGS=$("$ROOT/scripts/web-gpu-launch-args.sh")
+LAUNCH_ARGS="${WEB_E2E_LAUNCH_ARGS:-$DEFAULT_LAUNCH_ARGS}"
 
 info "capturing PNGs/JSON into $OUT"
 (

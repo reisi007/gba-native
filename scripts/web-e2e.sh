@@ -7,7 +7,7 @@
 #
 # Usage: ./scripts/web-e2e.sh [local|ci]
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
-#   ci     same entry point with SwiftShader flags for a GPU-less Linux runner
+#   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -80,7 +80,8 @@ cp apps/web/tests/functional.spec.ts "$E2E_DIR"/
 
 CHANNEL="${WEB_E2E_CHANNEL:-chromium}"
 HEADLESS="${WEB_E2E_HEADLESS:-1}"
-LAUNCH_ARGS="${WEB_E2E_LAUNCH_ARGS:---enable-unsafe-webgpu --use-webgpu-adapter=swiftshader}"
+DEFAULT_LAUNCH_ARGS=$("$ROOT/scripts/web-gpu-launch-args.sh")
+LAUNCH_ARGS="${WEB_E2E_LAUNCH_ARGS:-$DEFAULT_LAUNCH_ARGS}"
 if [ "$MODE" = "ci" ]; then
   HEADLESS=1
   CHANNEL="${WEB_E2E_CHANNEL:-chromium}"
