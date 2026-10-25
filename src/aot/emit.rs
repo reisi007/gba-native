@@ -2,9 +2,10 @@ use std::fmt::Write as _;
 
 use super::artifact::{AotArtifact, AotBlock};
 use super::emit_driver::emit_driver;
+use super::emit_ops::instruction_body;
 use crate::cart::Cartridge;
 use crate::error::{Error, Result};
-use crate::ir::{Cond, IrInstr, Op, PsrSrc, Src};
+use crate::ir::{Cond, IrInstr, Op};
 
 /// Emit a self-contained Rust harness. Known blocks become direct statements;
 /// only unknown targets call the reference interpreter.
@@ -85,34 +86,32 @@ fn emit_block(out: &mut String, block: &AotBlock) -> Result<()> {
 
 fn emit_instruction(out: &mut String, instruction: &IrInstr) -> Result<()> {
     match instruction.op {
-        Op::B { target } => {
-            if instruction.cond == Cond::Al {
-                writeln!(out, "    cpu.set_reg(15, 0x{target:08X});").unwrap();
-            } else {
-                writeln!(out, "    if {} {{", condition_expression(instruction.cond)).unwrap();
-                writeln!(out, "        cpu.set_reg(15, 0x{target:08X});").unwrap();
-                writeln!(out, "    }} else {{").unwrap();
-                writeln!(
-                    out,
-                    "        cpu.set_reg(15, 0x{:08X});",
-                    instruction.next_addr()
-                )
-                .unwrap();
-                writeln!(out, "    }}").unwrap();
-            }
+        Op::B { target } => emit_direct_branch(out, instruction, target, false),
+        Op::Bl { target } => emit_direct_branch(out, instruction, target, true),
+        Op::Bx { rm } => emit_bx(out, instruction, rm),
+        Op::BlLow { offset } => {
+            writeln!(
+                out,
+                "    let target = cpu.reg(14).wrapping_add(0x{offset:08X}u32);"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    cpu.set_reg(14, 0x{:08X}u32);",
+                instruction.next_addr() | 1
+            )
+            .unwrap();
+            writeln!(out, "    cpu.set_reg(15, target & !1);").unwrap();
             emit_tick(out, "    ");
             writeln!(out, "    return Ok(Next::Continue);").unwrap();
         }
-        Op::Bx { rm } => {
+        _ if instruction.op.writes_pc() => {
+            let body = instruction_body(instruction);
             if instruction.cond == Cond::Al {
-                writeln!(out, "    let target = cpu.reg({rm});").unwrap();
-                writeln!(out, "    cpu.set_thumb(target & 1 != 0);").unwrap();
-                writeln!(out, "    cpu.set_reg(15, target & !1);").unwrap();
+                out.push_str(&body);
             } else {
                 writeln!(out, "    if {} {{", condition_expression(instruction.cond)).unwrap();
-                writeln!(out, "        let target = cpu.reg({rm});").unwrap();
-                writeln!(out, "        cpu.set_thumb(target & 1 != 0);").unwrap();
-                writeln!(out, "        cpu.set_reg(15, target & !1);").unwrap();
+                out.push_str(&indent(&body, 4));
                 writeln!(out, "    }} else {{").unwrap();
                 writeln!(
                     out,
@@ -146,144 +145,74 @@ fn emit_instruction(out: &mut String, instruction: &IrInstr) -> Result<()> {
     Ok(())
 }
 
-fn instruction_body(instruction: &IrInstr) -> String {
-    let mut out = String::new();
-    match instruction.op {
-        Op::Mrs { rd, psr } => {
+fn emit_direct_branch(out: &mut String, instruction: &IrInstr, target: u32, link: bool) {
+    if instruction.cond == Cond::Al {
+        if link {
             writeln!(
                 out,
-                "    let value = cpu.read_psr(gba_native::ir::Psr::{})?;",
-                psr.rust_name()
-            )
-            .unwrap();
-            writeln!(out, "    cpu.set_reg({rd}, value);").unwrap();
-        }
-        Op::Msr { psr, fields, src } => {
-            writeln!(
-                out,
-                "    cpu.write_psr(gba_native::ir::Psr::{}, 0x{fields:02X}, {})?;",
-                psr.rust_name(),
-                psr_source_expression(src)
+                "    cpu.set_reg(14, 0x{:08X});",
+                instruction.next_addr()
             )
             .unwrap();
         }
-        Op::Mov { rd, src, set_flags } => {
-            writeln!(out, "    let value = {};", source_expression(src)).unwrap();
-            writeln!(out, "    cpu.set_reg({rd}, value);").unwrap();
-            if set_flags {
-                writeln!(
-                    out,
-                    "    cpu.set_logic_flags(value, {});",
-                    carry_expression(src)
-                )
-                .unwrap();
-            }
-        }
-        Op::Add {
-            rd,
-            rn,
-            rhs,
-            set_flags,
-        } => {
+        writeln!(out, "    cpu.set_reg(15, 0x{target:08X});").unwrap();
+    } else {
+        writeln!(out, "    if {} {{", condition_expression(instruction.cond)).unwrap();
+        if link {
             writeln!(
                 out,
-                "    let (result, carry, overflow) = gba_native::cpu::add_flags(cpu.reg({rn}), {});",
-                source_expression(rhs)
-            )
-            .unwrap();
-            writeln!(out, "    cpu.set_reg({rd}, result);").unwrap();
-            if set_flags {
-                writeln!(out, "    cpu.set_arith_flags(result, carry, overflow);").unwrap();
-            }
-        }
-        Op::Sub {
-            rd,
-            rn,
-            rhs,
-            set_flags,
-        } => {
-            writeln!(
-                out,
-                "    let (result, carry, overflow) = gba_native::cpu::sub_flags(cpu.reg({rn}), {});",
-                source_expression(rhs)
-            )
-            .unwrap();
-            writeln!(out, "    cpu.set_reg({rd}, result);").unwrap();
-            if set_flags {
-                writeln!(out, "    cpu.set_arith_flags(result, carry, overflow);").unwrap();
-            }
-        }
-        Op::Cmp { rn, rhs } => {
-            writeln!(
-                out,
-                "    let (result, carry, overflow) = gba_native::cpu::sub_flags(cpu.reg({rn}), {});",
-                source_expression(rhs)
-            )
-            .unwrap();
-            writeln!(out, "    cpu.set_arith_flags(result, carry, overflow);").unwrap();
-        }
-        Op::LdrLiteral { rd, addr } => {
-            writeln!(out, "    let address = 0x{addr:08X}u32;").unwrap();
-            writeln!(out, "    let word = bus.read32(address & !3)?;").unwrap();
-            writeln!(
-                out,
-                "    cpu.set_reg({rd}, word.rotate_right((address & 3) * 8));"
+                "        cpu.set_reg(14, 0x{:08X});",
+                instruction.next_addr()
             )
             .unwrap();
         }
-        Op::LdrHalf { rd, rn, offset } => {
-            writeln!(
-                out,
-                "    let address = cpu.reg({rn}).wrapping_add(0x{:08X}u32);",
-                offset as u32
-            )
-            .unwrap();
-            writeln!(out, "    let half = bus.read16(address & !1)? as u32;").unwrap();
-            writeln!(
-                out,
-                "    cpu.set_reg({rd}, if address & 1 != 0 {{ half.rotate_right(8) }} else {{ half }});"
-            )
-            .unwrap();
-        }
-        Op::StrHalf { rd, rn, offset } => {
-            writeln!(
-                out,
-                "    let address = cpu.reg({rn}).wrapping_add(0x{:08X}u32);",
-                offset as u32
-            )
-            .unwrap();
-            writeln!(out, "    bus.write16(address & !1, cpu.reg({rd}) as u16)?;").unwrap();
-        }
-        Op::B { .. } | Op::Bx { .. } => unreachable!(),
+        writeln!(out, "        cpu.set_reg(15, 0x{target:08X});").unwrap();
+        writeln!(out, "    }} else {{").unwrap();
+        writeln!(
+            out,
+            "        cpu.set_reg(15, 0x{:08X});",
+            instruction.next_addr()
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
     }
-    out
+    emit_tick(out, "    ");
+    writeln!(out, "    return Ok(Next::Continue);").unwrap();
 }
 
-fn source_expression(src: Src) -> String {
-    match src {
-        Src::Reg(index) => format!("cpu.reg({index})"),
-        Src::Imm { value, .. } => format!("0x{value:08X}u32"),
+fn emit_bx(out: &mut String, instruction: &IrInstr, rm: u8) {
+    let body_indent = if instruction.cond == Cond::Al {
+        "    "
+    } else {
+        "        "
+    };
+    if instruction.cond != Cond::Al {
+        writeln!(out, "    if {} {{", condition_expression(instruction.cond)).unwrap();
     }
-}
-
-fn psr_source_expression(src: PsrSrc) -> String {
-    match src {
-        PsrSrc::Reg(index) => format!("cpu.reg({index})"),
-        PsrSrc::Imm(value) => format!("0x{value:08X}u32"),
+    if rm == 15 {
+        let value = if instruction.thumb {
+            format!("0x{:08X}u32", instruction.addr.wrapping_add(4) & !2)
+        } else {
+            format!("0x{:08X}u32", instruction.addr.wrapping_add(8))
+        };
+        writeln!(out, "{body_indent}let target = {value};").unwrap();
+    } else {
+        writeln!(out, "{body_indent}let target = cpu.reg({rm});").unwrap();
     }
-}
-
-fn carry_expression(src: Src) -> &'static str {
-    match src {
-        Src::Reg(_) => "None",
-        Src::Imm {
-            carry: Some(true), ..
-        } => "Some(true)",
-        Src::Imm {
-            carry: Some(false), ..
-        } => "Some(false)",
-        Src::Imm { carry: None, .. } => "None",
+    writeln!(out, "{body_indent}cpu.set_thumb(target & 1 != 0);").unwrap();
+    writeln!(out, "{body_indent}cpu.set_reg(15, target & !1);").unwrap();
+    if instruction.cond != Cond::Al {
+        writeln!(out, "    }} else {{").unwrap();
+        writeln!(
+            out,
+            "        cpu.set_reg(15, 0x{:08X});",
+            instruction.next_addr()
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
     }
+    emit_tick(out, "    ");
+    writeln!(out, "    return Ok(Next::Continue);").unwrap();
 }
 
 fn condition_expression(cond: Cond) -> String {
@@ -309,4 +238,14 @@ fn indent(text: &str, spaces: usize) -> String {
 
 pub(super) fn block_name(addr: u32, thumb: bool) -> String {
     format!("block_{addr:08x}_{}", if thumb { "thumb" } else { "arm" })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indentation_is_stable() {
+        assert_eq!(indent("a\nb\n", 2), "  a\n  b\n");
+    }
 }

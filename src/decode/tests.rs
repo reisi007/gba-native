@@ -1,4 +1,4 @@
-use crate::ir::{Cond, Op, Psr, PsrSrc, Src};
+use crate::ir::{AluOpcode, Cond, Op, Psr, PsrSrc, Src};
 
 use crate::decode::{decode_arm, decode_thumb};
 
@@ -66,8 +66,22 @@ fn arm_immediate_payload_is_never_reinterpreted_as_extra_transfer() {
         }
     );
 
-    // BIC immediate: unsupported, but specifically not STRH r0,[r1].
-    assert!(decode_arm(0x0800_0008, 0xE3C1_00B0).is_err());
+    // BIC immediate is a data-processing instruction, not STRH r0,[r1].
+    assert_eq!(
+        decode_arm(0x0800_0008, 0xE3C1_00B0)
+            .expect("BIC immediate")
+            .op,
+        Op::Alu {
+            opcode: AluOpcode::Bic,
+            rd: Some(0),
+            rn: 1,
+            rhs: Src::Imm {
+                value: 0xB0,
+                carry: None
+            },
+            set_flags: false
+        }
+    );
 
     // A malformed CMP (Rd != 0) must be rejected, not decoded as STRH r1,[r0].
     assert!(decode_arm(0x0800_000C, 0xE350_10B4).is_err());
@@ -119,13 +133,15 @@ fn decodes_psr_transfer_forms_and_rejects_malformed_fixed_bits() {
     for raw in [
         0xE10F_F000, // MRS PC
         0xE10F_0001, // MRS low bits nonzero
-        0xE11F_0000, // MRS fixed Rn != 1111
+        0xE10E_0000, // valid MRS shape, fixed Rn != 1111 (must error as MRS)
         0xE12F_0000, // MSR fixed Rd-field != 1111
         0xE129_F010, // register MSR bits 11-4 nonzero
         0xE129_F00F, // MSR from PC
     ] {
         assert!(decode_arm(0, raw).is_err(), "raw 0x{raw:08X} must fail");
     }
+    let error = decode_arm(0, 0xE10E_0000).expect_err("MRS fixed Rn");
+    assert!(format!("{error}").contains("malformed ARM MRS"), "{error}");
 }
 
 #[test]

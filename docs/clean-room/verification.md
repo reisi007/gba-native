@@ -61,8 +61,18 @@ blank and comment lines, and a trailing newline adds no phantom line.
   `UnsupportedIoRead`/`UnsupportedIoWrite`, not `Unmapped`.
 - Palette/VRAM byte-store duplication and OAM byte-store ignore behavior.
 - DISPCNT/KEYINPUT only; KEYINPUT reports all buttons released.
-- ARM/Thumb MOV/ADD/SUB/CMP, NZCV for carry/borrow/overflow, condition-false
-  no-op, PC advance, direct branches, BX ARM↔Thumb round trip.
+- ARM/Thumb ALU, NZCV for carry/borrow/overflow, condition-false no-op, PC
+  advance, direct branches, `BL` link/return, BX ARM↔Thumb round trip, PC
+  operand pipeline values, and aligned ALU PC writes.
+- Full ARM data-processing family, LSL/LSR/ASR/ROR/RRX by immediate and by
+  register (low-byte amounts, 0/32/>32/256 cases), ADC/SBC/RSC carry ordering,
+  logical V/C preservation, and explicit `S=1` PC rejection. See
+  `tests/arm_alu.rs`, `tests/arm_shift.rs` and `tests/arm_control.rs`.
+- Thumb move-shifted, the other fifteen register ALU opcodes, high-register
+  ADD/CMP/MOV (including low/low MOV/CMP), ADR/PC/SP adjustment, and both
+  `BL` halves with an exact mid-pair budget stop. MUL, low/low ADD and ARMv5
+  BLX stay explicit errors. See `tests/thumb_alu.rs` and
+  `tests/thumb_control.rs`.
 - ARM7 odd-address LDRH rotation, STRH forced alignment, unaligned literal LDR
   rotation.
 - ARM halfword classification and signed offsets (`tests/arm_halfword.rs`):
@@ -81,8 +91,9 @@ blank and comment lines, and a trailing newline adds no phantom line.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
-- Rejected encodings (multiply, block, PC writes, malformed PSR fixed fields,
-  Thumb PUSH/shift) report the raw word/state and leave PC unchanged.
+- Rejected encodings (multiply/swap, block transfers, `S=1` Rd=PC,
+  malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb MUL/PUSH/BLX) report the raw
+  word/state and leave PC unchanged.
 - Unaligned/nonexecutable fetches fail explicitly.
 - Unknown backend names are preserved in `UnsupportedBackend` (`--backend foo`
   reports `foo`, never `"unknown"`).
@@ -96,15 +107,31 @@ expectations, not from the decoder/interpreter:
   with `S=0` and `S=1`, plus `CMP` (28,672 decoded/executed cases). Each case
   checks typed IR, result, NZCV or preservation, and memory immutability.
 - Exact regression encodings: `0xE35000B0` is `CMP r0,#0xB0` (not `LDRH`),
-  unsupported `BIC` `0xE3C100B0` errors (does not alias `STRH`), and the
+  `BIC` `0xE3C100B0` is a typed data-processing operation (not `STRH`), and the
   malformed CMP encoding `0xE35010B4` with `Rd != 0` errors (does not alias
-  `STRH`).
-  Rejected alias candidates leave guest memory and PC unchanged.
+  `STRH`). Rejected alias candidates leave guest memory and PC unchanged.
 - Arm immediate classification happens by bit 25 before inspecting bits 7..4.
 - PSR-transfer vectors compose MRS/MSR words from the documented field table
   and check typed IR, all 16 immediate rotations, mask bytes, preservation and
   explicit error cases. They also verify that the earlier bit-25 immediate
   regression still holds (`MOV`/`CMP` immediates are not reclassified).
+- `tests/arm_shift.rs`: independent value/carry matrix for every shift kind and
+  0/1/31/32/33/63/64/255/256 register amounts, immediate specials, RRX both
+  signs, and explicit Rs=15 rejection.
+- `tests/arm_alu.rs`: all sixteen opcodes in register and immediate form,
+  ADC/SBC/RSC carry-in and overflow edges, RRX-before-flags ordering, logical
+  shifter-carry/V preservation, S=0 preservation, and encoding restrictions.
+- `tests/arm_control.rs`: ARM PC+8/+12 operands, aligned S=0 PC writes,
+  S=1 PC errors, B/BL targets and link register, conditional false LR
+  preservation, BX state exchange and BX PC behavior.
+- `tests/thumb_alu.rs`: all fifteen non-MUL register ALU forms, both shift
+  groups, low-byte register amounts, high-register flags/PC rules, ADR/SP
+  bases, low/low MOV/CMP, and reserved/BLX errors.
+- `tests/thumb_control.rs`: the two BL halves, negative high offset,
+  second-half-only wrap, and the exact one-instruction budget stop between
+  halves.
+- `tests/aot_control.rs`: discovery metadata for ARM BL callee/return,
+  Thumb BL dynamic callee/known return, and ALU PC-write block termination.
 
 ### Display and presentation
 
@@ -166,6 +193,24 @@ expectations, not from the decoder/interpreter:
   value back. The report is compared with the reference and with an
   independently constructed bus that has exactly the negative-offset target and
   the DISPCNT write, not the positive-offset alias; runtime fallbacks are 0.
+- Expanded-ALU fixture (`tests/aot_alu.rs`): a synthetic ARM program exercises
+  AND/EOR/ORR/BIC/MVN, shifted MOV/ADD, SUBS/ADCS, an ARM `BL` with a
+  `BX LR` return, and an MSR-driven IRQ-bank write. The native report must match
+  a separately constructed final `Cpu` (including the inactive IRQ stack bank
+  and state digest), exact 26-instruction budget, 0 fallbacks, DISPCNT-only bus
+  digest and full image digest. A second fixture proves a dynamic `MOV PC,Rs`
+  target takes two fresh reference fallbacks while the native block terminates.
+- Thumb-ALU fixture (`tests/aot_thumb_alu.rs`): Thumb move-shifted, AND/ORR/EOR/
+  MVN/NEG/SBC/ADD, high-register MOVs and both `BL` halves. The generated block
+  section has no interpreter call; the dynamic callee takes exactly three
+  reference fallbacks; the known return executes natively. Exact 25-instruction
+  budget, independently constructed final CPU digest, bus and image are checked.
+  A second emitted harness stops at budget 19, exactly between the two BL halves,
+  with the intermediate LR and second-half PC preserved.
+- `tests/aot_control.rs` checks discovery metadata without building a harness:
+  ARM `BL` follows callee and return, Thumb `BL` is two instructions with a
+  dynamic callee and known return, and an ALU PC write ends the block without
+  statically following the next word.
 - Emitter refuses an artifact bound to a different cartridge and refuses an
   artifact containing an empty block (before any generated loop could run).
 - Harness build/run leaves caller-owned sentinel files untouched; the harness
@@ -177,8 +222,10 @@ expectations, not from the decoder/interpreter:
 
 Discovery unit tests additionally cover: per-block cap splits blocks with
 queued continuations (`block_limit_splits`), a zero per-block cap is an explicit
-error, a global instruction budget is exact and terminal, and default limits
-give no splits.
+error, a global instruction budget is exact and terminal, default limits give no
+splits, CPSR control writes clear banked constants, and the new `bl_calls`,
+`bl_returns`, `dynamic_bl` and `pc_writes` metadata is populated without
+following data words.
 
 A generated crate is written to a fresh owned directory, uses a separate
 `CARGO_TARGET_DIR` inside that directory and `cargo --offline`, so it does not
@@ -230,47 +277,49 @@ explicitly to the harness, and prints `proof=ok` plus
 Observed at this implementation round (2026-10-25). These are recorded
 observations, not a generated inventory:
 
-- `./scripts/short.sh`: hard limit 0 oversized files, Ratchet fast 2/2 rules,
+- `./scripts/short.sh`: hard limit 0 oversized files, Ratchet fast 2/2 rules
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 57 ≥ 36),
   `cargo fmt --check`, Clippy with warnings denied and the fast unit tests all
   passed.
 - `./scripts/full.sh`: passed end to end, including debug and release suites,
   the demo (230,411 instructions, image SHA-256
   `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154`) and the
   native AOT proof (4 blocks / 17 translated instructions, 230,411 instructions,
-  0 fallbacks, `native_vs_reference=match`).
-- `cargo test`: 123 tests passed (30 library unit tests, 5 CLI binary unit
-  tests, 88 integration tests: AOT halfword 1, AOT native 5, AOT PSR 3, ARM
-  halfword 5, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, ISA
-  golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality counter 10,
-  scripts 3). This is an exact snapshot for this round, not a guarantee of GBA
-  completeness.
-- `cargo test --release`: 123 tests passed.
+  0 fallbacks, `native_vs_reference=match`). The discovery counts did not change
+  because the demo fixture does not use the expanded ALU/control operations.
+- `cargo test`: 164 tests passed (33 library unit tests, 5 CLI binary unit
+  tests, 126 integration tests: AOT ALU 2, AOT control 4, AOT halfword 1, AOT
+  native 5, AOT PSR 3, AOT Thumb ALU 1, ARM ALU 6, ARM control 9, ARM halfword
+  5, ARM shift 4, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5,
+  ISA golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality
+  counter 10, scripts 3, Thumb ALU 7, Thumb control 5). This is an exact
+  snapshot for this round, not a guarantee of GBA completeness.
+- `cargo test --release`: 164 tests passed.
 - Both suites were also repeated with fresh `CARGO_TARGET_DIR` directories, with
-  the same 123/123 result.
-- `tests/aot_native.rs` builds and runs four generated harnesses (demo,
-  mid-budget, immediate regression, fallback), `tests/aot_psr.rs` builds one
-  PSR/banking harness, and `tests/aot_halfword.rs` builds one negative-halfword
-  harness. Their contract/invalidation tests make no generated build.
-  `tests/cli_output.rs` runs two real default `aot proof` builds and refuses all
-  redirect/invalid-path cases before Cargo starts.
-- Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 44 ≥ 36);
+  the same 164/164 result in debug and release.
+- Generated harnesses built and run by tests: `tests/aot_native.rs` four (demo,
+  mid-budget, immediate regression, fallback), `tests/aot_alu.rs` two (expanded
+  ALU/banking/BL and dynamic-PC fallback), `tests/aot_thumb_alu.rs` two
+  (full run and exact mid-pair stop), `tests/aot_psr.rs` one and
+  `tests/aot_halfword.rs` one — ten in total. Their
+  contract/invalidation tests make no generated build. `tests/cli_output.rs`
+  runs two real default `aot proof` builds and refuses all redirect/invalid-path
+  cases before Cargo starts.
+- Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed;
   `check --tier slow` = 1 rule / 0 failed (`native-consistency` 1 ≥ 1).
   A full `ratchet check` is 3 rules / 0 failed. The machine-written baseline is
   `{native-consistency: 1, oversized-rust-file: 0, rust-source-population: 36}`;
   adding files leaves the floor satisfied without editing the baseline.
-- A temporary untracked 501-line Rust probe with a 1-line root `lib.rs` in
-  `src/output/` was reported by `oversized --root <temp> --max 500 --hard` with
-  exit status 1 and stdout `1`, while root-level `target/` and `output/` probes
-  were skipped; the probe was removed afterwards. The same boundary is covered
-  by `tests/quality_counter.rs` for nested `src/output/` and `tests/target/`.
-  `scripts/short.sh` also passed when invoked from another working directory.
-- Maintained Rust population: 44 files; maximum 459 physical lines
-  (`src/cpu.rs`). The code meets the hard limit without a baseline exemption.
-  The pre-refactor worktree was split into `src/aot/`, `src/decode/`,
-  `src/main.rs` and `src/cli/`; the earlier very large line counts were
-  uncommitted working-tree measurements, not initial HEAD sizes, and are not
-  used as historical evidence. Current per-file sizes are the source audit.
+- Maintained Rust population: 57 files; maximum 481 physical lines
+  (`src/cpu.rs`). The code meets the hard limit without a baseline exemption or
+  hand-edited baseline. The earlier 501-line/nested-directory boundary tests are
+  unchanged in `tests/quality_counter.rs`.
+- Bounded read-only local retail observation: the existing CLI stops at abstract
+  address `0x08000224` on the ARM single word store (base-register `STR`)
+  family, after the previously blocking PC-operand ALU instruction at
+  `0x08000220` now executes. No retail bytes, AOT source or copied payload were
+  produced; the ROM SHA-256 remains
+  `7c599c56849efeebeb93bd71f714932ae4cdf980db51c9c1016b4431057f71d4`.
 
 ## Not established
 
@@ -280,6 +329,11 @@ persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
 or window frontend is verified. PSR-transfer and banking evidence is limited to
 the synthetic/direct-entry subset. No real GBA hardware measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
+
+Thumb `MUL`, low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, `S=1` PC restore, and all
+load/store expansion beyond the listed literal/halfword forms remain explicitly
+unsupported. The expanded ALU/control subset is not a complete ARMv4T
+implementation.
 
 The discovery/native proof applies only to the synthetic fixtures. It is not
 evidence of general static recovery, broad ARMv4T coverage or retail compatibility.

@@ -214,6 +214,10 @@ fn cmd_aot_proof(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     );
     println!("resolved_bx={}", artifact.stats.resolved_bx);
     println!("dynamic_bx={}", artifact.stats.dynamic_bx);
+    println!("bl_calls={}", artifact.stats.bl_calls);
+    println!("bl_returns={}", artifact.stats.bl_returns);
+    println!("dynamic_bl={}", artifact.stats.dynamic_bl);
+    println!("pc_writes={}", artifact.stats.pc_writes);
     println!("decode_stops={}", artifact.stats.decode_stops);
     println!("external_targets={}", artifact.stats.external_targets);
     println!("budget_used={}", report.budget_used);
@@ -253,6 +257,10 @@ fn cmd_aot_emit(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("translated_instructions={}", artifact.stats.instructions);
     println!("resolved_bx={}", artifact.stats.resolved_bx);
     println!("dynamic_bx={}", artifact.stats.dynamic_bx);
+    println!("bl_calls={}", artifact.stats.bl_calls);
+    println!("bl_returns={}", artifact.stats.bl_returns);
+    println!("dynamic_bl={}", artifact.stats.dynamic_bl);
+    println!("pc_writes={}", artifact.stats.pc_writes);
     println!("decode_stops={}", artifact.stats.decode_stops);
     println!("output={out}");
     println!("embedded_rom_bytes=0");

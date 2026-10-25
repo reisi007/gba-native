@@ -11,7 +11,7 @@ use gba_native::cpu::Cpu;
 use gba_native::decode::decode_arm;
 use gba_native::error::Error;
 use gba_native::interpret;
-use gba_native::ir::{Cond, Op, Psr, PsrSrc};
+use gba_native::ir::{AluOpcode, Cond, Op, Psr, PsrSrc};
 
 fn cart() -> Cartridge {
     Cartridge::from_bytes(vec![0u8; 0x200]).expect("synthetic cart")
@@ -299,7 +299,7 @@ fn psr_classification_is_unchanged_by_halfword_precedence() {
     for raw in [
         0xE10F_F000, // MRS PC
         0xE10F_0001, // MRS low bits nonzero
-        0xE11F_0000, // MRS fixed Rn != 1111
+        0xE10E_0000, // valid MRS shape, fixed Rn != 1111 (must error as MRS)
         0xE12F_0000, // MSR fixed Rd-field != 1111
         0xE129_F010, // register MSR bits 11-4 nonzero
         0xE129_F00F, // MSR from PC
@@ -307,6 +307,13 @@ fn psr_classification_is_unchanged_by_halfword_precedence() {
         let error = decode_arm(0, raw).expect_err("malformed PSR encoding");
         assert!(matches!(error, Error::UnsupportedInstruction { .. }));
     }
+    // 0xE10E0000 has the valid MRS field shape (bit20=0, immediate=0) but a
+    // fixed Rn of 1110b instead of 1111b. It must be diagnosed as malformed MRS,
+    // not as TST or a halfword transfer.
+    let error = decode_arm(0, 0xE10E_0000).expect_err("MRS fixed Rn");
+    let message = format!("{error}");
+    assert!(message.contains("MRS"), "{message}");
+    assert!(message.contains("Rn=1111"), "{message}");
 
     // The earlier bit-25 immediate regression must stay intact.
     assert!(matches!(
@@ -317,5 +324,11 @@ fn psr_classification_is_unchanged_by_halfword_precedence() {
         decode_arm(0, 0xE350_00B0).expect("CMP immediate").op,
         Op::Cmp { .. }
     ));
-    assert!(decode_arm(0, 0xE3C1_00B0).is_err());
+    assert!(matches!(
+        decode_arm(0, 0xE3C1_00B0).expect("BIC immediate").op,
+        Op::Alu {
+            opcode: AluOpcode::Bic,
+            ..
+        }
+    ));
 }

@@ -112,3 +112,14 @@ a WebGPU browser target where feasible, without claiming it is already built
 or that native AOT harnesses run unchanged in a browser. Later browser scaling
 needs its own evaluated implementation, not an FSR/DLSS label. Nearest/pixel
 presentation alone is still neither AI reconstruction nor vendor upscaling.
+
+## D10 — Separate runtime, AOT and application crates
+
+Decided by the owner on 2026-10-25. After the in-flight implementation rounds,
+split the portable runtime (including typed IR and HLE), AOT tooling and CLI
+into separate crates, with the GPU frontend remaining isolated. Frontends must
+not need to depend on host-side AOT build/process tooling just to execute the
+runtime. Preserve existing public import paths through a compatibility facade
+where practical. Core/default validation must remain std-only and usable
+offline without resolving the frontend's external dependencies. This records
+the chosen target structure, not a claim that the split already exists.

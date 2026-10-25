@@ -2,7 +2,7 @@
 //!
 //! The fixture is entirely synthetic. It loads an EWRAM base and a stored value
 //! through literal `LDR`, performs `STRH r1,[r0,#-0x20]`, initialises DISPCNT,
-//! reads the stored halfword back with `LDRH r0,[r0,#-0x20]` and ends in a
+//! reads the stored halfword back with `LDRH r4,[r0,#-0x20]` and ends in a
 //! self-branch. Expected registers and the expected bus effect are hand-derived
 //! from that sequence, independent of the shared decoder/interpreter.
 

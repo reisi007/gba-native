@@ -10,8 +10,11 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 - Experimental prototype; no retail game is supported or known playable.
 - No BIOS is supplied or executed; direct entry is a test policy.
-- ARM7TDMI PSR transfers and MSR-driven register banking are implemented for
-  this subset. Exception entry/return, SWI and BIOS boot remain absent.
+- The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
+  `B`/`BL`/`BX` and the corresponding Thumb ALU/high-register/long-branch
+  subset are implemented and independently tested. ARM7TDMI PSR transfers and
+  MSR-driven register banking are implemented for this subset. Exception
+  entry/return, SWI and BIOS boot remain absent; Thumb `MUL` remains explicit.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
@@ -100,31 +103,43 @@ Implemented regions and widths:
 
 ## Implemented ARM subset
 
-All 16 condition codes are evaluated from NZCV. A false condition is a no-op
-that still consumes one instruction and advances PC, including for a PSR
-transfer whose executed form would be restricted. PC reads as an ordinary
-register operand are rejected; control flow is only via `B`/`BX`. Writes to PC
-via ALU/load are rejected. BL, multiply, swap, block transfer, SWI,
-coprocessor and newer ARM encodings are rejected with address/state/raw word
+Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
+unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
+sixteenth condition. A false condition is a no-op that still consumes one
+instruction and advances PC, including for a PSR transfer whose executed form
+would be restricted. Multiply, swap, block transfer, SWI, coprocessor, ARMv5
+`BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
 and are never NOPs.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
-| Data processing | `MOV`, `ADD`, `SUB`, `CMP`; register or immediate operand; `S` bit honored; immediate rotation carry tracked; CMP enforces its fixed `S=1`/`Rd=0` encoding | shifts, logical/ADC/SBC/RSB/RSC, PC operands, PC destination |
-| Branch | conditional/unconditional `B`; `BX` register | `BL`, `BX PC`, `BLX` |
+| Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands and `S=0` PC destinations | `S=1` with `Rd=PC` (needs SPSR restore), ARMv2 P-variant test ops, ARMv5/newer |
+| Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
 | Word load | `LDR` literal only, including ARM7 rotated unaligned literal read | `LDR`/`STR` with base register, register offset, writeback |
 | Halfword | pre-indexed immediate `LDRH`/`STRH`, ±offset, no writeback | `LDRSB`, `LDRSH`, post-index, register offset, writeback |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
-| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, unconditional/newer space |
+| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, conditional/newer space |
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
 payload, not a multiply/swap/halfword opcode. `CMP r0,#0xB0` is therefore `CMP`,
-not `LDRH r0,[r0]`; unsupported `BIC`-class immediates error instead of aliasing
+not `LDRH r0,[r0]`; `BIC r0,r1,#0xB0` is a typed data-processing operation, not
 `STRH`, and a malformed `CMP` with `Rd != 0` errors instead of storing. An
 independent test sweeps all 256 imm8 values × 16 rotations for `MOV`/`ADD`/`SUB`
 with `S=0/1` and for `CMP`, checking typed IR, results, NZCV and memory
 immutability against separately written ISA expectations.
+
+The barrel shifter follows the documented special cases: LSL#0 leaves C
+unchanged; LSR#0/ASR#0 mean 32; ROR#0 is RRX; a register-specified shift uses
+only the low eight bits, so 0/32/33/63/64/255/256 behave as documented. MOV/MVN
+require their fixed `Rn=0`, and CMP/CMN/TST/TEQ require their fixed `Rd=0`
+encoding. An empty MSR field mask remains an error.
+
+`ADC`/`SBC`/`RSC` evaluate the shifted operand and RRX against the old carry
+before any flag update; arithmetic flags then come from the arithmetic result,
+not from the shifter carry. Logical operations update C from the shifter carry
+(unchanged for LSL#0 or a zero register amount) and preserve V. `S=0` preserves
+all four flags.
 
 Extra halfword transfers are classified before the PSR-transfer shape. A
 pre-indexed negative `STRH` (`P=1`, `U=0`, `L=0`) has the same coarse
@@ -178,36 +193,64 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   banked-register save/restore by the CPU, no exception return and no SPSR
   restore. Those remain explicit unsupported behavior, not hidden successes.
 
-Pipeline offsets are documented: ARM `PC = instruction address + 8`. Direct
-branch targets are forced to 4-byte alignment.
+Pipeline offsets are documented. ARM operands reading R15 use
+`instruction address + 8`, or `+12` when the instruction uses a
+register-specified shift. Thumb operands reading R15 use `instruction address +
+4`; `ADR` and `ADD Rd,PC,#imm` address generation use the word-aligned PC+4
+value. Direct branch targets are forced to 4-byte (ARM) or 2-byte (Thumb)
+alignment.
+
+ARM ALU/MOV writes to PC with `S=0` are allowed, force-align the low two bits
+and keep the ARM state; `S=1` with `Rd=PC` is explicitly unsupported because it
+would require an SPSR restore. Thumb `MOV PC,Rs`/`ADD PC,Rs` force-align the low
+bit and keep Thumb state. `BX` bit 0 is the only state switch. `BX PC` follows
+GBATEK's ARM7 behavior (ARM `$+8`; Thumb `(($+4) AND NOT 2)`, switching to ARM);
+GBATEK notes that this case is not officially defined as predictable.
 
 ## Implemented Thumb subset
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
-| Add/subtract | `ADD`/`SUB` register and 3-bit immediate, flags set | carries, shifts |
+| Move shifted | `LSL`/`LSR`/`ASR` immediate, flags set | — |
+| Add/subtract | `ADD`/`SUB` register and 3-bit immediate, flags set | — |
 | Immediate | `MOV`, `CMP`, `ADD`, `SUB` with 8-bit immediate | — |
-| ALU | register `CMP` only | shifts, MUL, logical/ADC/SBC/NEG/CMN/etc. |
-| High register | `MOV`, `CMP`, `BX` | high-register `ADD` |
-| PC-relative | `LDR` literal | `ADR`, SP-relative loads/stores |
+| ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`; shift amount from register low byte | `MUL` remains explicit |
+| High register | `ADD`, `CMP`, `MOV` including low/low `MOV`/`CMP`, `BX` including PC | low/low `ADD` (reserved), ARMv5 `BLX` register |
+| Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm` | SP-relative loads/stores |
+| PC-relative | `LDR` literal | — |
 | Halfword | immediate `LDRH`/`STRH` | signed/register-offset forms |
-| Branch | conditional `B` (`cond != 14/15`), unconditional `B` | `BL`/long branch, SWI, undefined `cond=14` |
+| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions | ARMv5 `BLX` second half, SWI, undefined `cond=14` |
 | Block/stack | none | `PUSH`/`POP`, `LDM`/`STM` |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
-alignment. `BX` alone changes ARM/Thumb state. Thumb `BL` is rejected as two
-unimplemented halves rather than decoded as another instruction. The
-high-register `MOV`/`CMP` forms require at least one high-register bit; valid
-low/low encodings such as `0x4600` are deliberately outside this subset and are
-rejected rather than treated as a different operation.
+alignment. `BX` alone changes ARM/Thumb state. High-register `ADD`/`MOV` never
+set flags; high-register `CMP` always does. Low/low `MOV` and `CMP` are accepted
+as the valid aliases requested for this milestone; low/low `ADD` stays the
+documented reserved encoding.
+
+Thumb `BL` is two independent 16-bit instructions. The first sets an
+intermediate LR and does not branch; the second computes `LR + (imm11<<1)`, sets
+`LR = next address | 1` and branches. Each half consumes one instruction, so a
+budget can stop between them. Bounded discovery treats the first half as an
+ordinary instruction and the second as a dynamic computed target; the known
+return address is still followed. The ARMv5 `BLX` second half (`0xE800..0xEFFF`)
+and register form are rejected.
 
 ## Flag semantics
 
-- `ADD`: N/Z from result, C from unsigned carry, V from signed overflow.
-- `SUB`/`CMP`: N/Z from result, C is no-borrow, V from signed overflow.
-- `MOV` (including `MOVS`): N/Z from result; C is the immediate-shift carry when
-  a rotation actually occurs, otherwise preserved; V preserved.
-- Thumb immediate `MOV` sets N/Z and preserves C/V.
+- Logical operations (`AND`, `EOR`, `TST`, `TEQ`, `ORR`, `MOV`, `BIC`, `MVN`,
+  and the Thumb shift-immediate/register forms): N/Z from the result, C from the
+  shifter carry when the shift actually produces one, otherwise preserved; V
+  preserved.
+- Arithmetic operations (`ADD`, `ADC`, `SUB`, `SBC`, `RSB`, `RSC`, `CMP`, `CMN`,
+  Thumb `NEG`): N/Z from the result, C from the arithmetic carry/no-borrow, V
+  from signed overflow.
+- `ADC`/`SBC`/`RSC` consume the old C as carry/borrow input after evaluating the
+  operand (including RRX); they never use the shifter carry as their carry-in.
+- ARM immediate rotations update C only when a rotation occurs; `MOVS` with
+  rotation zero preserves C. Thumb immediate `MOV` sets N/Z and preserves C/V.
+- Thumb high-register `ADD`/`MOV`, `ADR` and SP adjustments do not change flags.
+- `S=0` preserves all flags; test operations and CMP/CMN always set them.
 - Unsupported flag-producing operations are not approximated.
 
 ## Display snapshot
@@ -237,11 +280,67 @@ temporal FSR, ML-FSR and DLSS names return `UnsupportedBackend`.
 ## Typed IR and interpreter
 
 `ir::IrInstr` contains the instruction address, width/state, raw encoding,
-condition and one typed operation (`Mov`, `Add`, `Sub`, `Cmp`, `B`, `Bx`,
-`LdrLiteral`, `LdrHalf`, `StrHalf`, `Mrs`, `Msr`). The reference interpreter
-executes these operations; it does not dispatch on raw opcodes or run an opcode
-table. `Msr` carries the PSR selector, the four field bits and a register or
-already-expanded immediate source.
+condition and one typed operation. Data-processing sources are either
+`Src::Reg`, `Src::Imm { value, carry }` or an explicit `Src::RegShift { rm,
+shift }` with `ShiftKind` and an immediate or register amount. The remaining
+ALU operations use `Op::Alu { opcode: AluOpcode, ... }`; MOV/ADD/SUB/CMP keep
+their earlier explicit variants so previously supported IR shapes and tests are
+unchanged. Branch operations are `B`, `Bl`, the two Thumb halves `BlHigh` and
+`BlLow`, and `Bx`. Memory/PSR operations remain `LdrLiteral`, `LdrHalf`,
+`StrHalf`, `Mrs`, `Msr`.
+
+The reference interpreter executes these operations and does not dispatch on
+raw opcodes or run an opcode table. Shared `semantics` helpers evaluate typed
+operands, PC pipeline values, shifts and operand carry; they are used by both
+the reference interpreter and the emitter. `Msr` carries the PSR selector, the
+four field bits and a register or already-expanded immediate source. Control-flow
+metadata (`writes_pc`) marks direct branches, `BX`, both halves of Thumb `BL`,
+and ALU/MOV writes to R15, so discovery and emission terminate blocks
+consistently.
+
+## Hybrid AOT
+
+- Discovery starts at an explicit, aligned `(PC, ARM/Thumb)` entry inside the
+  immutable ROM and walks straight-line blocks. It follows direct `B` targets,
+  the fallthrough of conditional branches, and both sides of a conditional
+  instruction. An ARM `BL` follows its callee *and* its return address, bounded by
+  the same global limits; it is never assumed that a target is a code word.
+  Thumb `BL` is deliberately not fused: the first half is an ordinary LR update,
+  the second half is a dynamic LR target, and the known return address is queued.
+  A `BX` target is followed only when local constant propagation (literal `LDR`
+  or immediate `MOV`, same block, no intervening write) resolves it. This is
+  intentionally not general static recovery.
+- A write to R15 through MOV/ALU terminates the current block and is not followed
+  statically; a false condition still makes its fallthrough discoverable. This
+  prevents translating instructions that are only reachable through a dynamic
+  computed target.
+- Discovery stops at dynamic `BX`, dynamic `BL` targets, unknown/unsupported
+  encodings and non-ROM targets. Limits are explicit: `max_blocks` and
+  `max_instructions` are global terminal budgets (default 512/8192) and set
+  `limit_reached`; hitting `max_block_instructions` (default 64) only ends the
+  current block and queues its continuation, counted in
+  `block_limit_splits`, so a small per-block cap can still discover reachable
+  code. A per-block cap of zero is an explicit error rather than an infinite
+  loop. It never decodes every ROM word as code.
+- Every computed branch target is dispatched by `(PC, ARM/Thumb)`; the two states
+  are distinct keys. A Thumb `BL` second half can therefore dispatch to a
+  discovered block or a fresh interpreter fallback without decoding stale RAM.
+- The emitter consumes typed IR and writes direct Rust statements for known
+  operations. It calls bus helpers for memory, flag helpers for arithmetic,
+  shared typed operand/shift helpers for registers and PC pipeline values, and
+  `cpu.read_psr`/`cpu.write_psr` for PSR transfers; it does not call the decoder
+  or interpreter for a known instruction. Each new ALU/control operation has a
+  direct emission path.
+- A CPSR control-field MSR can change the active register bank, so bounded
+  discovery invalidates cached r8-r14 constants across it. It never carries a
+  stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
+  do not invalidate the bank cache. Every register a new ALU/control instruction
+  can write is invalidated conservatively; only immediate/MOV and literal loads
+  introduce constants.
+- Each translated instruction decrements the budget exactly once, including
+  condition-false instructions, both sides of a conditional branch, and each
+  half of a Thumb `BL`. Reaching zero stops before the next instruction in either
+  reference or native execution.
 
 ## Hybrid AOT
 
@@ -286,15 +385,19 @@ already-expanded immediate source.
   experimental prototype, not a signature, code-signing identity or
   anti-tamper guarantee.
 - Partial coverage is explicit: `DiscoveryStats` reports blocks, translated
-  instructions, resolved/dynamic BX, decode stops, external targets, per-block
-  splits and whether a global limit was reached. The native report reports
-  runtime fallback instructions and a CPU-state digest covering inactive
-  register banks and SPSRs, not only the visible register snapshot.
-- **Design, not a general claim:** the synthetic demo discovers 4 blocks / 17
-  instructions and executes 230,411 guest instructions with 0 fallbacks. The
-  fallback fixture deliberately leaves the dynamic target undiscovered and takes
-  2 interpreter fallback steps. These are fixture facts, not evidence that
-  arbitrary retail code can be statically recovered.
+  instructions, resolved/dynamic BX, followed ARM `BL` calls and return
+  continuations, dynamic Thumb-`BL` targets, ALU PC-write terminations, decode
+  stops, external targets, per-block splits and whether a global limit was
+  reached. The native report reports runtime fallback instructions and a
+  CPU-state digest covering inactive register banks and SPSRs, not only the
+  visible register snapshot.
+- **Design, not a general claim:** the synthetic demo still discovers 4 blocks /
+  17 instructions and executes 230,411 guest instructions with 0 fallbacks.
+  Separate synthetic fixtures exercise the expanded ALU with banked state and an
+  ARM `BL`, Thumb ALU/`BL` halves with three fresh fallbacks for the dynamic
+  callee, a dynamic MOV-to-PC fallback, and the existing fallback fixture
+  (2 interpreter steps). These are fixture facts, not evidence that arbitrary
+  retail code can be statically recovered.
 
 ## CLI output and artifacts
 

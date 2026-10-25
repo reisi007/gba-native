@@ -17,6 +17,7 @@ pub mod error;
 pub mod interpret;
 pub mod ir;
 pub mod render;
+pub mod semantics;
 pub mod sha256;
 
 pub use error::{Error, Result};

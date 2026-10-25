@@ -17,7 +17,7 @@ instructions.
 | Area | State |
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
-| ARM/Thumb subset + NZCV + BX state exchange | Implemented and tested |
+| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset; Thumb MUL remains explicit |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
@@ -145,21 +145,29 @@ until implemented and independently verified.
 
 ## Supported subset (short version)
 
-- ARM: `MOV`, `ADD`, `SUB`, `CMP` (register/immediate, no shifts), `B`, `BX`,
-  `MRS`/`MSR` for CPSR/SPSR with the documented field bytes (an empty field mask
-  is rejected), literal `LDR` and immediate `LDRH`/`STRH` with positive or
-  negative pre-indexed offsets, with all 16 conditions. Immediate payloads are
-  classified by bit 25 and independently swept over all imm8/rotation values;
-  unsupported immediate families error rather than aliasing a transfer.
+- ARM: all sixteen data-processing operations (`AND`, `EOR`, `SUB`, `RSB`,
+  `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`,
+  `MVN`) with immediate or register operands and LSL/LSR/ASR/ROR/RRX shifts by
+  immediate or by the low eight bits of a register; `B`, `BL` and `BX`.
+  Documented PC reads (`+8`, or `+12` for register-specified shifts), ALU PC
+  writes with `S=0`, and PC wrapping are implemented. `S=1` with `Rd=PC`
+  requires an SPSR restore and stays an explicit error; ARMv5/newer exchange
+  encodings are rejected. `MRS`/`MSR`, literal `LDR` and immediate
+  `LDRH`/`STRH` remain as before. Condition fields 0..14 are evaluated; field
+  1111b is reserved and rejected explicitly. Immediate payloads are classified
+  by bit 25 and independently swept over all imm8/rotation values.
 - CPU state: the seven ARM7TDMI modes, shared r0-r7, FIQ-only r8-r12 banking,
   per-exception r13/r14 banks with USER/SYSTEM sharing, and independent
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Exception entry/return, SWI and
   BIOS boot are not implemented.
-- Thumb: `ADD`/`SUB` register and immediate forms, `MOV`/`CMP` immediate,
-  register `CMP`, high-register `MOV`/`CMP`, `BX`, literal `LDR`,
-  `LDRH`/`STRH`, conditional and unconditional `B`.
+- Thumb: register ALU operations (all except `MUL`, which is explicit), shift by
+  immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
+  register and immediate forms, high-register `ADD`/`CMP`/`MOV` (including the
+  low/low `MOV`/`CMP` aliases), `ADR`, `ADD PC/SP`, `ADD`/`SUB SP,#imm`, both
+  halves of `BL`, `BX`, literal `LDR`, `LDRH`/`STRH`, and conditional or
+  unconditional `B`. The ARMv5 `BLX` second half and register form are rejected.
 - Memory: exact EWRAM/IWRAM/palette/VRAM/OAM regions, three ROM windows,
   DISPCNT and KEYINPUT. No mirrors, open bus, DMA, timers, interrupts or saves.
 - Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.

@@ -1,6 +1,8 @@
 use super::sign_extend;
 use crate::ir::{Cond, DecodeResult, IrInstr, Op, Src, unsupported};
 
+mod alu;
+
 pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     let raw = raw & 0xFFFF;
     let cond = Cond::Al;
@@ -43,6 +45,10 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
         return Ok(make(op));
     }
 
+    if raw & 0xE000 == 0x0000 {
+        return alu::decode_move_shifted(addr, raw);
+    }
+
     if raw & 0xE000 == 0x2000 {
         let kind = (raw >> 11) & 0x3;
         let rd = ((raw >> 8) & 0x7) as u8;
@@ -76,76 +82,11 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
     }
 
     if raw & 0xFC00 == 0x4000 {
-        let kind = (raw >> 6) & 0xF;
-        let rs = ((raw >> 3) & 0x7) as u8;
-        let rd = (raw & 0x7) as u8;
-        if kind != 0xA {
-            return Err(unsupported_thumb(
-                "only Thumb CMP register is implemented in the ALU group",
-            ));
-        }
-        return Ok(make(Op::Cmp {
-            rn: rd,
-            rhs: Src::Reg(rs),
-        }));
+        return alu::decode_register_alu(addr, raw);
     }
 
     if raw & 0xFC00 == 0x4400 {
-        let kind = (raw >> 8) & 0x3;
-        match kind {
-            0x3 => {
-                if raw & 0x0080 != 0 {
-                    return Err(unsupported_thumb("invalid Thumb BX encoding"));
-                }
-                let rm = ((raw >> 3) & 0xF) as u8;
-                if rm == 15 {
-                    return Err(unsupported_thumb("Thumb BX PC is not implemented"));
-                }
-                return Ok(make(Op::Bx { rm }));
-            }
-            0x2 => {
-                let rd = (((raw >> 7) & 1) << 3 | (raw & 0x7)) as u8;
-                let rs = (((raw >> 6) & 1) << 3 | ((raw >> 3) & 0x7)) as u8;
-                if raw & 0x00C0 == 0 {
-                    return Err(unsupported_thumb(
-                        "Thumb high-register MOV requires a high register bit",
-                    ));
-                }
-                if rd == 15 || rs == 15 {
-                    return Err(unsupported_thumb(
-                        "Thumb high-register MOV with PC is not implemented",
-                    ));
-                }
-                return Ok(make(Op::Mov {
-                    rd,
-                    src: Src::Reg(rs),
-                    set_flags: false,
-                }));
-            }
-            0x1 => {
-                let rn = (((raw >> 7) & 1) << 3 | (raw & 0x7)) as u8;
-                let rs = (((raw >> 6) & 1) << 3 | ((raw >> 3) & 0x7)) as u8;
-                if raw & 0x00C0 == 0 {
-                    return Err(unsupported_thumb(
-                        "Thumb high-register CMP requires a high register bit",
-                    ));
-                }
-                if rn == 15 || rs == 15 {
-                    return Err(unsupported_thumb(
-                        "Thumb high-register CMP with PC is not implemented",
-                    ));
-                }
-                return Ok(make(Op::Cmp {
-                    rn,
-                    rhs: Src::Reg(rs),
-                }));
-            }
-            _ => {
-                return Err(unsupported_thumb(
-                    "Thumb high-register ADD is not implemented",
-                ));
-            }
-        }
+        return alu::decode_hi_register(addr, raw);
     }
 
     if raw & 0xF800 == 0x4800 {
@@ -153,6 +94,17 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
         let base = addr.wrapping_add(4) & !3;
         let target = base.wrapping_add((raw & 0xFF) * 4);
         return Ok(make(Op::LdrLiteral { rd, addr: target }));
+    }
+
+    if raw & 0xF000 == 0x5000 {
+        return Err(unsupported_thumb(
+            "Thumb register-offset word transfers are not implemented",
+        ));
+    }
+    if raw & 0xE000 == 0x6000 {
+        return Err(unsupported_thumb(
+            "Thumb immediate-offset word transfers are not implemented",
+        ));
     }
 
     if raw & 0xF000 == 0x8000 {
@@ -166,6 +118,67 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
             Op::StrHalf { rd, rn: rb, offset }
         };
         return Ok(make(op));
+    }
+
+    if raw & 0xF000 == 0x9000 {
+        return Err(unsupported_thumb(
+            "Thumb SP-relative transfers are not implemented",
+        ));
+    }
+
+    if raw & 0xF000 == 0xA000 {
+        let rd = ((raw >> 8) & 0x7) as u8;
+        let offset = (raw & 0xFF) * 4;
+        if raw & 0x0800 == 0 {
+            // ADR: address generation uses the word-aligned PC+4 value.
+            let value = (addr.wrapping_add(4) & !3).wrapping_add(offset);
+            return Ok(make(Op::Mov {
+                rd,
+                src: Src::Imm { value, carry: None },
+                set_flags: false,
+            }));
+        }
+        return Ok(make(Op::Add {
+            rd,
+            rn: 13,
+            rhs: Src::Imm {
+                value: offset,
+                carry: None,
+            },
+            set_flags: false,
+        }));
+    }
+
+    if raw & 0xFF00 == 0xB000 {
+        let subtract = raw & 0x0080 != 0;
+        let offset = (raw & 0x7F) * 4;
+        let rhs = Src::Imm {
+            value: offset,
+            carry: None,
+        };
+        let op = if subtract {
+            Op::Sub {
+                rd: 13,
+                rn: 13,
+                rhs,
+                set_flags: false,
+            }
+        } else {
+            Op::Add {
+                rd: 13,
+                rn: 13,
+                rhs,
+                set_flags: false,
+            }
+        };
+        return Ok(make(op));
+    }
+
+    if raw & 0xF000 == 0xB000 {
+        return Err(unsupported_thumb("Thumb PUSH/POP are not implemented"));
+    }
+    if raw & 0xF000 == 0xC000 {
+        return Err(unsupported_thumb("Thumb LDM/STM are not implemented"));
     }
 
     if raw & 0xF000 == 0xD000 {
@@ -193,26 +206,25 @@ pub fn decode_thumb(addr: u32, raw: u32) -> DecodeResult {
         return Ok(make(Op::B { target }));
     }
 
-    if raw & 0xF000 == 0xF000 {
+    if raw & 0xF800 == 0xE800 {
         return Err(unsupported_thumb(
-            "Thumb BL/long-branch encodings are not implemented",
+            "Thumb BLX second half (ARMv5) is not implemented",
         ));
     }
-    if raw & 0xF000 == 0xB000 {
-        return Err(unsupported_thumb("Thumb PUSH/POP are not implemented"));
+
+    if raw & 0xF800 == 0xF000 {
+        let high = sign_extend(raw & 0x7FF, 11) << 12;
+        let lr = addr.wrapping_add(4).wrapping_add(high as u32);
+        return Ok(make(Op::BlHigh { lr }));
     }
-    if raw & 0xF000 == 0xC000 {
-        return Err(unsupported_thumb("Thumb LDM/STM are not implemented"));
+
+    if raw & 0xF800 == 0xF800 {
+        return Ok(make(Op::BlLow {
+            offset: (raw & 0x7FF) << 1,
+        }));
     }
-    if raw & 0xF000 == 0x9000 {
-        return Err(unsupported_thumb(
-            "Thumb SP-relative transfers are not implemented",
-        ));
-    }
-    if raw & 0xF000 == 0xA000 {
-        return Err(unsupported_thumb("Thumb ADR/SP-adjust are not implemented"));
-    }
+
     Err(unsupported_thumb(
-        "Thumb shift/register-offset transfer family is not implemented",
+        "unimplemented Thumb instruction encoding",
     ))
 }

@@ -31,13 +31,20 @@ Relevant anchors actually consulted for this milestone:
 - `#arm-cpu-memory-alignments`: aligned stores, rotated ARM7 word reads,
   odd-address LDRH rotation and LDRSH/LDRSB note.
 - `#arm-opcodes-branch-and-branch-with-link-b-bl-bx-blx-swi-bkpt`.
-- `#arm-opcodes-data-processing-alu`.
+- `#arm-opcodes-data-processing-alu` and `#second-operand-op2`: all sixteen
+  opcodes, shift kinds, zero-shift specials and CPSR flag rules.
+- `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
+  register-specified shifts, and PC write behavior.
+- `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC
+  alignment in ARM/Thumb state.
 - `#arm-opcodes-memory-single-data-transfer-ldr-str-pld`.
 - `#arm-opcodes-memory-halfword-doubleword-and-signed-data-transfer`.
 - `#thumb-instruction-summary`.
-- `#thumb-opcodes-register-operations-alu-bx`.
+- `#thumb-opcodes-register-operations-alu-bx`: move-shifted register,
+  add/subtract, ALU opcodes, high-register operations and BX.
 - `#thumb-opcodes-memory-loadstore-ldrstr`.
-- `#thumb-opcodes-jumps-and-calls`.
+- `#thumb-opcodes-jumps-and-calls`: conditional/unconditional branches and the
+  two-half BL/BLX encoding.
 - `#lcd-io-display-control`, `#lcd-vram-bitmap-bg-modes`.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and

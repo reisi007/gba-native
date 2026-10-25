@@ -104,10 +104,56 @@ pub fn discover(
                     }
                     break;
                 }
+                Op::Bl { target } => {
+                    // A call is followed to its callee and to its return
+                    // address. Both are bounded by the same global limits and
+                    // are never assumed to be code outside ROM.
+                    stats.bl_calls += 1;
+                    enqueue(&mut queue, cart, &mut stats, target, block_thumb);
+                    stats.bl_returns += 1;
+                    enqueue(
+                        &mut queue,
+                        cart,
+                        &mut stats,
+                        instruction.next_addr(),
+                        block_thumb,
+                    );
+                    break;
+                }
+                Op::BlLow { .. } => {
+                    // The second Thumb half computes its target from LR, so the
+                    // callee is a dynamic dispatch. The return address is known.
+                    stats.dynamic_bl += 1;
+                    stats.bl_returns += 1;
+                    enqueue(
+                        &mut queue,
+                        cart,
+                        &mut stats,
+                        instruction.next_addr(),
+                        block_thumb,
+                    );
+                    break;
+                }
                 Op::Bx { .. } => {
                     if let Some(value) = resolved_bx {
                         enqueue(&mut queue, cart, &mut stats, value & !1, value & 1 != 0);
                     }
+                    if instruction.cond != Cond::Al {
+                        enqueue(
+                            &mut queue,
+                            cart,
+                            &mut stats,
+                            instruction.next_addr(),
+                            block_thumb,
+                        );
+                    }
+                    break;
+                }
+                _ if instruction.op.writes_pc() => {
+                    // MOV/ALU writes to R15 are not statically followed: the
+                    // value is a dynamic dispatch target. A false condition
+                    // falls through, so that continuation stays discoverable.
+                    stats.pc_writes += 1;
                     if instruction.cond != Cond::Al {
                         enqueue(
                             &mut queue,
@@ -169,10 +215,14 @@ fn update_constants(constants: &mut [Option<u32>; 16], instruction: IrInstr, car
     if instruction.writes_cpsr_control() {
         constants[8..=14].fill(None);
     }
-    if instruction.cond != Cond::Al {
-        if let Some(rd) = written_register(instruction) {
-            constants[rd as usize] = None;
+    // Conservative invalidation for every register the instruction can write.
+    // Conditional instructions clear the constant on both paths.
+    for (index, slot) in constants.iter_mut().enumerate() {
+        if instruction.writes_register(index as u8) {
+            *slot = None;
         }
+    }
+    if instruction.cond != Cond::Al {
         return;
     }
     match instruction.op {
@@ -181,27 +231,11 @@ fn update_constants(constants: &mut [Option<u32>; 16], instruction: IrInstr, car
             src: Src::Imm { value, .. },
             ..
         } => constants[rd as usize] = Some(value),
-        Op::Mov { rd, .. } => constants[rd as usize] = None,
-        Op::Add { rd, .. } | Op::Sub { rd, .. } => constants[rd as usize] = None,
         Op::LdrLiteral { rd, addr } => {
             constants[rd as usize] = cart
                 .read_u32(addr & !3)
                 .map(|word| word.rotate_right((addr & 3) * 8));
         }
-        Op::LdrHalf { rd, .. } => constants[rd as usize] = None,
-        Op::Mrs { rd, .. } => constants[rd as usize] = None,
-        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => {}
-    }
-}
-
-fn written_register(instruction: IrInstr) -> Option<u8> {
-    match instruction.op {
-        Op::Mov { rd, .. }
-        | Op::Add { rd, .. }
-        | Op::Sub { rd, .. }
-        | Op::LdrLiteral { rd, .. }
-        | Op::LdrHalf { rd, .. }
-        | Op::Mrs { rd, .. } => Some(rd),
-        Op::Cmp { .. } | Op::B { .. } | Op::Bx { .. } | Op::StrHalf { .. } | Op::Msr { .. } => None,
+        _ => {}
     }
 }

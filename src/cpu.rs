@@ -398,6 +398,28 @@ pub fn sub_flags(a: u32, b: u32) -> (u32, bool, bool) {
     (result, no_borrow, overflow)
 }
 
+/// ADC: `a + b + carry_in`. Returns `(result, carry-out, signed overflow)`.
+/// The carry flag is a full unsigned carry and V follows the signed sum; the
+/// caller must evaluate the operand (including RRX) before using the old C.
+pub fn adc_flags(a: u32, b: u32, carry_in: bool) -> (u32, bool, bool) {
+    let wide = u64::from(a) + u64::from(b) + u64::from(carry_in);
+    let result = wide as u32;
+    let carry = wide > u64::from(u32::MAX);
+    let overflow = ((a ^ result) & (b ^ result) & 0x8000_0000) != 0;
+    (result, carry, overflow)
+}
+
+/// SBC: `a - b - !carry_in`. Returns `(result, no-borrow carry, overflow)`.
+/// The borrow-in is derived from the *old* C flag; callers evaluate Op2 first.
+pub fn sbc_flags(a: u32, b: u32, carry_in: bool) -> (u32, bool, bool) {
+    let borrow = u64::from(!carry_in);
+    let wide = u64::from(a).wrapping_sub(u64::from(b)).wrapping_sub(borrow);
+    let result = wide as u32;
+    let no_borrow = u64::from(a) >= u64::from(b) + borrow;
+    let overflow = ((a ^ b) & (a ^ result) & 0x8000_0000) != 0;
+    (result, no_borrow, overflow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

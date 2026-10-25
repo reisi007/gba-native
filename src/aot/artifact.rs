@@ -34,6 +34,15 @@ pub struct DiscoveryStats {
     pub instructions: usize,
     pub resolved_bx: usize,
     pub dynamic_bx: usize,
+    /// ARM `BL` callees followed during discovery.
+    pub bl_calls: usize,
+    /// Return continuations followed after a call (ARM `BL` or the second
+    /// Thumb long-branch half).
+    pub bl_returns: usize,
+    /// Thumb long-branch second halves whose callee is a dynamic LR target.
+    pub dynamic_bl: usize,
+    /// Straight-line blocks terminated by an ALU/MOV write to R15.
+    pub pc_writes: usize,
     pub decode_stops: usize,
     pub external_targets: usize,
     /// Number of blocks cut at `max_block_instructions` and resumed from the

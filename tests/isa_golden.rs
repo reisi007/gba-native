@@ -12,7 +12,7 @@ use gba_native::cpu::Cpu;
 use gba_native::decode::decode_arm;
 use gba_native::error::Error;
 use gba_native::interpret;
-use gba_native::ir::{Cond, Op, Src};
+use gba_native::ir::{AluOpcode, Cond, Op, Src};
 
 const INITIAL_FLAGS: (bool, bool, bool, bool) = (true, true, false, true);
 
@@ -230,16 +230,22 @@ fn exact_problem_encodings_are_classified_by_bit25_not_low_nibble() {
         }
     );
 
-    // BIC r0,r1,#0xB0 is outside the subset. It must not alias STRH r0,[r1].
-    let bic = decode_arm(0x0800_0004, 0xE3C1_00B0).expect_err("BIC rejected");
-    assert!(matches!(
-        bic,
-        Error::UnsupportedInstruction {
-            raw: 0xE3C1_00B0,
-            thumb: false,
-            ..
+    // BIC r0,r1,#0xB0 must be a data-processing instruction, not STRH r0,[r1].
+    assert_eq!(
+        decode_arm(0x0800_0004, 0xE3C1_00B0)
+            .expect("BIC immediate")
+            .op,
+        Op::Alu {
+            opcode: AluOpcode::Bic,
+            rd: Some(0),
+            rn: 1,
+            rhs: Src::Imm {
+                value: 0xB0,
+                carry: None
+            },
+            set_flags: false
         }
-    ));
+    );
 
     // CMP with Rd != 0 is malformed and must not alias STRH r1,[r0].
     let malformed = decode_arm(0x0800_0008, 0xE350_10B4).expect_err("malformed CMP rejected");
@@ -255,7 +261,7 @@ fn exact_problem_encodings_are_classified_by_bit25_not_low_nibble() {
 #[test]
 fn rejected_alias_candidates_leave_guest_memory_unchanged() {
     let cases = [
-        (0xE3C1_00B0u32, 1u8), // BIC would have aliased STRH r0,[r1]
+        (0xE120_F000u32, 0u8), // empty-mask MSR would have aliased STRH r0,[r0]
         (0xE350_10B4u32, 0u8), // malformed CMP would have aliased STRH r1,[r0]
     ];
     for (raw, base_register) in cases {

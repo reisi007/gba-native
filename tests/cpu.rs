@@ -220,7 +220,7 @@ fn unsupported_encodings_are_rejected_without_state_progress() {
     ));
     assert_eq!(cpu.pc(), EWRAM_BASE);
 
-    let (mut cpu, mut bus) = arm(&[0xE1A0_F000]); // MOV pc,r0
+    let (mut cpu, mut bus) = arm(&[0xE1B0_F000]); // MOVS pc,r0 needs SPSR restore
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })
@@ -266,13 +266,13 @@ fn unsupported_encodings_are_rejected_without_state_progress() {
         })
     ));
 
-    let (mut cpu, mut bus) = thumb(&[0x0001]); // LSL immediate
+    let (mut cpu, mut bus) = thumb(&[0x4340]); // MUL remains explicitly unsupported
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })
     ));
 
-    let (mut cpu, mut bus) = thumb(&[0x4600]); // reserved low/low MOV encoding
+    let (mut cpu, mut bus) = thumb(&[0x4400]); // reserved low/low high-register ADD
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })

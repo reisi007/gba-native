@@ -10,7 +10,7 @@ use gba_native::cpu::{Cpu, FLAG_F, FLAG_I, FLAG_T, Mode};
 use gba_native::decode::decode_arm;
 use gba_native::error::Error;
 use gba_native::interpret;
-use gba_native::ir::{Cond, Op, Psr, PsrSrc};
+use gba_native::ir::{AluOpcode, Cond, Op, Psr, PsrSrc};
 
 fn cart() -> Cartridge {
     Cartridge::from_bytes(vec![0u8; 0x200]).expect("synthetic cart")
@@ -96,7 +96,13 @@ fn psr_transfer_decoding_and_rotated_immediate_are_exact() {
         decode_arm(0, 0xE350_00B0).expect("CMP immediate").op,
         Op::Cmp { .. }
     ));
-    assert!(decode_arm(0, 0xE3C1_00B0).is_err());
+    assert!(matches!(
+        decode_arm(0, 0xE3C1_00B0).expect("BIC immediate").op,
+        Op::Alu {
+            opcode: AluOpcode::Bic,
+            ..
+        }
+    ));
 }
 
 #[test]
