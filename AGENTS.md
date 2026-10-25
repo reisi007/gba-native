@@ -26,7 +26,20 @@ The documented entry points are:
 ./scripts/full.sh    # short + debug/release tests, demo, native proof, Ratchet slow
 ```
 
-CI runs the same two scripts. The underlying gates remain:
+The optional synthetic GPU frontend is a separate package and gate:
+
+```text
+./scripts/frontend.sh
+```
+
+It is not part of `short.sh`/`full.sh`, does not require Ratchet and never opens
+a GPU window. It overrides `CARGO_TARGET_DIR` to the root-level ignored
+`target/frontend` before any frontend Cargo command. Never run frontend Cargo
+from inside `apps/desktop/` without a root-level target: generated
+`apps/desktop/target/*.rs` files would enter the maintained-source scan.
+
+CI runs the same two scripts. The optional frontend workflow runs
+`scripts/frontend.sh` separately. The underlying gates remain:
 
 ```text
 cargo fmt --check
@@ -126,6 +139,8 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   (`artifact.rs`), Rust emission (`emit.rs`), report parsing (`report.rs`),
   harness build/run (`harness.rs`) and tests.
 - `src/main.rs`, `src/cli/`: CLI dispatch, commands and safe `output/` writes.
+- `apps/desktop/`: optional, separate synthetic Winit/Pixels/WGPU package with
+  its own workspace/lockfile; no core dependency changes and no ROM surface.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: header/bus/CPU/display/demo tests, independent ISA golden vectors,

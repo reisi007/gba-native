@@ -1,0 +1,33 @@
+name: Frontend
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: frontend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      # actions/checkout v7.0.1, verified from the official tag:
+      # https://api.github.com/repos/actions/checkout/git/ref/tags/v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      # The same optional gate a developer runs locally. It compiles, lints,
+      # unit-tests and checks --help. It never opens a GPU window, so the job
+      # does not claim live rendering or a visible frame on any OS.
+      - name: Optional frontend gate (no live GPU window)
+        run: bash scripts/frontend.sh

@@ -16,6 +16,11 @@ native 240x160 image. PPM output needs no platform graphics dependency. This
 establishes a tested baseline only: **it is neither FSR nor DLSS nor AI
 upscaling**.
 
+The optional, separate `apps/desktop` package adds a Winit/Pixels/WGPU window
+for the same static synthetic snapshot, with pixel-perfect integer scaling and
+a black letterbox. It is not integrated into the std-only core, accepts no
+cartridge and is not a vendor backend. See `docs/gpu-frontend.md`.
+
 | Backend name | CLI value | Status |
 | --- | --- | --- |
 | Nearest | `nearest` | Implemented CPU reference |
@@ -25,8 +30,10 @@ upscaling**.
 | DLSS Super Resolution | `dlss` | Explicitly unsupported, error |
 
 Selecting any unimplemented vendor backend returns `UnsupportedBackend`. It is
-never silently replaced by nearest-neighbor. No GPU detection claim is made:
-this build has no graphics device, shader, model, weights or vendor SDK.
+never silently replaced by nearest-neighbor. No GPU detection claim is made.
+The default core build has no graphics device, shader, model, weights or vendor
+SDK. The optional desktop package creates a Pixels/WGPU surface only to present
+the synthetic bitmap; it integrates no vendor backend.
 
 ## Intended separation
 

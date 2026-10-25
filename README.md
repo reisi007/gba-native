@@ -1,9 +1,11 @@
 # gba-native
 
 **Experimental, documentation-driven hybrid GBA-to-native prototype.** This is
-not a playable emulator. It does not boot a BIOS or retail cartridges, has no
-GPU/vendor upscaling integration, and has no successful REA native-analysis
-evidence. It is **not** a certified separate-team legal clean-room project.
+not a playable emulator. It does not boot a BIOS or retail cartridges and has no
+vendor upscaling integration. An optional, separate desktop package can present
+the static synthetic bitmap through a real Pixels/WGPU window; that window is
+not a playable frontend. There is no successful REA native-analysis evidence.
+It is **not** a certified separate-team legal clean-room project.
 
 The repository currently contains a small, deliberately bounded ARMv4T subset,
 a bitmap snapshot renderer, a typed intermediate representation, a reference
@@ -25,6 +27,7 @@ instructions.
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
 | Runtime fallback | Reference interpreter; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
+| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
@@ -66,11 +69,22 @@ cargo run -- aot emit <rom.gba> <generated.rs>
 - Scaling is integer nearest-neighbor only, with exact 3:2 centering and black
   letterboxing. Vendor backends are rejected with a clear error.
 
+The optional frontend is a separate package (`apps/desktop/`, its own Cargo
+workspace and lockfile) and is not part of the default std-only core graph:
+
+```text
+./scripts/frontend.sh   # optional: hard line gate, fmt, clippy, unit tests, build, --help
+```
+
+The gate never opens a GPU window. GUI smoke and the exact artifact rules are in
+[`docs/gpu-frontend.md`](docs/gpu-frontend.md).
+
 ## Build and test
 
 ```text
-./scripts/short.sh   # fast: hard 500-line gate, Ratchet fast, fmt, clippy, fast tests
-./scripts/full.sh    # short + debug/release tests, demo, native proof, Ratchet slow
+./scripts/short.sh     # fast: hard 500-line gate, Ratchet fast, fmt, clippy, fast tests
+./scripts/full.sh      # short + debug/release tests, demo, native proof, Ratchet slow
+./scripts/frontend.sh  # optional separate package: no Ratchet, no live GPU window
 ```
 
 The underlying gates are `cargo fmt --check`,
@@ -93,12 +107,20 @@ any working directory. The pinned source can be built from the `v0.5.0` tag of
 
 Every maintained Rust source/test file is limited to 500 physical lines
 (blank and comment lines included, a trailing newline adds no phantom line).
-The root-level `target/`, `output/` and `.git` directories hold generated
+That population includes `apps/desktop/src` and the frontend tests. The
+root-level `target/`, `output/` and `.git` directories hold generated
 build/runtime or version-control artifacts and are not part of the maintained
 source population. The exemption is positional: a nested directory with one of
-those names, such as `src/output/`, is scanned like any other source directory.
-`scripts/short.sh` and CI run the hard limit directly, so the zero-debt Ratchet
-baseline cannot be edited to dilute it.
+those names, such as `src/output/` or `apps/desktop/target/`, is scanned like
+any other source directory. `scripts/short.sh`, `scripts/frontend.sh` and CI run
+the hard limit directly, so the zero-debt Ratchet baseline cannot be edited to
+dilute it.
+
+`scripts/frontend.sh` overrides `CARGO_TARGET_DIR` to the root-level ignored
+`target/frontend` before any frontend Cargo command. Do not run frontend Cargo
+directly inside `apps/desktop/` without setting a root-level target: the
+checked-in `apps/desktop/.gitignore` hides generated files from Git but is not a
+quality-scan exemption.
 
 The native integration test requires only the installed Cargo/rustc. It creates
 a fresh generated crate in an owned temporary directory, uses `--offline` and a

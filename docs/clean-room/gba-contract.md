@@ -12,7 +12,10 @@ not a roadmap promise and not a retail-game compatibility statement.
 - No BIOS is supplied or executed; direct entry is a test policy.
 - ARM7TDMI PSR transfers and MSR-driven register banking are implemented for
   this subset. Exception entry/return, SWI and BIOS boot remain absent.
-- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated.
+- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. An optional,
+  separate `apps/desktop` package presents the synthetic snapshot in a real
+  Winit/Pixels/WGPU window; it is not a playable/retail frontend and adds no
+  core dependency.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
 - Instruction counts are budgets, not cycles or frames.
@@ -230,9 +233,14 @@ PPU.
   transforms and scanline effects are absent. Mosaic/blending registers are
   unsupported I/O, so they cannot be enabled through this bus.
 
-Presentation (`upscaling.md`): integer nearest-neighbor only, exact 3:2 content,
-centered black bars, output dimensions 1..=4096 and at least 240x160. FSR1,
-temporal FSR, ML-FSR and DLSS names return `UnsupportedBackend`.
+Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
+nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output
+dimensions 1..=4096 and at least 240x160. FSR1, temporal FSR, ML-FSR and DLSS
+names return `UnsupportedBackend`. The optional, separate `apps/desktop` package
+presents the same static synthetic snapshot through Pixels/WGPU with
+pixel-perfect integer scaling and a black letterbox; it is not part of the
+std-only core or this PPM backend and is not a vendor upscaler. Its exact
+boundary is in `docs/gpu-frontend.md`.
 
 ## Typed IR and interpreter
 
@@ -299,7 +307,10 @@ already-expanded immediate source.
 ## CLI output and artifacts
 
 `info`, `demo`, `run`, `aot proof` and `aot emit` are documented in `README.md`.
-PPM is the only image output; there is no window frontend.
+PPM is the only image output of the core CLI. The optional, separate
+`apps/desktop` package can present the static synthetic snapshot in a
+Winit/Pixels window; it accepts no cartridge path, is not built by the default
+workspace and is not a core CLI output format. See `docs/gpu-frontend.md`.
 
 - Generated files are restricted to `<cwd>/output/...`. Relative paths resolve
   against the process working directory; absolute paths are accepted only when
