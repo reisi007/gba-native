@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod aot;
+pub mod bios;
 pub mod bus;
 pub mod cart;
 pub mod cpu;
