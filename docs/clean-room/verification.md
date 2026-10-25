@@ -402,7 +402,7 @@ observations, not a generated inventory:
 - Maintained Rust population: 73 files (including `apps/desktop/src` and the
   workspace/frontend contract tests); maximum 481 physical lines
   (`crates/core/src/cpu.rs`) and the next largest maintained files are
-  `tests/workspace_contract.rs` at 457 lines and
+  `tests/workspace_contract.rs` at 457 lines, `crates/core/src/bus.rs` at 449, and
   `crates/core/tests/bios_memory_copy.rs` at 447 lines. The code meets the hard
   limit without a baseline exemption or hand-edited baseline. The earlier
   501-line/nested-directory boundary tests are unchanged in

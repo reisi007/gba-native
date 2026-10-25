@@ -4,9 +4,10 @@ Status: design and implementation foundation for the synthetic fixture only.
 This is not a playable emulator, not frame/cycle timing, not a retail-content
 claim and not evidence of FSR, DLSS, AI reconstruction or vendor upscaling.
 
-Decision context: `docs/decisions.md` D9 selects a GPU presentation direction
-with an isolated frontend crate, a std-only default core and a possible future
-WebGPU target. Existing core non-claims still apply.
+Decision context: `docs/decisions.md` D9 selects an isolated GPU frontend and a
+std-only default core. D11 makes Web a first-class target with WebGPU/WebGL2
+presentation; no browser implementation is claimed yet. Existing core
+non-claims still apply.
 
 ## Boundary
 
@@ -105,7 +106,7 @@ surfaces.
 
 A later custom-shader path can use `Pixels::render_with` and its
 `CommandEncoder`/render target/`PixelsContext`; it is not implemented here.
-A later browser/WebGPU target is only a feasibility direction:
+The first-class browser target still needs a separate implementation:
 
 - Pixels offers async construction for Web targets, but this crate uses the
   native blocking path;
