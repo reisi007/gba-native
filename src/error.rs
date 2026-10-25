@@ -56,6 +56,9 @@ pub enum Error {
     /// A structurally valid MRS/MSR whose documented execution is restricted
     /// (for example SPSR access in USER/SYSTEM or a T-bit change).
     Psr(&'static str),
+    /// An explicit BIOS HLE service failure. Unsupported, waiting and invalid
+    /// requests are never reported as a successful no-op.
+    Bios(crate::bios::BiosError),
     UnsupportedDisplayMode {
         mode: u16,
     },
@@ -137,6 +140,7 @@ impl fmt::Display for Error {
                 width = if *thumb { 4 } else { 8 }
             ),
             Error::Psr(reason) => write!(f, "PSR access: {reason}"),
+            Error::Bios(source) => write!(f, "BIOS HLE: {source}"),
             Error::UnsupportedDisplayMode { mode } => {
                 write!(
                     f,
