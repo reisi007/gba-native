@@ -16,7 +16,26 @@ use crate::model::{BrowserBackend, IMAGE_HEIGHT, IMAGE_WIDTH, Resolution};
 use crate::presentation::RgbaImage;
 
 use super::dom;
-use super::status::DeviceReport;
+use super::status::{self, DeviceReport};
+
+const GPU_CONSOLE_TEXT_LIMIT_BYTES: usize = 1_024;
+const TRUNCATION_MARKER: &str = "… [truncated]";
+
+fn gpu_console_text(category: &str, detail: &str) -> String {
+    let prefix = format!("gba-native-web {category}: ");
+    let available = GPU_CONSOLE_TEXT_LIMIT_BYTES.saturating_sub(prefix.len());
+    if detail.len() <= available {
+        return format!("{prefix}{detail}");
+    }
+
+    let keep_bytes = available.saturating_sub(TRUNCATION_MARKER.len());
+    let detail_prefix = detail
+        .char_indices()
+        .take_while(|(index, character)| *index + character.len_utf8() <= keep_bytes)
+        .map(|(_, character)| character)
+        .collect::<String>();
+    format!("{prefix}{detail_prefix}{TRUNCATION_MARKER}")
+}
 
 #[derive(Clone, Debug)]
 pub enum GpuError {
@@ -122,8 +141,15 @@ pub async fn build(
         max_buffer_size: limits.max_buffer_size,
     };
 
+    pixels.device().on_uncaptured_error(Arc::new(|error| {
+        let message = gpu_console_text("uncaptured GPU error", &error.to_string());
+        status::console_error(&message);
+    }));
     pixels.device().set_device_lost_callback(|reason, message| {
-        dom::mark_lost(format!("WebGPU device lost ({reason:?}): {message}"));
+        let detail = format!("WebGPU device lost ({reason:?}): {message}");
+        let console_message = gpu_console_text("device loss", &detail);
+        status::console_error(&console_message);
+        dom::mark_lost(detail);
     });
 
     Ok(BuiltSurface { pixels, report })
@@ -142,4 +168,43 @@ pub fn copy_frame(pixels: &mut Pixels<'_>, image: &RgbaImage) -> Result<(), Stri
     }
     frame.copy_from_slice(image.rgba());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GPU_CONSOLE_TEXT_LIMIT_BYTES, gpu_console_text};
+
+    #[test]
+    fn gpu_console_diagnostics_keep_category_and_bound_long_causes() {
+        let short = gpu_console_text(
+            "device loss",
+            "WebGPU device lost (OutOfMemory): synthetic allocation failure",
+        );
+        assert!(short.contains("device loss: WebGPU device lost (OutOfMemory)"));
+        assert!(short.contains("synthetic allocation failure"));
+
+        let long_loss = gpu_console_text(
+            "device loss",
+            &format!("WebGPU device lost (OutOfMemory): {}", "x".repeat(2_000)),
+        );
+        assert!(
+            long_loss.starts_with("gba-native-web device loss: WebGPU device lost (OutOfMemory):")
+        );
+        assert!(long_loss.ends_with("… [truncated]"));
+        assert!(long_loss.len() <= GPU_CONSOLE_TEXT_LIMIT_BYTES);
+
+        let long_unicode =
+            gpu_console_text("device loss", &format!("原因: {}", "💥".repeat(1_000)));
+        assert!(long_unicode.starts_with("gba-native-web device loss: 原因: "));
+        assert!(long_unicode.ends_with("… [truncated]"));
+        assert!(long_unicode.len() <= GPU_CONSOLE_TEXT_LIMIT_BYTES);
+
+        let long = gpu_console_text(
+            "uncaptured GPU error",
+            &format!("validation failure: {}", "x".repeat(2_000)),
+        );
+        assert!(long.starts_with("gba-native-web uncaptured GPU error: validation failure:"));
+        assert!(long.ends_with("… [truncated]"));
+        assert!(long.len() <= GPU_CONSOLE_TEXT_LIMIT_BYTES);
+    }
 }

@@ -39,21 +39,193 @@ const WEBGPU_STABILITY_STEP_TIMEOUT_MS = 3_000;
 const WEBGPU_STABILITY_FRAMES = 8;
 const DISCLAIMER = 'Experimental synthetic GPU demo; no playable ROM, saves or game input yet.';
 
-type Fixtures = {
-  problems: string[];
-  requests: string[];
+type Fixtures = { failureDiagnostics: void; requests: string[] };
+
+const DIAGNOSTIC_STATUS_FIELDS = [
+  'disposition', 'state', 'message', 'requested', 'actual', 'autoFallback', 'action', 'detail',
+  'backend', 'adapterName', 'deviceType', 'driver', 'driverInfo', 'vendorId', 'deviceId',
+  'surfaceFormat', 'renderFormat', 'presentMode', 'presented', 'viewportX', 'viewportY',
+  'viewportWidth', 'viewportHeight', 'viewportScale', 'viewportClipped',
+];
+
+type BrowserEvent = {
+  kind: string;
+  type?: string;
+  text?: string;
+  url?: string;
+  error?: string;
 };
 
+const PROBLEM_SAMPLE_LIMIT = 20;
+const PROBLEM_TEXT_LIMIT = 1_000;
+
+type ProblemSummary = { total: number; truncated: boolean; sample: string[] };
+
+function createProblemCollector() {
+  let total = 0;
+  const sample: string[] = [];
+  return {
+    add(problem: string): void {
+      total += 1;
+      if (sample.length < PROBLEM_SAMPLE_LIMIT) {
+        sample.push(problem.slice(0, PROBLEM_TEXT_LIMIT));
+      }
+    },
+    snapshot(): ProblemSummary {
+      return { total, truncated: total > sample.length, sample: [...sample] };
+    },
+  };
+}
+
+function problemFailureMessage(summary: ProblemSummary): string {
+  return `console/page errors: ${summary.total}; sample truncated: ${summary.truncated}\n${summary.sample.join('\n')}`;
+}
+
+const browserEventTrails = new WeakMap<Page, BrowserEvent[]>();
+
+async function browserDiagnosticSnapshot(page: Page, reason: string): Promise<unknown> {
+  return page.evaluate(({ reason, fields }) => {
+    const api = (window as unknown as {
+      __gbaNative?: {
+        state?: () => string;
+        status?: () => unknown;
+        statusHistory?: () => unknown[];
+      };
+    }).__gbaNative;
+    const pick = (value: unknown): unknown => {
+      if (value === null || typeof value !== 'object') return value ?? null;
+      const record = value as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+      for (const key of ['atMs', 'phase', ...fields]) {
+        if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+        const field = record[key];
+        if (typeof field === 'string') result[key] = field.slice(0, 500);
+        else if (typeof field === 'number' || typeof field === 'boolean' || field === null) {
+          result[key] = field;
+        }
+      }
+      return result;
+    };
+    const byId = (id: string) => document.getElementById(id);
+    const rect = (element: Element | null) => {
+      if (!element) return null;
+      const box = element.getBoundingClientRect();
+      return {
+        x: box.x, y: box.y, top: box.top, right: box.right,
+        bottom: box.bottom, left: box.left, width: box.width, height: box.height,
+      };
+    };
+    const canvas = byId('gba-canvas') as HTMLCanvasElement | null;
+    const canvasStyle = canvas ? getComputedStyle(canvas) : null;
+    const slot = byId('screen-slot');
+    const slotStyle = slot ? getComputedStyle(slot) : null;
+    let currentStatus: unknown = null;
+    let history: unknown[] = [];
+    let statusReadError: string | null = null;
+    try {
+      currentStatus = pick(api?.status?.());
+      history = (api?.statusHistory?.() ?? []).slice(-32).map(pick);
+    } catch (error) {
+      statusReadError = String(error).slice(0, 500);
+    }
+    return {
+      reason,
+      capturedAtMs: Math.round(performance.now()),
+      appPhase: api?.state?.() ?? null,
+      bodyPhase: document.body?.dataset.appState ?? null,
+      currentStatus,
+      statusHistory: history,
+      statusReadError,
+      ui: {
+        statusMessage: byId('status-message')?.textContent?.slice(0, 500) ?? null,
+        statusDetail: byId('status-detail')?.textContent?.slice(0, 500) ?? null,
+        overlayTitle: byId('overlay-title')?.textContent?.slice(0, 300) ?? null,
+      },
+      canvas: canvas ? {
+        width: canvas.width,
+        height: canvas.height,
+        hiddenAttribute: canvas.hidden,
+        ariaHidden: canvas.getAttribute('aria-hidden'),
+        className: canvas.className,
+        computed: {
+          display: canvasStyle?.display ?? null,
+          visibility: canvasStyle?.visibility ?? null,
+          opacity: canvasStyle?.opacity ?? null,
+        },
+        rect: rect(canvas),
+        clientRectCount: canvas.getClientRects().length,
+      } : null,
+      slot: slot ? {
+        ariaBusy: slot.getAttribute('aria-busy'),
+        computed: {
+          display: slotStyle?.display ?? null,
+          visibility: slotStyle?.visibility ?? null,
+        },
+        rect: rect(slot),
+      } : null,
+    };
+  }, { reason, fields: DIAGNOSTIC_STATUS_FIELDS });
+}
+
+async function logCanvasVisibilityFailure(page: Page, original: unknown): Promise<string> {
+  let snapshot: unknown;
+  try {
+    snapshot = await browserDiagnosticSnapshot(page, 'canvas visibility assertion failed');
+  } catch (error) {
+    snapshot = { captureError: String(error).slice(0, 500) };
+  }
+  const serialized = JSON.stringify({
+    snapshot,
+    browserEvents: browserEventTrails.get(page) ?? [],
+  });
+  console.log(`WEB_E2E_CANVAS_VISIBILITY_FAILURE ${serialized}`);
+  return `${String(original)}\nBrowser failure diagnostics: ${serialized}`;
+}
+
 const test = base.extend<Fixtures>({
-  problems: async ({ page }, use) => {
-    const problems: string[] = [];
+  failureDiagnostics: [async ({ page }, use, testInfo) => {
+    const events: BrowserEvent[] = [];
+    const problems = createProblemCollector();
+    browserEventTrails.set(page, events);
+    const addEvent = (event: BrowserEvent) => {
+      if (events.length === 100) events.shift();
+      events.push(event);
+    };
     page.on('console', (message) => {
-      if (message.type() === 'error') problems.push(`console: ${message.text()}`);
+      const text = message.text().slice(0, 1_000);
+      addEvent({ kind: 'console', type: message.type(), text });
+      if (message.type() === 'error') problems.add(`console: ${text}`);
     });
-    page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
-    await use(problems);
-    expect(problems, `console/page errors: ${problems.join('\n')}`).toEqual([]);
-  },
+    page.on('pageerror', (error) => {
+      const text = (error.stack ?? error.message).slice(0, 1_000);
+      addEvent({ kind: 'pageerror', error: text });
+      problems.add(`pageerror: ${text}`);
+    });
+    page.on('requestfailed', (request) => {
+      addEvent({
+        kind: 'requestfailed',
+        url: request.url().slice(0, 1_000),
+        error: (request.failure()?.errorText ?? 'unknown').slice(0, 500),
+      });
+    });
+    await use();
+    const problemSummary = problems.snapshot();
+    if (testInfo.status !== testInfo.expectedStatus || problemSummary.total > 0) {
+      let snapshot: unknown;
+      try {
+        snapshot = await browserDiagnosticSnapshot(page, `failed test: ${testInfo.title}`);
+      } catch (error) {
+        snapshot = { captureError: String(error).slice(0, 500) };
+      }
+      console.log(`WEB_E2E_FAILURE_DIAGNOSTICS ${JSON.stringify({
+        test: testInfo.title,
+        problemSummary,
+        browserEvents: events,
+        snapshot,
+      })}`);
+    }
+    expect(problemSummary.total, problemFailureMessage(problemSummary)).toBe(0);
+  }, { auto: true }],
   requests: async ({ page, baseURL }, use) => {
     const requests: string[] = [];
     page.on('request', (request) => requests.push(request.url()));
@@ -61,6 +233,35 @@ const test = base.extend<Fixtures>({
     const foreign = requests.filter((url) => !url.startsWith(baseURL!));
     expect(foreign, `unexpected external request(s): ${foreign.join(', ')}`).toEqual([]);
   },
+});
+
+test('synthetic browser-error flood keeps diagnostics bounded and counts every error', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    const problems = createProblemCollector();
+    page.on('console', (message) => {
+      if (message.type() === 'error') problems.add(`console: ${message.text()}`);
+    });
+    await page.evaluate(async () => {
+      for (let index = 0; index < 40; index += 1) {
+        console.error(`synthetic diagnostic error ${index}: ${'x'.repeat(1_500)}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await expect.poll(() => problems.snapshot().total).toBe(40);
+
+    const summary = problems.snapshot();
+    expect(summary.truncated).toBe(true);
+    expect(summary.sample).toHaveLength(PROBLEM_SAMPLE_LIMIT);
+    expect(summary.sample.every((problem) => problem.length <= PROBLEM_TEXT_LIMIT)).toBe(true);
+    expect(summary.sample[0]).toContain('synthetic diagnostic error 0');
+    expect(JSON.stringify(summary).length).toBeLessThanOrEqual(
+      PROBLEM_SAMPLE_LIMIT * (PROBLEM_TEXT_LIMIT + 8) + 256,
+    );
+  } finally {
+    await context.close();
+  }
 });
 
 type Status = {
@@ -86,6 +287,7 @@ type Status = {
   viewportClipped?: boolean;
   presented?: number;
   detail?: string;
+  action?: string;
 };
 
 async function waitForState(page: Page, state: string, timeout = 90_000): Promise<void> {
@@ -196,7 +398,11 @@ type Samples = {
 
 async function sampleRenderedCanvas(page: Page, status: Status): Promise<Samples> {
   const canvas = page.locator('#gba-canvas');
-  await expect(canvas).toBeVisible({ timeout: CANVAS_VISIBILITY_TIMEOUT_MS });
+  try {
+    await expect(canvas).toBeVisible({ timeout: CANVAS_VISIBILITY_TIMEOUT_MS });
+  } catch (error) {
+    throw new Error(await logCanvasVisibilityFailure(page, error));
+  }
   const png = await canvas.screenshot({ timeout: SCREENSHOT_TIMEOUT_MS });
   const metrics = await canvas.evaluate((element: HTMLCanvasElement) => ({
     width: element.width,
@@ -399,6 +605,9 @@ async function expectWebGpuConfirmationRedraw(page: Page, status: Status): Promi
           stablePresentationFrames,
           windowResizeEvents: windowResizeEvents - baselineWindowResizeEvents,
           canvasResizeEvents: canvasResizeEvents - baselineCanvasResizeEvents,
+          statusHistory: (window as unknown as {
+            __gbaNative: { statusHistory?: () => unknown[] };
+          }).__gbaNative.statusHistory?.() ?? [],
         };
       }, WEBGPU_STABILITY_FRAMES);
       expect(stability.layoutStable, 'canvas geometry must settle before stability sampling').toBe(true);
@@ -562,6 +771,27 @@ test('permanently blank or hidden canvas fails within the sampler bounds', async
   );
 
   await page.setContent('<canvas id="gba-canvas" width="240" height="160" hidden></canvas>');
+  await page.evaluate(() => {
+    const lostStatus = {
+      state: 'lost',
+      message: 'Synthetic WebGPU device loss for diagnostics regression.',
+      detail: 'synthetic device-loss reason: hidden canvas diagnostic fixture',
+      requested: 'webgpu',
+      actual: 'webgpu',
+      backend: 'BrowserWebGpu',
+      surfaceFormat: 'Bgra8Unorm',
+      presented: 1,
+      opaqueTestSentinel: 'diagnostic-secret-sentinel',
+    };
+    (window as unknown as { __gbaNative: unknown }).__gbaNative = {
+      state: () => 'lost',
+      status: () => lostStatus,
+      statusHistory: () => [
+        { phase: 'ready', state: 'ready', requested: 'webgpu', actual: 'webgpu', presented: 1 },
+        { phase: 'ready', ...lostStatus },
+      ],
+    };
+  });
   const hiddenStarted = Date.now();
   let hiddenFailure = '';
   try {
@@ -573,6 +803,12 @@ test('permanently blank or hidden canvas fails within the sampler bounds', async
   if (!hiddenFailure.includes(`with timeout ${CANVAS_VISIBILITY_TIMEOUT_MS}ms`)) {
     throw new Error(`hidden canvas did not reach the expected visibility timeout: ${hiddenFailure}`);
   }
+  expect(hiddenFailure).toContain('synthetic device-loss reason: hidden canvas diagnostic fixture');
+  expect(hiddenFailure).toContain('"requested":"webgpu"');
+  expect(hiddenFailure).toContain('"actual":"webgpu"');
+  expect(hiddenFailure).toContain('"presented":1');
+  expect(hiddenFailure).toContain('"display":"none"');
+  expect(hiddenFailure).not.toContain('diagnostic-secret-sentinel');
   expect(hiddenElapsed, 'a permanently hidden canvas must not inherit the global expect timeout').toBeLessThan(2_000);
   console.log(`bounded blank-canvas failures: visible=${blankElapsed}ms hidden=${hiddenElapsed}ms`);
 });
@@ -597,6 +833,74 @@ test('unsupported-WebGPU browser uses the explicit WebGL2 path and refuses force
   expect(page.url()).not.toContain('fallback=');
   await expect(page.locator('#screen-overlay')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Restart with selected backend' })).toBeEnabled();
+});
+
+test('invalid backend history bounds a long query without normalizing the diagnostic', async ({ page }) => {
+  const invalidBackend = `invalid-backend-${'x'.repeat(2_048)}`;
+  await openApp(page, `autostart=1&backend=${encodeURIComponent(invalidBackend)}`);
+  await waitForState(page, 'error');
+
+  const diagnostics = await page.evaluate(() => {
+    const api = (window as unknown as {
+      __gbaNative: { status: () => Status; statusHistory: () => Array<Record<string, unknown>> };
+    }).__gbaNative;
+    return { current: api.status(), history: api.statusHistory() };
+  });
+  expect(diagnostics.current.message).toContain('unknown backend');
+  expect(diagnostics.current.requested).toHaveLength(160);
+  expect(diagnostics.current.requested).toMatch(/^invalid-backend-/);
+  expect(diagnostics.current.requested.endsWith('… [truncated]')).toBe(true);
+  expect(diagnostics.history.length).toBeLessThanOrEqual(32);
+  expect(diagnostics.history.some((entry) => entry.state === 'error')).toBe(true);
+  const invalidHistory = diagnostics.history.filter(
+    (entry) => typeof entry.requested === 'string' && entry.requested.startsWith('invalid-backend-'),
+  );
+  expect(invalidHistory.length).toBeGreaterThan(0);
+  for (const entry of invalidHistory) {
+    expect((entry.requested as string).length).toBeLessThanOrEqual(160);
+    expect(entry.requested).toBe(diagnostics.current.requested);
+  }
+});
+
+test('status diagnostics return detached snapshots, including caller-added nested values', async ({ page }) => {
+  await openApp(page, 'autostart=1&backend=webgl2');
+  await expectReady(page);
+
+  const result = await page.evaluate(() => {
+    const api = (window as unknown as {
+      __gbaNative: { status: () => Status; statusHistory: () => Array<Record<string, unknown>> };
+    }).__gbaNative;
+    const returned = api.status() as Status & Record<string, unknown>;
+    const historyBefore = api.statusHistory();
+    const original = {
+      state: returned.state,
+      message: returned.message,
+      requested: returned.requested,
+      presented: returned.presented,
+    };
+    returned.state = 'error';
+    returned.message = 'caller mutation';
+    returned.requested = 'caller mutation';
+    returned.diagnosticMutation = { detail: 'before mutation' };
+    (returned.diagnosticMutation as { detail: string }).detail = 'nested mutation';
+    const next = api.status() as Status & Record<string, unknown>;
+    return {
+      original,
+      historyBefore,
+      historyAfter: api.statusHistory(),
+      next: {
+        state: next.state,
+        message: next.message,
+        requested: next.requested,
+        presented: next.presented,
+      },
+      leakedNestedValue: Object.prototype.hasOwnProperty.call(next, 'diagnosticMutation'),
+    };
+  });
+  expect(result.next).toEqual(result.original);
+  expect(result.historyAfter).toEqual(result.historyBefore);
+  expect(result.leakedNestedValue).toBe(false);
+  await expect(page.locator('#status-message')).not.toContainText('caller mutation');
 });
 
 test('invalid backend is a real configuration error, not a fake frame', async ({ page }) => {
@@ -659,11 +963,11 @@ test('mobile portrait device-pixel-ratio letterbox stays integer and centred', a
     hasTouch: true,
   });
   const page = await context.newPage();
-  const problems: string[] = [];
+  const problems = createProblemCollector();
   page.on('console', (message) => {
-    if (message.type() === 'error') problems.push(message.text());
+    if (message.type() === 'error') problems.add(`console: ${message.text()}`);
   });
-  page.on('pageerror', (error) => problems.push(error.message));
+  page.on('pageerror', (error) => problems.add(`pageerror: ${error.message}`));
   await openApp(page, 'autostart=1&backend=webgl2');
   const status = await expectReady(page);
   const metrics = await page.locator('#gba-canvas').evaluate(async (element: HTMLCanvasElement) => {
@@ -705,7 +1009,8 @@ test('mobile portrait device-pixel-ratio letterbox stays integer and centred', a
   expect(samples.corner).toEqual([0, 0, 0]);
   expect(close(samples.guest[0], GOLDEN[0].rgb)).toBe(true);
   await context.close();
-  expect(problems).toEqual([]);
+  const problemSummary = problems.snapshot();
+  expect(problemSummary.total, problemFailureMessage(problemSummary)).toBe(0);
 });
 
 test('resize re-negotiates the surface with the same static image', async ({ page }, testInfo) => {
@@ -716,6 +1021,15 @@ test('resize re-negotiates the surface with the same static image', async ({ pag
     const status = (window as unknown as { __gbaNative: { status: () => Status } }).__gbaNative.status();
     const canvas = document.querySelector<HTMLCanvasElement>('#gba-canvas');
     if (!canvas || !status || status.state !== 'ready') return false;
+    // CSS can adopt the new viewport before Winit's resize event updates the
+    // physical backing store and status viewport. Do not accept the old, still-
+    // internally-consistent geometry during that gap; this remains within the
+    // existing bounded wait below and does not retry a failed presentation.
+    const rect = canvas.getBoundingClientRect();
+    const backingMatchesCss =
+      Math.abs(canvas.width - Math.round(rect.width * window.devicePixelRatio)) <= 1 &&
+      Math.abs(canvas.height - Math.round(rect.height * window.devicePixelRatio)) <= 1;
+    if (!backingMatchesCss) return false;
     const scale = Math.max(1, Math.min(Math.floor(canvas.width / 240), Math.floor(canvas.height / 160)));
     return status.viewportWidth === Math.min(240 * scale, canvas.width) &&
       status.viewportHeight === Math.min(160 * scale, canvas.height);

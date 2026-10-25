@@ -39,6 +39,18 @@ const STATE_BADGE = {
 };
 const ACTIVE_STATES = new Set(["loading", "ready"]);
 const STARTED_STATES = new Set(["loading", "ready", "error", "lost"]);
+const STATUS_HISTORY_LIMIT = 32;
+const STATUS_TEXT_LIMIT = 500;
+const REQUESTED_BACKEND_LIMIT = 160;
+const TRUNCATION_MARKER = "… [truncated]";
+const STATUS_SNAPSHOT_FIELDS = [
+  "state", "message", "requested", "actual", "autoFallback", "action", "detail", "presented",
+  "sourceSha256", "guestBudget", "imageWidth", "imageHeight", "surfaceCapEdge", "surfaceCapPixels",
+  "viewportX", "viewportY", "viewportWidth", "viewportHeight", "viewportScale", "viewportClipped",
+  "adapterName", "backend", "deviceType", "driver", "driverInfo", "vendorId", "deviceId",
+  "surfaceFormat", "renderFormat", "presentMode", "maxTextureDimension2d", "maxBufferSize",
+];
+const statusHistory = [];
 
 const byId = (id) => document.getElementById(id);
 const params = new URLSearchParams(window.location.search);
@@ -50,14 +62,92 @@ let pollTimer = null;
 let fallbackNotice = "";
 let fallbackActive = false;
 
-window.__gbaNative = {
-  state: () => appState,
-  status: () => lastStatus,
-  fallbackNotice: () => fallbackNotice,
-};
+function nativeDiagnostics() {
+  return {
+    state: () => appState,
+    // Export only a detached, field-limited snapshot. The native payload is
+    // flat, and arbitrary caller-added/nested data must never alias lastStatus.
+    status: () => diagnosticStatusSnapshot(lastStatus),
+    fallbackNotice: () => fallbackNotice,
+    statusHistory: () => statusHistory.map((entry) => ({ ...entry })),
+  };
+}
+
+window.__gbaNative = nativeDiagnostics();
 
 function normalizeBackend(value) {
   return value === "webgpu" || value === "webgl2" ? value : "auto";
+}
+
+function boundedText(value, limit) {
+  const text = String(value);
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - TRUNCATION_MARKER.length)}${TRUNCATION_MARKER}`;
+}
+
+function boundedRequestedBackend(value) {
+  if (value == null) return null;
+  const requested = String(value);
+  // Preserve useful invalid input while making truncation explicit in the
+  // exported diagnostic snapshot; supported backend IDs stay exact.
+  if (requested === "auto" || requested === "webgpu" || requested === "webgl2") return requested;
+  return boundedText(requested, REQUESTED_BACKEND_LIMIT);
+}
+
+function diagnosticStatusSnapshot(status) {
+  if (status === null || typeof status !== "object") return null;
+  const snapshot = {};
+  for (const field of STATUS_SNAPSHOT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(status, field)) continue;
+    const value = status[field];
+    if (field === "requested") {
+      snapshot[field] = boundedRequestedBackend(value);
+    } else if (typeof value === "string") {
+      snapshot[field] = boundedText(value, STATUS_TEXT_LIMIT);
+    } else if (
+      value === null ||
+      typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))
+    ) {
+      snapshot[field] = value;
+    }
+  }
+  return snapshot;
+}
+
+function boundedOptionalText(value, limit = STATUS_TEXT_LIMIT) {
+  return value == null ? null : boundedText(value, limit);
+}
+
+function finiteNumber(value, fallback = null) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function rememberStatus(status, disposition) {
+  statusHistory.push({
+    atMs: Math.round(performance.now()),
+    phase: appState,
+    disposition,
+    state: boundedText(status.state ?? "", 80),
+    message: boundedOptionalText(status.message) ?? "",
+    requested: boundedRequestedBackend(status.requested),
+    actual: boundedOptionalText(status.actual, 120),
+    action: boundedOptionalText(status.action, 120),
+    detail: boundedOptionalText(status.detail),
+    backend: boundedOptionalText(status.backend, 120),
+    adapterName: boundedOptionalText(status.adapterName, 200),
+    deviceType: boundedOptionalText(status.deviceType, 120),
+    surfaceFormat: boundedOptionalText(status.surfaceFormat, 120),
+    renderFormat: boundedOptionalText(status.renderFormat, 120),
+    presented: finiteNumber(status.presented ?? 0, 0),
+    viewportX: finiteNumber(status.viewportX),
+    viewportY: finiteNumber(status.viewportY),
+    viewportWidth: finiteNumber(status.viewportWidth),
+    viewportHeight: finiteNumber(status.viewportHeight),
+    viewportScale: finiteNumber(status.viewportScale),
+  });
+  if (statusHistory.length > STATUS_HISTORY_LIMIT) statusHistory.shift();
 }
 
 function sessionStorageOrNull() {
@@ -161,9 +251,11 @@ function renderStatus(status) {
   // Lost/error are terminal for this page instance: a late ready/viewport status
   // from the Rust redraw path must not re-show a dead canvas or claim success.
   if ((appState === 'lost' || appState === 'error') && (status.state === 'ready' || status.state === 'loading')) {
+    rememberStatus(status, "ignored-after-terminal");
     return;
   }
   status = statusForFallbackPage(status, fallbackActive, fallbackNotice);
+  rememberStatus(status, "applied");
   lastStatus = status;
   byId("status-message").textContent = status.message ?? "";
   renderReport(status);
@@ -202,7 +294,7 @@ function renderStatus(status) {
   } else if (status.state === "loading") {
     setState("loading");
   }
-  window.__gbaNative = { state: () => appState, status: () => lastStatus, fallbackNotice: () => fallbackNotice };
+  window.__gbaNative = nativeDiagnostics();
 }
 
 function startPolling() {
