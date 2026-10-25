@@ -15,6 +15,9 @@ not a roadmap promise and not a retail-game compatibility statement.
   subset are implemented and independently tested. ARM7TDMI PSR transfers and
   MSR-driven register banking are implemented for this subset. Exception
   entry/return, SWI and BIOS boot remain absent; Thumb `MUL` remains explicit.
+- Six documented BIOS services exist as direct, public Rust HLE primitives (see
+  below). They are not reachable from a guest SWI instruction and do not
+  execute a BIOS.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
@@ -45,11 +48,13 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 **Design:** the runner starts in system mode with CPSR `0x000000DF` (ARM, IRQ/FIQ
 masked), SP `0x03007F00`, PC `0x08000000`, and all other registers zero. This is
-not BIOS reset execution. There is no exception vectoring, SWI/HLE service, BIOS
-read path, exception return, or PSR restore through ALU/PC writes. The ARM7TDMI
-register banks and exception-mode SPSRs exist for MSR-driven mode switches and
-SPSR transfers (below); they are not entered through exceptions. BIOS accesses
-return `BiosAccess`.
+not BIOS reset execution. There is no exception vectoring, guest SWI dispatch,
+SVC/exception framing, BIOS read path, exception return, or PSR restore through
+ALU/PC writes. A separate public Rust API implements six documented BIOS service
+primitives directly (`bios::call`, below); the interpreter does not call it and
+it consumes no instruction. The ARM7TDMI register banks and exception-mode
+SPSRs exist for MSR-driven mode switches and SPSR transfers (below); they are
+not entered through exceptions. BIOS accesses return `BiosAccess`.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -57,6 +62,28 @@ return `BiosAccess`.
   is decoded freshly by the interpreter on every execution.
 - The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
   timing or frame completion concept.
+
+## BIOS HLE primitives (direct, not guest SWI)
+
+`gba_native::bios::call(service, &mut cpu, &mut bus)` implements exactly six
+documented, timing-independent services as direct Rust primitives derived from
+S1:
+
+| SWI | Service | Boundary |
+| --- | --- | --- |
+| `01h` | `RegisterRamReset` | Clears the selected memory regions and always forces blank; flags 5..31 are rejected |
+| `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
+| `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
+| `08h` | `Sqrt` | Floor unsigned integer square root of r0 |
+| `0Bh` | `CpuSet` | Halfword/word copy or fill with prevalidated ranges |
+| `0Ch` | `CpuFastSet` | Word copy or fill rounded up to 8-word blocks before range validation |
+
+These primitives do not consume an instruction, advance PC, enter SVC/IRQ mode,
+write SPSR, fetch a vector, count cycles or model wait states. Every other
+service number is an explicit `BiosError::UnsupportedService`; in particular
+there is no Halt/IntrWait/VBlankIntrWait, Stop/Sleep, SoftReset/HardReset or
+decompression implementation. Unsupported requests are never successful no-ops.
+See `docs/clean-room/hle-services.md` for the exact policies and tests.
 
 ## Bus
 
@@ -118,7 +145,7 @@ and are never NOPs.
 | Word load | `LDR` literal only, including ARM7 rotated unaligned literal read | `LDR`/`STR` with base register, register offset, writeback |
 | Halfword | pre-indexed immediate `LDRH`/`STRH`, ±offset, no writeback | `LDRSB`, `LDRSH`, post-index, register offset, writeback |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
-| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, conditional/newer space |
+| Everything else | none | multiply/swap, LDM/STM, SWI, coprocessor, unconditional/newer space |
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -189,9 +216,10 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
-- **Boundary:** there is no exception entry/vector fetch, no SWI/HLE, no
-  banked-register save/restore by the CPU, no exception return and no SPSR
-  restore. Those remain explicit unsupported behavior, not hidden successes.
+- **Boundary:** there is no exception entry/vector fetch, no guest SWI dispatch
+  or HLE call from an instruction, no banked-register save/restore by the CPU,
+  no exception return and no SPSR restore. Those remain explicit unsupported
+  behavior, not hidden successes.
 
 Pipeline offsets are documented. ARM operands reading R15 use
 `instruction address + 8`, or `+12` when the instruction uses a
@@ -215,7 +243,7 @@ GBATEK notes that this case is not officially defined as predictable.
 | Add/subtract | `ADD`/`SUB` register and 3-bit immediate, flags set | — |
 | Immediate | `MOV`, `CMP`, `ADD`, `SUB` with 8-bit immediate | — |
 | ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`; shift amount from register low byte | `MUL` remains explicit |
-| High register | `ADD`, `CMP`, `MOV` including low/low `MOV`/`CMP`, `BX` including PC | low/low `ADD` (reserved), ARMv5 `BLX` register |
+| High register | documented high-register `ADD`, `CMP`, `MOV` (at least one of `Rd`/`Rs` high) and `BX` including PC; low/low `MOV`/`CMP` as an explicit **Design** extension | low/low `ADD` (documented reserved encoding), ARMv5 `BLX` register |
 | Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm` | SP-relative loads/stores |
 | PC-relative | `LDR` literal | — |
 | Halfword | immediate `LDRH`/`STRH` | signed/register-offset forms |
@@ -224,17 +252,20 @@ GBATEK notes that this case is not officially defined as predictable.
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
 alignment. `BX` alone changes ARM/Thumb state. High-register `ADD`/`MOV` never
-set flags; high-register `CMP` always does. Low/low `MOV` and `CMP` are accepted
-as the valid aliases requested for this milestone; low/low `ADD` stays the
-documented reserved encoding.
+set flags; high-register `CMP` always does. GBATEK THUMB.5 restricts the
+high-register group to encodings with at least one high register bit, so the
+accepted low/low `MOV` and `CMP` forms are an explicit **Design** extension of
+this prototype, not documented-valid aliases; their behavior and tests are
+unchanged by that label. Low/low `ADD` stays the documented reserved encoding
+and is rejected.
 
 Thumb `BL` is two independent 16-bit instructions. The first sets an
 intermediate LR and does not branch; the second computes `LR + (imm11<<1)`, sets
 `LR = next address | 1` and branches. Each half consumes one instruction, so a
 budget can stop between them. Bounded discovery treats the first half as an
 ordinary instruction and the second as a dynamic computed target; the known
-return address is still followed. The ARMv5 `BLX` second half (`0xE800..0xEFFF`)
-and register form are rejected.
+return address is still queued as a discovery candidate. The ARMv5 `BLX` second
+half (`0xE800..0xEFFF`) and register form are rejected.
 
 ## Flag semantics
 
@@ -294,9 +325,10 @@ raw opcodes or run an opcode table. Shared `semantics` helpers evaluate typed
 operands, PC pipeline values, shifts and operand carry; they are used by both
 the reference interpreter and the emitter. `Msr` carries the PSR selector, the
 four field bits and a register or already-expanded immediate source. Control-flow
-metadata (`writes_pc`) marks direct branches, `BX`, both halves of Thumb `BL`,
-and ALU/MOV writes to R15, so discovery and emission terminate blocks
-consistently.
+metadata (`writes_pc`) marks direct branches, `BX`, the second (`BlLow`) half of
+Thumb `BL`, and ALU/MOV writes to R15, so discovery and emission terminate blocks
+consistently. The first (`BlHigh`) half writes only the intermediate LR and falls
+through: it does not write PC and does not itself end the block.
 
 ## Hybrid AOT
 
@@ -325,6 +357,9 @@ consistently.
 - Every computed branch target is dispatched by `(PC, ARM/Thumb)`; the two states
   are distinct keys. A Thumb `BL` second half can therefore dispatch to a
   discovered block or a fresh interpreter fallback without decoding stale RAM.
+  A dispatch key that is not a discovered ROM block goes through the reference
+  interpreter for one instruction with a fresh fetch/decode. This includes all
+  RAM code and any dynamic ROM target. Unsupported instructions still error.
 - The emitter consumes typed IR and writes direct Rust statements for known
   operations. It calls bus helpers for memory, flag helpers for arithmetic,
   shared typed operand/shift helpers for registers and PC pipeline values, and
@@ -341,38 +376,6 @@ consistently.
   condition-false instructions, both sides of a conditional branch, and each
   half of a Thumb `BL`. Reaching zero stops before the next instruction in either
   reference or native execution.
-
-## Hybrid AOT
-
-- Discovery starts at an explicit, aligned `(PC, ARM/Thumb)` entry inside the
-  immutable ROM and walks straight-line blocks. It follows direct `B` targets and the
-  fallthrough of conditional branches. A `BX` target is followed only when local
-  constant propagation (literal `LDR` or immediate `MOV`, same block, no
-  intervening write) resolves it. This is intentionally not general static
-  recovery.
-- Discovery stops at dynamic `BX`, unknown/unsupported encodings and non-ROM
-  targets. Limits are explicit: `max_blocks` and `max_instructions` are global
-  terminal budgets (default 512/8192) and set `limit_reached`; hitting
-  `max_block_instructions` (default 64) only ends the current block and queues
-  its continuation, counted in `block_limit_splits`, so a small per-block cap
-  can still discover reachable code. A per-block cap of zero is an explicit
-  error rather than an infinite loop. It never decodes every ROM word as code.
-- Every computed branch target is dispatched by `(PC, ARM/Thumb)`; the two states
-  are distinct keys.
-- The emitter consumes typed IR and writes direct Rust statements for known
-  operations. It calls bus helpers for memory, flag helpers for arithmetic and
-  `cpu.read_psr`/`cpu.write_psr` for PSR transfers; it does not call the decoder
-  or interpreter for a known instruction.
-- A CPSR control-field MSR can change the active register bank, so bounded
-  discovery invalidates cached r8-r14 constants across it. It never carries a
-  stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
-  do not invalidate the bank cache.
-- Each translated instruction decrements the budget exactly once, including
-  condition-false instructions and both sides of a conditional branch. Reaching
-  zero stops before the next instruction in either reference or native execution.
-- A dispatch key that is not a discovered ROM block goes through the reference
-  interpreter for one instruction with a fresh fetch/decode. This includes all
-  RAM code and any dynamic ROM target. Unsupported instructions still error.
 - The artifact records ROM length and SHA-256. Emission re-decodes every IR
   instruction from the current cartridge and refuses a mismatch. The generated
   harness deliberately contains **no ROM byte array and no raw copy of the
@@ -385,12 +388,15 @@ consistently.
   experimental prototype, not a signature, code-signing identity or
   anti-tamper guarantee.
 - Partial coverage is explicit: `DiscoveryStats` reports blocks, translated
-  instructions, resolved/dynamic BX, followed ARM `BL` calls and return
-  continuations, dynamic Thumb-`BL` targets, ALU PC-write terminations, decode
-  stops, external targets, per-block splits and whether a global limit was
-  reached. The native report reports runtime fallback instructions and a
-  CPU-state digest covering inactive register banks and SPSRs, not only the
-  visible register snapshot.
+  instructions, resolved/dynamic BX, ARM `BL` callees, candidate return
+  continuations queued for an ARM `BL` or the second Thumb `BL` half, dynamic
+  Thumb-`BL` targets, ALU PC-write terminations, decode stops, external targets,
+  per-block splits and whether a global limit was reached. A queued return
+  continuation is a candidate address, not proof of ROM-resident code; the same
+  address is counted as an external target when it is not a ROM address. The
+  native report reports runtime fallback instructions and a CPU-state digest
+  covering inactive register banks and SPSRs, not only the visible register
+  snapshot.
 - **Design, not a general claim:** the synthetic demo still discovers 4 blocks /
   17 instructions and executes 230,411 guest instructions with 0 fallbacks.
   Separate synthetic fixtures exercise the expanded ALU with banked state and an

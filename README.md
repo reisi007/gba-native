@@ -20,6 +20,7 @@ instructions.
 | ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset; Thumb MUL remains explicit |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
+| BIOS HLE primitives | Six documented services callable directly from Rust; no guest SWI/SVC, BIOS boot or timing |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
@@ -164,8 +165,9 @@ until implemented and independently verified.
   BIOS boot are not implemented.
 - Thumb: register ALU operations (all except `MUL`, which is explicit), shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
-  register and immediate forms, high-register `ADD`/`CMP`/`MOV` (including the
-  low/low `MOV`/`CMP` aliases), `ADR`, `ADD PC/SP`, `ADD`/`SUB SP,#imm`, both
+  register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
+  `MOV`/`CMP` are an explicit **Design** extension beyond the documented
+  high-register encodings), `ADR`, `ADD PC/SP`, `ADD`/`SUB SP,#imm`, both
   halves of `BL`, `BX`, literal `LDR`, `LDRH`/`STRH`, and conditional or
   unconditional `B`. The ARMv5 `BLX` second half and register form are rejected.
 - Memory: exact EWRAM/IWRAM/palette/VRAM/OAM regions, three ROM windows,

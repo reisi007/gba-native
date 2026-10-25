@@ -259,10 +259,24 @@ fn cpu_set_reads_rom_but_rejects_rom_overread_before_mutation() {
 
 #[test]
 fn cpu_fast_set_rounds_count_up_to_eight_word_blocks() {
+    // Literal oracle, not derived from the implementation's div_ceil formula.
+    const ROUNDED: [(u32, u32); 11] = [
+        (0, 0),
+        (1, 8),
+        (7, 8),
+        (8, 8),
+        (9, 16),
+        (15, 16),
+        (16, 16),
+        (17, 24),
+        (23, 24),
+        (24, 24),
+        (25, 32),
+    ];
     let (mut cpu, mut bus) = fresh();
     let source = EWRAM_BASE + 0x800;
     bus.write32(source, 0xA5A5_5A5A).expect("seed");
-    for count in 0..=17u32 {
+    for &(count, expected) in &ROUNDED {
         let destination = EWRAM_BASE + 0x1000 + count * 0x100;
         for unit in 0..=32u32 {
             bus.write32(destination + 4 * unit, 0xDEAD_BEEF)
@@ -271,7 +285,6 @@ fn cpu_fast_set_rounds_count_up_to_eight_word_blocks() {
         set_args(&mut cpu, source, destination, count | FILL);
         bios::call(bios::SERVICE_CPU_FAST_SET, &mut cpu, &mut bus)
             .unwrap_or_else(|error| panic!("count {count}: {error}"));
-        let expected = if count == 0 { 0 } else { count.div_ceil(8) * 8 };
         for unit in 0..expected {
             assert_eq!(
                 bus.read32(destination + 4 * unit).expect("read"),

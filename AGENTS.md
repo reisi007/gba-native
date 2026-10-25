@@ -122,15 +122,17 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   ARM/Thumb decode (`arm.rs`, `thumb.rs`, tests) and reference semantics.
 - `src/display.rs`, `src/render.rs`: bitmap snapshot, nearest/letterbox, PPM.
 - `src/demo.rs`: entirely synthetic ROM fixtures.
+- `src/bios/`: six direct, documentation-driven HLE service primitives
+  (`mod.rs`, `arithmetic.rs`, `memory.rs`); no guest SWI/SVC integration.
 - `src/aot/`: bounded discovery (`discover.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`), report parsing (`report.rs`),
   harness build/run (`harness.rs`) and tests.
 - `src/main.rs`, `src/cli/`: CLI dispatch, commands and safe `output/` writes.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
-- `tests/`: header/bus/CPU/display/demo tests, independent ISA golden vectors,
-  the native AOT proof, quality-counter/script failure paths and the CI gate
-  contracts.
+- `tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE arithmetic/
+  memory-copy/reset/dispatch tests, independent ISA golden vectors, the native
+  AOT proof, quality-counter/script failure paths and the CI gate contracts.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality
