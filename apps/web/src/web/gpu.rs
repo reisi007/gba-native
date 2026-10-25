@@ -81,14 +81,14 @@ pub async fn build(
         BrowserBackend::WebGl2 => Backends::GL,
     };
     let builder = {
-        // Browser WebGPU canvas contexts accept only non-sRGB formats
-        // (`bgra8unorm`/`rgba8unorm`), while the core bytes are already
-        // sRGB-encoded. Declaring both the pixel texture and the surface
-        // non-sRGB keeps the raw bytes untouched. The WebGL2 path can use the
-        // sRGB surface format that WGPU reports, so it declares the pixel
-        // texture sRGB for an exact decode/encode round-trip.
+        // Browser WebGPU canvases accept non-sRGB formats. Keep the pixel
+        // texture and surface RGBA/non-sRGB to match the format reported as
+        // preferred by Linux SwiftShader and preserve guest channel bytes.
+        // Other browsers may prefer BGRA. WebGL2 uses the sRGB surface format
+        // reported by WGPU and an sRGB pixel texture for a decode/encode
+        // round-trip.
         let (pixel_format, surface_format) = match resolved.backend {
-            BrowserBackend::WebGpu => (TextureFormat::Rgba8Unorm, Some(TextureFormat::Bgra8Unorm)),
+            BrowserBackend::WebGpu => (TextureFormat::Rgba8Unorm, Some(TextureFormat::Rgba8Unorm)),
             BrowserBackend::WebGl2 => (TextureFormat::Rgba8UnormSrgb, None),
         };
         let mut builder = PixelsBuilder::new(IMAGE_WIDTH, IMAGE_HEIGHT, surface)

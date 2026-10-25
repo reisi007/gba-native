@@ -176,8 +176,15 @@ the physical backing store, centred with black letterbox, `image-rendering:
 pixelated`, no CSS blur. The surface is deferred until a non-zero canvas size;
 the design cap is 8192 per edge and 16,777,216 pixels (labelled as an application
 cap, not a queried adapter maximum). The core bitmap is declared sRGB for the
-WebGL2 path and kept raw non-sRGB with a `bgra8unorm` WebGPU canvas, avoiding
-the invalid sRGB canvas-configure format and double gamma conversion.
+WebGL2 path and kept raw non-sRGB with an `rgba8unorm` WebGPU
+pixel/render/surface path. The RGBA surface matches the preferred format
+reported by Linux SwiftShader in the CI investigation; preferred formats vary
+by browser/device. The changed code has not yet been verified on Linux, so its
+warning/device-loss outcome there is unknown. The local macOS SwiftShader
+browser instead reports `bgra8unorm`, so the local test still reports the
+corresponding extra-copy warning. The WebGPU path does not configure an invalid
+sRGB canvas format or apply a gamma conversion; WebGL2 retains its sRGB
+decode/encode round-trip.
 
 Canvas physical geometry is computed from the live CSS content rectangle times
 `devicePixelRatio`, rounded to the nearest backing pixel. Winit's resize event
@@ -224,9 +231,9 @@ Local runs on 2026-10-25 with this repository, Playwright Chromium
 
 | Run | Forced/auto backend | Observed result |
 | --- | --- | --- |
-| headless Chromium, `--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader` | `auto`/`webgpu` | `actual=webgpu`, `backend=BrowserWebGpu`, surface `Bgra8Unorm`, adapter name not exposed, device type `Other` (the launch flag provisions a software WebGPU adapter; the UI does not call it physical) |
+| headless Chromium, `--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader` (macOS arm64) | `auto`/`webgpu` | `actual=webgpu`, `backend=BrowserWebGpu`, surface/render `Rgba8Unorm`, adapter name not exposed, device type `Other`; browser preference is `bgra8unorm` here, so its extra-copy warning remains (the UI does not call the software adapter physical) |
 | headless Chromium, same flags | `webgl2` | `backend=Gl`, adapter `ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro)`, type `IntegratedGpu`, surface `Rgba8UnormSrgb` |
-| headful system Chrome 156.0.8078.47 | `webgpu` | ready, `backend=BrowserWebGpu`, adapter details redacted, sampled pixels exact |
+| headful system Chrome 156.0.8078.47 (before the RGBA surface change) | `webgpu` | ready, `backend=BrowserWebGpu`, adapter details redacted, sampled pixels exact; not re-run for the changed format |
 | headless Chromium without WebGPU flags | `webgpu` | explicit “requested explicitly … no WebGPU adapter” error; no fallback |
 | Playwright page with `Navigator.prototype.gpu` removed | `auto` then `webgpu` | auto ready on WebGL2 with `Auto compatibility path: yes`; forced WebGPU typed error |
 
@@ -279,14 +286,18 @@ combinations and 97 PNGs. The captures remain review artifacts, not repository
 assets; the owner/reviewer reads the images. This document does not claim visual
 approval.
 
-The integrated local gate run on 2026-10-25 passed the core wasm32 check, the
-WASM release build, the pinned bundle build, 15 Rust library tests, one loopback
-server test, five lifecycle tests and all 15 functional browser E2E tests. It ran
-on macOS arm64; forced WebGPU and WebGL2 both passed there. The `--ci` mode and
-workflow are configured for Linux/SwiftShader, but this local run is not Linux CI
-evidence. The full local logs are in
-`output/integration-web-unique/web.log`; root test/gate logs are in the same
-directory. Screenshot review remains pending.
+The fresh local normal and `--ci` gates on 2026-10-25 passed the core wasm32
+check, WASM release build, pinned bundle build, 16 Rust library tests, one
+loopback-server test, five lifecycle tests and all 19 functional browser E2E
+tests. Both ran on macOS arm64 with SwiftShader WebGPU flags. Real PNG samples
+matched all five RGB goldens exactly; source SHA-256 and the 230,411-instruction
+budget were unchanged. This host reports preferred `bgra8unorm`, so the
+preferred-format extra-copy warning remains locally despite the configured
+`Rgba8Unorm` target. These runs are not Linux CI evidence and do not establish
+whether the device-loss failure from Linux run 40234092808 is fixed. Logs and
+captured E2E PNGs are in
+`output/web-linux-format-xyJBkfLLOd/`; the earlier integrated run remains in
+`output/integration-web-unique/web.log`. Screenshot review remains pending.
 
 ## Remaining gaps (explicitly not implemented)
 

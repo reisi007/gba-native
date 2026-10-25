@@ -8,6 +8,8 @@
 //   fails the forced-WebGPU test instead of skipping it.
 // - Every request must stay on the local test origin; console errors and page
 //   errors fail the test.
+// - WebGPU's preferred-format copy warning must be absent when the browser's
+//   preferred canvas format is rgba8unorm; other platform preferences are logged.
 // - Loss/restart is triggered through the real WebGL context-loss extension.
 
 import { expect, test as base } from '@playwright/test';
@@ -82,6 +84,7 @@ function problemFailureMessage(summary: ProblemSummary): string {
 }
 
 const browserEventTrails = new WeakMap<Page, BrowserEvent[]>();
+const webGpuFormatWarnings = new WeakMap<Page, string[]>();
 
 async function browserDiagnosticSnapshot(page: Page, reason: string): Promise<unknown> {
   return page.evaluate(({ reason, fields }) => {
@@ -185,8 +188,10 @@ async function logCanvasVisibilityFailure(page: Page, original: unknown): Promis
 const test = base.extend<Fixtures>({
   failureDiagnostics: [async ({ page }, use, testInfo) => {
     const events: BrowserEvent[] = [];
+    const formatWarnings: string[] = [];
     const problems = createProblemCollector();
     browserEventTrails.set(page, events);
+    webGpuFormatWarnings.set(page, formatWarnings);
     const addEvent = (event: BrowserEvent) => {
       if (events.length === 100) events.shift();
       events.push(event);
@@ -194,6 +199,12 @@ const test = base.extend<Fixtures>({
     page.on('console', (message) => {
       const text = message.text().slice(0, 1_000);
       addEvent({ kind: 'console', type: message.type(), text });
+      if (
+        message.type() === 'warning' &&
+        text.includes('configured with a different format than is preferred')
+      ) {
+        formatWarnings.push(text);
+      }
       if (message.type() === 'error') problems.add(`console: ${text}`);
     });
     page.on('pageerror', (error) => {
@@ -737,6 +748,14 @@ test('forced WebGPU reports the browser WebGPU adapter and presents pixels', asy
   expect(status.actual).toBe('webgpu');
   expect(status.backend).toBe('BrowserWebGpu');
   expect(status.autoFallback).toBe(false);
+  expect(status.surfaceFormat).toBe('Rgba8Unorm');
+  expect(status.renderFormat).toBe('Rgba8Unorm');
+  const preferredCanvasFormat = await page.evaluate(() => {
+    const gpu = (navigator as unknown as {
+      gpu?: { getPreferredCanvasFormat?: () => string };
+    }).gpu;
+    return gpu?.getPreferredCanvasFormat?.() ?? null;
+  });
   console.log(`observed forced WebGPU: ${JSON.stringify({ backend: status.backend, adapter: status.adapterName, deviceType: status.deviceType, surface: status.surfaceFormat })}`);
   const samples = await waitForVisibleCanvas(
     page,
@@ -747,6 +766,13 @@ test('forced WebGPU reports the browser WebGPU adapter and presents pixels', asy
   );
   await expectWebGpuConfirmationRedraw(page, status);
   GOLDEN.forEach((entry, index) => expect(close(samples.guest[index], entry.rgb)).toBe(true));
+  const formatWarnings = webGpuFormatWarnings.get(page) ?? [];
+  if (preferredCanvasFormat === 'rgba8unorm') {
+    expect(formatWarnings, 'WebGPU preferred-format conversion warnings').toEqual([]);
+  }
+  console.log(
+    `observed WebGPU preferred canvas format and conversion warnings: ${JSON.stringify({ preferredCanvasFormat, formatWarnings })}`,
+  );
   await expect(page.locator('#probe-gl')).toContainText('not probed here');
   expectNoCapabilityProbeContextLoss(page);
 });
@@ -793,7 +819,7 @@ test('permanently blank or hidden canvas fails within the sampler bounds', async
       requested: 'webgpu',
       actual: 'webgpu',
       backend: 'BrowserWebGpu',
-      surfaceFormat: 'Bgra8Unorm',
+      surfaceFormat: 'Rgba8Unorm',
       presented: 1,
       opaqueTestSentinel: 'diagnostic-secret-sentinel',
     };
