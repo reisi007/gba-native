@@ -308,7 +308,7 @@ Observed at this implementation round (2026-10-25). These are recorded
 observations, not a generated inventory:
 
 - `./scripts/short.sh`: hard limit 0 oversized files, Ratchet fast 2/2 rules
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 64 ≥ 36),
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 69 ≥ 36),
   `cargo fmt --check`, Clippy with warnings denied and the fast unit tests all
   passed.
 - `./scripts/full.sh`: passed end to end, including debug and release suites,
@@ -318,20 +318,27 @@ observations, not a generated inventory:
   0 fallbacks, `native_vs_reference=match`). The discovery counts did not change
   because the demo fixture does not use the expanded ALU/control operations and
   no BIOS HLE primitive is reached by guest execution.
-- `cargo test`: 196 tests passed (40 library unit tests, 5 CLI binary unit
-  tests, 151 integration tests: AOT ALU 2, AOT control 4, AOT halfword 1, AOT
+- `cargo test`: 200 tests passed (40 library unit tests, 5 CLI binary unit
+  tests, 155 integration tests: AOT ALU 2, AOT control 4, AOT halfword 1, AOT
   native 5, AOT PSR 3, AOT Thumb ALU 1, ARM ALU 6, ARM control 9, ARM halfword
   5, ARM shift 4, BIOS arithmetic 6, BIOS dispatch 2, BIOS memory copy 13, BIOS
-  reset 4, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, ISA
-  golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality counter
-  10, scripts 3, Thumb ALU 7, Thumb control 5). This is the exact integrated
-  snapshot for this round, not a guarantee of GBA completeness. The historical
-  CPU-only snapshot was 164 tests (33 library unit, 5 CLI binary, 126
-  integration) and the isolated HLE snapshot was 155 tests (37 library unit, 5
-  CLI binary, 113 integration); neither is reused as this round's count.
-- `cargo test --release`: 196 tests passed.
+  reset 4, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, frontend
+  gates 4, ISA golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10,
+  quality counter 10, scripts 3, Thumb ALU 7, Thumb control 5). This is the
+  exact integrated snapshot for this round, not a guarantee of GBA completeness.
+  The historical CPU-only snapshot was 164 tests (33 library unit, 5 CLI binary,
+  126 integration), the isolated HLE snapshot was 155 tests (37 library unit, 5
+  CLI binary, 113 integration) and the isolated GPU-foundation snapshot was 127
+  tests (30 library unit, 5 CLI binary, 92 integration); none is reused as this
+  round's count. The four frontend-gate tests use a fake Cargo or a deliberately
+  minimal tool path and never fetch or build the optional GPU frontend.
+- `cargo test --release`: 200 tests passed.
 - Both suites were also repeated with fresh `CARGO_TARGET_DIR` directories, with
-  the same 196/196 result in debug and release.
+  the same 200/200 result in debug and release.
+- The optional `apps/desktop` package is not part of that count: its separate
+  `scripts/frontend.sh` gate ran 15 frontend unit tests plus locked fmt, Clippy,
+  build and a headless `--help`, and all passed. None of its dependencies enter
+  the root default graph.
 - Generated harnesses built and run by tests: `tests/aot_native.rs` four (demo,
   mid-budget, immediate regression, fallback), `tests/aot_alu.rs` two (expanded
   ALU/banking/BL and dynamic-PC fallback), `tests/aot_thumb_alu.rs` two
@@ -341,21 +348,28 @@ observations, not a generated inventory:
   runs two real default `aot proof` builds and refuses all redirect/invalid-path
   cases before Cargo starts.
 - Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 64 ≥ 36);
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 69 ≥ 36);
   `check --tier slow` = 1 rule / 0 failed (`native-consistency` 1 ≥ 1).
   A full `ratchet check` is 3 rules / 0 failed. The machine-written baseline is
   `{native-consistency: 1, oversized-rust-file: 0, rust-source-population: 36}`;
   adding files leaves the floor satisfied without editing the baseline.
-- Maintained Rust population: 64 files; maximum 481 physical lines
-  (`src/cpu.rs`); the largest changed file is `tests/bios_memory_copy.rs` at
-  447 lines. The code meets the hard limit without a baseline exemption or
-  hand-edited baseline. The earlier 501-line/nested-directory boundary tests are
-  unchanged in `tests/quality_counter.rs` and cover nested `src/output/` and
+- Maintained Rust population: 69 files (including `apps/desktop/src` and
+  `tests/frontend_gates.rs`); maximum 481 physical lines (`src/cpu.rs`) and the
+  largest other maintained file is `tests/bios_memory_copy.rs` at 447 lines. The
+  code meets the hard limit without a baseline exemption or hand-edited
+  baseline. The earlier 501-line/nested-directory boundary tests are unchanged
+  in `tests/quality_counter.rs` and cover nested `src/output/` and
   `tests/target/` as maintained sources.
-  The pre-refactor worktree was split into `src/aot/`, `src/decode/`,
-  `src/main.rs` and `src/cli/`; the earlier very large line counts were
-  uncommitted working-tree measurements, not initial HEAD sizes, and are not
-  used as historical evidence.
+- A separate temporary untracked 501-line Rust probe with a 1-line root `lib.rs`
+  in `src/output/` was reported by `oversized --root <temp> --max 500 --hard`
+  with exit status 1 and stdout `1`, while root-level `target/` and `output/`
+  probes were skipped; the probe was removed afterwards. `scripts/short.sh` also
+  passed when invoked from another working directory.
+
+The pre-refactor worktree was split into `src/aot/`, `src/decode/`,
+`src/main.rs` and `src/cli/`; the earlier very large line counts were
+uncommitted working-tree measurements, not initial HEAD sizes, and are not
+used as historical evidence.
 - Bounded read-only local retail observation: the existing CLI stops at abstract
   address `0x08000224` on the ARM single word store (base-register `STR`)
   family, after the previously blocking PC-operand ALU instruction at
@@ -372,10 +386,14 @@ observations, not a generated inventory:
 No hardware conformance ROM suite has been run. No retail game is supported or known playable.
 No BIOS boots, exception entry/return, SWI, interrupt delivery, save
 persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
-or window frontend is verified. PSR-transfer and banking evidence is limited to
-the synthetic/direct-entry subset. The six direct BIOS HLE primitives are
-synthetic-test evidence for those primitives only; guest SWI/SVC dispatch, BIOS
-execution and hardware conformance remain unverified. No real GBA hardware
+or a playable window frontend is verified. The optional synthetic
+`apps/desktop` frontend presents one static synthetic bitmap and has
+build/unit-test evidence plus one local macOS Metal smoke observation; no live
+Windows/Linux GPU run, cross-platform presentation claim, playable/input loop
+or visible-frame counter is verified. PSR-transfer and banking evidence is
+limited to the synthetic/direct-entry subset. The six direct BIOS HLE primitives
+are synthetic-test evidence for those primitives only; guest SWI/SVC dispatch,
+BIOS execution and hardware conformance remain unverified. No real GBA hardware
 measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 

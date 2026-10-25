@@ -41,7 +41,10 @@ standalone emulator and not a game packager.
 No JIT or executable writable memory is required. iOS JIT constraints therefore
 do not block the current portable-core design. Standalone per-game packaging,
 Android/iOS packaging, GPU vendor upscaling and retail-game compatibility are
-later work and are not claimed.
+later work and are not claimed. An isolated optional `apps/desktop` frontend may
+present the synthetic snapshot through Winit/Pixels/WGPU; it remains outside
+the std-only core, accepts no cartridge and is not a playable or vendor-upscaled
+frontend (`docs/gpu-frontend.md`).
 
 ## Artifacts
 
@@ -49,6 +52,8 @@ later work and are not claimed.
 - `gba-contract.md`: actual implemented behavior, AOT rules and explicit limits.
 - `upscaling.md`: presentation baseline and future vendor options; not GBA
   hardware behavior.
+- `gpu-frontend.md`: optional synthetic Winit/Pixels/WGPU window boundary,
+  dependency pins, gate/artifact rules and observed limits.
 - `rea-status.md`: actual tool observations, including blockers. No Evidence ID
   exists for this investigation.
 - `verification.md`: executable acceptance criteria and test boundaries.
@@ -78,9 +83,13 @@ retail cartridges**.
 ## Non-claims
 
 - No BIOS boot, no retail-game playability, no save/audio/input interaction.
-- No cycle timing, frame timing, DMA, IRQ, tile/sprite PPU or window frontend.
+- No cycle timing, frame timing, DMA, IRQ, tile/sprite PPU or playable window
+  frontend.
 - No GPU vendor SDK, FSR, DLSS, ML model, shader or upscaling integration.
 - No successful REA analysis or native Evidence record.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and
   stops at unknown/indirect control flow.
 - The native proof is a developer test harness, not a shipped game build.
+- The optional `apps/desktop` Winit/Pixels window is plain GPU presentation of
+  the static synthetic bitmap. It is not a playable/retail frontend, not a
+  WebGPU/browser build and not vendor upscaling or frame/cycle timing.
