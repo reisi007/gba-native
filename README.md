@@ -20,6 +20,7 @@ instructions.
 | ARM/Thumb subset + NZCV + BX state exchange | Implemented and tested |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches; no exceptions/return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
+| BIOS HLE primitives | Six documented services callable directly from Rust; no guest SWI/SVC, BIOS boot or timing |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |

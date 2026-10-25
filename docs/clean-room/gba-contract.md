@@ -12,6 +12,9 @@ not a roadmap promise and not a retail-game compatibility statement.
 - No BIOS is supplied or executed; direct entry is a test policy.
 - ARM7TDMI PSR transfers and MSR-driven register banking are implemented for
   this subset. Exception entry/return, SWI and BIOS boot remain absent.
+- Six documented BIOS services exist as direct, public Rust HLE primitives (see
+  below). They are not reachable from a guest SWI instruction and do not
+  execute a BIOS.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
@@ -42,11 +45,13 @@ not a roadmap promise and not a retail-game compatibility statement.
 
 **Design:** the runner starts in system mode with CPSR `0x000000DF` (ARM, IRQ/FIQ
 masked), SP `0x03007F00`, PC `0x08000000`, and all other registers zero. This is
-not BIOS reset execution. There is no exception vectoring, SWI/HLE service, BIOS
-read path, exception return, or PSR restore through ALU/PC writes. The ARM7TDMI
-register banks and exception-mode SPSRs exist for MSR-driven mode switches and
-SPSR transfers (below); they are not entered through exceptions. BIOS accesses
-return `BiosAccess`.
+not BIOS reset execution. There is no exception vectoring, guest SWI dispatch,
+SVC/exception framing, BIOS read path, exception return, or PSR restore through
+ALU/PC writes. A separate public Rust API implements six documented BIOS service
+primitives directly (`bios::call`, below); the interpreter does not call it and
+it consumes no instruction. The ARM7TDMI register banks and exception-mode
+SPSRs exist for MSR-driven mode switches and SPSR transfers (below); they are
+not entered through exceptions. BIOS accesses return `BiosAccess`.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -54,6 +59,28 @@ return `BiosAccess`.
   is decoded freshly by the interpreter on every execution.
 - The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
   timing or frame completion concept.
+
+## BIOS HLE primitives (direct, not guest SWI)
+
+`gba_native::bios::call(service, &mut cpu, &mut bus)` implements exactly six
+documented, timing-independent services as direct Rust primitives derived from
+S1:
+
+| SWI | Service | Boundary |
+| --- | --- | --- |
+| `01h` | `RegisterRamReset` | Clears the selected memory regions and always forces blank; flags 5..31 are rejected |
+| `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
+| `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
+| `08h` | `Sqrt` | Floor unsigned integer square root of r0 |
+| `0Bh` | `CpuSet` | Halfword/word copy or fill with prevalidated ranges |
+| `0Ch` | `CpuFastSet` | Word copy or fill rounded up to 8-word blocks before range validation |
+
+These primitives do not consume an instruction, advance PC, enter SVC/IRQ mode,
+write SPSR, fetch a vector, count cycles or model wait states. Every other
+service number is an explicit `BiosError::UnsupportedService`; in particular
+there is no Halt/IntrWait/VBlankIntrWait, Stop/Sleep, SoftReset/HardReset or
+decompression implementation. Unsupported requests are never successful no-ops.
+See `docs/clean-room/hle-services.md` for the exact policies and tests.
 
 ## Bus
 
@@ -174,9 +201,10 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
-- **Boundary:** there is no exception entry/vector fetch, no SWI/HLE, no
-  banked-register save/restore by the CPU, no exception return and no SPSR
-  restore. Those remain explicit unsupported behavior, not hidden successes.
+- **Boundary:** there is no exception entry/vector fetch, no guest SWI dispatch
+  or HLE call from an instruction, no banked-register save/restore by the CPU,
+  no exception return and no SPSR restore. Those remain explicit unsupported
+  behavior, not hidden successes.
 
 Pipeline offsets are documented: ARM `PC = instruction address + 8`. Direct
 branch targets are forced to 4-byte alignment.

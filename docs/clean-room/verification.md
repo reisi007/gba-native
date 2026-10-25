@@ -238,15 +238,17 @@ observations, not a generated inventory:
   `b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154`) and the
   native AOT proof (4 blocks / 17 translated instructions, 230,411 instructions,
   0 fallbacks, `native_vs_reference=match`).
-- `cargo test`: 123 tests passed (30 library unit tests, 5 CLI binary unit
-  tests, 88 integration tests: AOT halfword 1, AOT native 5, AOT PSR 3, ARM
-  halfword 5, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, ISA
-  golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality counter 10,
-  scripts 3). This is an exact snapshot for this round, not a guarantee of GBA
-  completeness.
-- `cargo test --release`: 123 tests passed.
+- `cargo test`: 155 tests passed (37 library unit tests, 5 CLI binary unit
+  tests, 113 integration tests: AOT halfword 1, AOT native 5, AOT PSR 3, ARM
+  halfword 5, BIOS arithmetic 6, BIOS dispatch 2, BIOS memory copy 13, BIOS
+  reset 4, bus 6, cartridge 6, CLI output 5, CPU 12, demo 3, display 5, ISA
+  golden 4, PSR banking 6, PSR field mask 4, PSR transfer 10, quality counter
+  10, scripts 3). This is an exact snapshot for the HLE-foundation round, not a
+  guarantee of GBA completeness. The earlier 123-test figure is the historical
+  pre-HLE state and is superseded by this count.
+- `cargo test --release`: 155 tests passed.
 - Both suites were also repeated with fresh `CARGO_TARGET_DIR` directories, with
-  the same 123/123 result.
+  the same 155/155 result.
 - `tests/aot_native.rs` builds and runs four generated harnesses (demo,
   mid-budget, immediate regression, fallback), `tests/aot_psr.rs` builds one
   PSR/banking harness, and `tests/aot_halfword.rs` builds one negative-halfword
@@ -254,7 +256,7 @@ observations, not a generated inventory:
   `tests/cli_output.rs` runs two real default `aot proof` builds and refuses all
   redirect/invalid-path cases before Cargo starts.
 - Ratchet v0.5.0: `check --tier fast` = 2 rules / 0 failed
-  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 44 ≥ 36);
+  (`oversized-rust-file` 0 ≤ 0, `rust-source-population` 51 ≥ 36);
   `check --tier slow` = 1 rule / 0 failed (`native-consistency` 1 ≥ 1).
   A full `ratchet check` is 3 rules / 0 failed. The machine-written baseline is
   `{native-consistency: 1, oversized-rust-file: 0, rust-source-population: 36}`;
@@ -265,12 +267,18 @@ observations, not a generated inventory:
   were skipped; the probe was removed afterwards. The same boundary is covered
   by `tests/quality_counter.rs` for nested `src/output/` and `tests/target/`.
   `scripts/short.sh` also passed when invoked from another working directory.
-- Maintained Rust population: 44 files; maximum 459 physical lines
-  (`src/cpu.rs`). The code meets the hard limit without a baseline exemption.
-  The pre-refactor worktree was split into `src/aot/`, `src/decode/`,
-  `src/main.rs` and `src/cli/`; the earlier very large line counts were
-  uncommitted working-tree measurements, not initial HEAD sizes, and are not
-  used as historical evidence. Current per-file sizes are the source audit.
+- Maintained Rust population: 51 files; maximum 459 physical lines
+  (`src/cpu.rs`, unchanged by this round); the largest changed file is
+  `tests/bios_memory_copy.rs` at 447 lines. The code meets the hard limit
+  without a baseline exemption. The pre-refactor worktree was split into
+  `src/aot/`, `src/decode/`, `src/main.rs` and `src/cli/`; the earlier very
+  large line counts were uncommitted working-tree measurements, not initial
+  HEAD sizes, and are not used as historical evidence. Current per-file sizes
+  are the source audit.
+- The six direct BIOS HLE primitives are covered only by synthetic tests in
+  this worktree. This snapshot is not evidence that they are wired to guest
+  SWI/SVC dispatch, executed by the primary CPU worktree, integrated with the
+  GPU/display stream, cycle-accurate, or playability evidence.
 
 ## Not established
 
@@ -278,7 +286,10 @@ No hardware conformance ROM suite has been run. No retail game is supported or k
 No BIOS boots, exception entry/return, SWI, interrupt delivery, save
 persistence, audio, input interaction, DMA, cycle timing, tile/sprite rendering
 or window frontend is verified. PSR-transfer and banking evidence is limited to
-the synthetic/direct-entry subset. No real GBA hardware measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
+the synthetic/direct-entry subset. The six direct BIOS HLE primitives are
+synthetic-test evidence for those primitives only; guest SWI/SVC dispatch, BIOS
+execution and hardware conformance remain unverified. No real GBA hardware
+measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 
 The discovery/native proof applies only to the synthetic fixtures. It is not

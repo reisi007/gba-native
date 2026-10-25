@@ -1,10 +1,10 @@
 # Independently implemented BIOS HLE services (foundation)
 
-Status: implementation foundation only. This document describes Rust
-primitives that are callable directly from synthetic tests. They are not yet
-wired to SWI/SVC decoding or the interpreter, do not perform exception entry,
-do not boot a BIOS and do not establish playability. The public status summary
-and `gba-contract.md` are updated separately when the CPU integration lands.
+Status: implementation foundation only. This document describes six Rust
+primitives that are callable directly from synthetic tests. They are not wired
+to SWI/SVC decoding or the interpreter, do not perform exception entry, do not
+boot a BIOS and do not establish playability. `README.md` and `gba-contract.md`
+state the same boundary; guest SWI/SVC integration remains separate work.
 
 Decision background: **D8** in `docs/decisions.md` chooses documented BIOS HLE
 derived from public interface/hardware documentation instead of a bundled or
@@ -158,14 +158,25 @@ or silent successes:
 
 ## Tests and evidence boundary
 
-`tests/bios_arithmetic.rs`, `tests/bios_memory.rs` and
-`tests/bios_dispatch.rs` use synthetic RAM/ROM fixtures only. They contain
-independent expected values (including the documented division example, signed
-division matrix, integer-root property, rounding table, fill-read count,
-overlap smear, range/alignment/reserved-bit failures, atomic error paths,
-IWRAM-tail preservation and forced-blank snapshot). They require no ROM, BIOS
-file, save, network or external crate.
+`tests/bios_arithmetic.rs`, `tests/bios_memory_copy.rs`,
+`tests/bios_reset.rs` and `tests/bios_dispatch.rs` use synthetic RAM/ROM
+fixtures only. Their expected values are written independently of the
+implementation:
 
-This evidence establishes only the listed primitive behavior. It is not BIOS
-boot, not SWI/SVC integration, not retail-game compatibility, not cycle timing
-and not a hardware-conformance claim.
+- Arithmetic: the documented division example, a signed-division matrix, the
+  zero-divisor and `i32::MIN / -1` error paths, and an integer-square-root
+  property.
+- Memory copy/fill: a literal CpuFastSet rounding table for requested counts
+  `0, 1, 7, 8, 9, 15, 16, 17, 23, 24, 25` with independently stated expected
+  word counts `0, 8, 8, 8, 16, 16, 16, 24, 24, 24, 32`, a sentinel word at
+  every rounded end, fill source-read count, ascending-overlap smear, and the
+  range/alignment/reserved-bit failures before mutation. The table is not
+  computed from the production rounding formula.
+- Reset: IWRAM-tail preservation and the unconditional forced-blank snapshot.
+- Dispatch: explicit `UnsupportedService` results that mutate nothing.
+
+They require no ROM, BIOS file, save, network or external crate. This is the
+strongest independent evidence currently in the repository for these six
+documented primitives under synthetic conditions. It is not evidence for
+arbitrary requests, a particular retail BIOS, all hardware conformance, BIOS
+boot, SWI/SVC integration, retail-game compatibility or cycle timing.

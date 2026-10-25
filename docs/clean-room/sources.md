@@ -39,6 +39,15 @@ Relevant anchors actually consulted for this milestone:
 - `#thumb-opcodes-memory-loadstore-ldrstr`.
 - `#thumb-opcodes-jumps-and-calls`.
 - `#lcd-io-display-control`, `#lcd-vram-bitmap-bg-modes`.
+- `#bios-function-summary`, `#bios-arithmetic-functions`,
+  `#swi-06h-gba-or-swi-09h-nds7nds9dsi7dsi9---div`,
+  `#swi-07h-gba---divarm`,
+  `#swi-08h-gba-or-swi-0dh-nds7nds9dsi7dsi9---sqrt`, `#bios-memory-copy`,
+  `#swi-0bh-gbands7nds9dsi7dsi9---cpuset`,
+  `#swi-0ch-gbands7nds9dsi7dsi9---cpufastset`, `#bios-reset-functions`,
+  `#swi-01h-gba---registerramreset`: documented interface and behavior for the
+  direct BIOS HLE primitives (arithmetic, memory copy/fill and RAM reset). No
+  BIOS image, disassembly or implementation source was used.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.
