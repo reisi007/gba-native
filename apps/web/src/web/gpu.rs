@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use pixels::wgpu::{Backend, Backends, Color, TextureFormat};
+use pixels::wgpu::{Backend, Backends, Color, DeviceDescriptor, Features, Limits, TextureFormat};
 use pixels::{Pixels, PixelsBuilder, ScalingMode, SurfaceTexture};
 use winit::window::Window;
 
@@ -100,6 +100,17 @@ pub async fn build(
                 .surface_texture_format(format)
                 .render_texture_format(format);
         }
+        if resolved.backend == BrowserBackend::WebGpu {
+            // Pixels 0.17.2 otherwise requests every limit advertised by the
+            // adapter. The renderer needs only WebGPU's baseline limits; these
+            // retain its 8192-pixel surface cap without requesting any
+            // adapter-specific extensions. Keep the WebGL2 builder unchanged.
+            builder = builder.device_descriptor(DeviceDescriptor {
+                required_features: Features::empty(),
+                required_limits: Limits::default(),
+                ..Default::default()
+            });
+        }
         builder
     };
 
@@ -125,7 +136,7 @@ pub async fn build(
         });
     }
 
-    let limits = pixels.device().limits();
+    let limits = pixels.adapter().limits();
     let report = DeviceReport {
         adapter_name: info.name.clone(),
         backend: format!("{:?}", info.backend),
