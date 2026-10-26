@@ -43,9 +43,9 @@ jobs:
           WEB_LINUX_AB_DIAGNOSTICS: "1"
         run: bash scripts/web.sh --ci
 
-      # Preserve each matched variant's Playwright output, browser logs, and
-      # status summary even when either full suite fails.
-      - name: Upload Linux A/B browser diagnostics
+      # Preserve standalone smoke probes, each matched variant's Playwright
+      # output, browser logs, and status summary even when a probe or suite fails.
+      - name: Upload Linux WebGPU and A/B browser diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "support/linux_webgpu_smoke.rs"]
+mod linux_webgpu_smoke;
+
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -89,7 +92,12 @@ fn linux_ab_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     }
 
     let repo = repo_root();
-    for script in ["lib.sh", "web-e2e.sh", "web-gpu-launch-args.sh"] {
+    for script in [
+        "lib.sh",
+        "web-e2e.sh",
+        "web-gpu-launch-args.sh",
+        "web-linux-gpu-smoke.cjs",
+    ] {
         std::fs::copy(repo.join("scripts").join(script), script_dir.join(script))
             .expect("copy web E2E script");
     }
@@ -121,6 +129,14 @@ fn linux_ab_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
         r##"#!/bin/sh
 if [ "${1:-}" = "-e" ]; then
   printf 'test-revision\n'
+  exit 0
+fi
+if [ "${1##*/}" = "web-linux-gpu-smoke.cjs" ]; then
+  mode="$2"
+  printf '%s\t%s\t%s\n' "$mode" "$WEB_E2E_LAUNCH_ARGS" "$WEBGPU_SMOKE_OUTPUT_DIR" >> "$SMOKE_CALL_LOG"
+  printf '{"mode":"%s","ok":true}\n' "$mode" > "$WEBGPU_SMOKE_OUTPUT_DIR/result.json"
+  printf 'fake WebGPU smoke %s\n' "$mode"
+  if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$mode" = canvas ]; then exit 19; fi
   exit 0
 fi
 count=0
@@ -160,10 +176,12 @@ fn run_linux_ab_fixture(
         .env("PATH", path)
         .env("HOME", root.join("home"))
         .env_remove("XDG_CACHE_HOME")
+        .env_remove("GITHUB_STEP_SUMMARY")
         .env("CI", "true")
         .env("WEB_LINUX_AB_DIAGNOSTICS", "1")
         .env("WEB_E2E_LAUNCH_ARGS", launch_args)
-        .env("AB_CALL_LOG", calls);
+        .env("AB_CALL_LOG", calls)
+        .env("SMOKE_CALL_LOG", calls.with_extension("smokes.log"));
     if let Some(variant) = fail_variant {
         command.env("AB_FAIL_VARIANT", variant);
     } else {
@@ -186,6 +204,7 @@ fn newest_linux_ab_dir(root: &Path) -> PathBuf {
 }
 
 fn assert_linux_ab_diagnostic_contract() {
+    linux_webgpu_smoke::assert_probe_source(&repo_root());
     let (temp, root, bin, calls) = linux_ab_fixture();
     let launch_args = concat!(
         "--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader ",
@@ -195,11 +214,13 @@ fn assert_linux_ab_diagnostic_contract() {
         "--use-angle=vulkan --use-vulkan=swiftshader --disable-vulkan-surface"
     );
 
-    // A failure is a reported failure, but must not suppress the same full B run.
     let a_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("A"));
     assert!(!a_failure.status.success());
     let output_text = String::from_utf8_lossy(&a_failure.stderr);
-    assert!(output_text.contains("A=17 B=0"), "{output_text}");
+    assert!(
+        output_text.contains("canvas=19, offscreen=0, A=17, B=0"),
+        "{output_text}"
+    );
     let first_calls = std::fs::read_to_string(&calls).expect("read both variant calls");
     let first_lines: Vec<_> = first_calls.lines().collect();
     assert_eq!(
@@ -241,30 +262,29 @@ fn assert_linux_ab_diagnostic_contract() {
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
     let first_dir = newest_linux_ab_dir(&root);
-    assert_eq!(
-        std::fs::read_to_string(first_dir.join("summary.txt")).expect("read A/B summary"),
-        "A=17\nB=0\n"
-    );
+    linux_webgpu_smoke::assert_output(&calls, &first_dir, a_args);
     for variant in ["variant-a", "variant-b"] {
         assert!(first_dir.join(variant).join("playwright.log").is_file());
         assert!(first_dir.join(variant).join("launch-args.txt").is_file());
         assert!(first_dir.join(variant).join("test-results").is_dir());
     }
 
-    // B failures also fail the overall gate, after A has completed successfully.
     std::fs::write(&calls, "").expect("reset fixture calls");
     std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
     let b_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("B"));
     assert!(!b_failure.status.success());
     let output_text = String::from_utf8_lossy(&b_failure.stderr);
-    assert!(output_text.contains("A=0 B=18"), "{output_text}");
+    assert!(
+        output_text.contains("canvas=0, offscreen=0, A=0, B=18"),
+        "{output_text}"
+    );
     let second_dir = newest_linux_ab_dir(&root);
-    assert_eq!(
-        std::fs::read_to_string(second_dir.join("summary.txt")).expect("read B-failure summary"),
-        "A=0\nB=18\n"
+    assert!(
+        std::fs::read_to_string(second_dir.join("summary.txt"))
+            .expect("read B-failure summary")
+            .contains("smoke-canvas=0\nsmoke-offscreen=0\nA=0\nB=18\n")
     );
 
-    // A missing exact token is rejected before either browser run is started.
     std::fs::write(&calls, "").expect("reset fixture calls");
     std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
     let missing_angle = run_linux_ab_fixture(
@@ -286,7 +306,6 @@ fn assert_linux_ab_diagnostic_contract() {
             .is_empty()
     );
 
-    // Duplicate exact tokens are equally ambiguous and rejected before launch.
     let duplicate_angle = run_linux_ab_fixture(
         &root,
         &bin,

@@ -8,7 +8,8 @@
 # Usage: ./scripts/web-e2e.sh [local|ci]
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
 #   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
-#   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into the matched Vulkan/OpenGL run
+#   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
+#     plus the existing matched Vulkan/OpenGL full-suite diagnostics
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -151,6 +152,47 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
   done
   B_LAUNCH_ARGS_TEXT="${B_LAUNCH_ARGS[*]}"
 
+  run_linux_webgpu_smoke() {
+    smoke_mode="$1"
+    smoke_dir="$LINUX_DIAGNOSTICS_DIR/smoke-$smoke_mode"
+    SMOKE_STATUS=125
+    if ! mkdir "$smoke_dir"; then
+      info "could not allocate fresh $smoke_dir; recording probe failure and continuing"
+      return 0
+    fi
+    printf '%s\n' "$LAUNCH_ARGS" >"$smoke_dir/launch-args.txt"
+    printf 'channel=%s\nheadless=%s\nchromium_revision=%s\norigin=%s\n' \
+      "$CHANNEL" "$HEADLESS" "$PLAYWRIGHT_REVISION" "$URL" >"$smoke_dir/run-info.txt"
+    info "standalone WebGPU smoke probe: $smoke_mode (current Linux variant A flags)"
+    if (
+      cd "$ROOT"
+      DEBUG=pw:browser \
+      WEBGPU_SMOKE_OUTPUT_DIR="$smoke_dir" \
+      WEB_PLAYWRIGHT_CHROMIUM_REVISION="$PLAYWRIGHT_REVISION" \
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
+      PLAYWRIGHT_PACKAGE_PATH="$NPM/node_modules/playwright" \
+        "$NODE_BIN" "$ROOT/scripts/web-linux-gpu-smoke.cjs" "$smoke_mode" \
+        2>&1 | tee "$smoke_dir/playwright.log"
+    ); then
+      smoke_status=0
+    else
+      smoke_status=$?
+    fi
+    printf '%s\n' "$smoke_status" >"$smoke_dir/exit-status.txt"
+    printf '{"mode":"%s","processExitStatus":%s,"resultWritten":%s}\n' \
+      "$smoke_mode" "$smoke_status" "$([ -s "$smoke_dir/result.json" ] && printf true || printf false)" \
+      >"$smoke_dir/process-status.json"
+    SMOKE_STATUS="$smoke_status"
+    return 0
+  }
+
+  run_linux_webgpu_smoke canvas
+  SMOKE_CANVAS_STATUS="$SMOKE_STATUS"
+  run_linux_webgpu_smoke offscreen
+  SMOKE_OFFSCREEN_STATUS="$SMOKE_STATUS"
+
   A_STATUS=""
   B_STATUS=""
   for variant in A B; do
@@ -189,10 +231,59 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     fi
   done
 
-  printf 'A=%s\nB=%s\n' "$A_STATUS" "$B_STATUS" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
-  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
-  if [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then
-    fail "Linux A/B browser E2E failed (A=$A_STATUS, B=$B_STATUS); see $LINUX_DIAGNOSTICS_DIR/summary.txt"
+  SHARED_IMAGE_LOGS=(
+    "$LINUX_DIAGNOSTICS_DIR/smoke-canvas/playwright.log"
+    "$LINUX_DIAGNOSTICS_DIR/smoke-offscreen/playwright.log"
+    "$LINUX_DIAGNOSTICS_DIR/variant-a/playwright.log"
+    "$LINUX_DIAGNOSTICS_DIR/variant-b/playwright.log"
+  )
+  SHARED_LOGS_COMPLETE=1
+  for log in "${SHARED_IMAGE_LOGS[@]}"; do
+    [ -f "$log" ] || SHARED_LOGS_COMPLETE=0
+  done
+  if [ "$SHARED_LOGS_COMPLETE" != 1 ]; then
+    SHARED_IMAGE_FAILURES=unknown-incomplete-logs
+    printf 'Could not inspect every browser log for SharedImageBackingFactory failures.\n' \
+      >"$LINUX_DIAGNOSTICS_DIR/shared-image-backing-factory.txt"
+  elif grep -Hni 'SharedImageBackingFactory' "${SHARED_IMAGE_LOGS[@]}" \
+    >"$LINUX_DIAGNOSTICS_DIR/shared-image-backing-factory.txt"; then
+    if grep -Eiq '(error|fail)' "$LINUX_DIAGNOSTICS_DIR/shared-image-backing-factory.txt"; then
+      SHARED_IMAGE_FAILURES=observed
+    else
+      SHARED_IMAGE_FAILURES=not-observed
+    fi
+  else
+    grep_status=$?
+    if [ "$grep_status" -eq 1 ]; then
+      SHARED_IMAGE_FAILURES=not-observed
+      printf 'No SharedImageBackingFactory messages were observed in the standalone probe or A/B browser logs.\n' \
+        >"$LINUX_DIAGNOSTICS_DIR/shared-image-backing-factory.txt"
+    else
+      SHARED_IMAGE_FAILURES=unknown-log-read-error
+      printf 'Could not read every browser log for SharedImageBackingFactory failures.\n' \
+        >"$LINUX_DIAGNOSTICS_DIR/shared-image-backing-factory.txt"
+    fi
+  fi
+
+  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nSharedImageBackingFactoryFailures=%s\n' \
+    "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS" \
+    "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      printf '## Linux WebGPU diagnostic experiment\n\n'
+      printf '| Check | Exit/status |\n| --- | ---: |\n'
+      printf '| Canvas smoke | %s |\n| Offscreen smoke | %s |\n| Functional E2E A | %s |\n| Functional E2E B | %s |\n' \
+        "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS"
+      printf '\nSharedImageBackingFactory failures: **%s**.\n\n' "$SHARED_IMAGE_FAILURES"
+      printf 'Artifacts: `%s`. These are software-runner diagnostics, not GPU hardware evidence or root-cause proof.\n' \
+        "$LINUX_DIAGNOSTICS_DIR"
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+  info "Linux WebGPU smoke statuses: canvas=$SMOKE_CANVAS_STATUS offscreen=$SMOKE_OFFSCREEN_STATUS"
+  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
+  if [ "$SMOKE_CANVAS_STATUS" -ne 0 ] || [ "$SMOKE_OFFSCREEN_STATUS" -ne 0 ] ||
+    [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then
+    fail "Linux WebGPU diagnostics/browser E2E failed (canvas=$SMOKE_CANVAS_STATUS, offscreen=$SMOKE_OFFSCREEN_STATUS, A=$A_STATUS, B=$B_STATUS); see $LINUX_DIAGNOSTICS_DIR/summary.txt"
   fi
 else
   info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"

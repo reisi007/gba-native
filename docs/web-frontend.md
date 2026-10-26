@@ -185,6 +185,24 @@ user override (it replaces the preset); unset or empty values use the
 platform-aware default. Playwright still reports forced WebGPU failures and
 device loss; these switches do not introduce fallback or relaxed assertions.
 
+Linux CI's explicitly gated `WEB_LINUX_AB_DIAGNOSTICS=1` path also runs two
+standalone probes once with the exact current Variant A arguments and pinned
+Chromium revision. Both use `page.route()` to serve a CSP-restricted document
+from the existing loopback HTTP origin and verify `isSecureContext`. The canvas
+probe configures the preferred WebGPU format, submits two clear passes and checks
+a Playwright screenshot's clear-color pixel; the offscreen probe verifies a
+compute-buffer readback without creating a canvas. Each records console/page
+errors, adapter details, a bounded post-work wait and `device.lost` separately
+from its deliberate teardown. These diagnostics are not GPU-hardware evidence
+and do not establish root cause; either probe failing fails the CI browser gate
+after both full A/B functional suites have run. Artifacts are retained below
+`output/web-linux-ab-*/smoke-{canvas,offscreen}`.
+Animation-frame waits and Playwright navigation, evaluation, screenshot and
+cleanup calls have deadlines; a 150-second harness ceiling persists a failed
+result and exits the owned smoke process if cleanup stalls. Playwright's Browser
+API does not expose the launched Chromium child exit code, so the fallback closes
+the harness/control pipe and does not attempt a broad process kill.
+
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
 pixelated`, no CSS blur. The surface is deferred until a non-zero canvas size;
