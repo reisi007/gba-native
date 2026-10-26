@@ -41,16 +41,16 @@ if [ "$MODE" = "ci" ] && [ "$(uname -s)" = Linux ] && [ "${CI:-}" = true ]; then
   mkdir -p "$ROOT/output"
   DIAGNOSTIC_STAMP=$(date -u '+%Y%m%dT%H%M%SZ')
   for suffix in $(seq 0 99); do
-    candidate="$ROOT/output/web-linux-diag-$DIAGNOSTIC_STAMP-$$-$suffix"
+    candidate="$ROOT/output/web-linux-proc-$DIAGNOSTIC_STAMP-$$-$suffix"
     if mkdir "$candidate" 2>/dev/null; then
       LINUX_DIAGNOSTICS_DIR="$candidate"
       break
     fi
   done
   [ -n "$LINUX_DIAGNOSTICS_DIR" ] ||
-    fail "could not allocate a fresh output/web-linux-diag-* directory"
+    fail "could not allocate a fresh output/web-linux-proc-* directory"
   LINUX_DIAGNOSTICS_ENABLED=1
-  info "Linux browser diagnostics will be saved under $LINUX_DIAGNOSTICS_DIR"
+  info "Linux browser/process diagnostics will be saved under $LINUX_DIAGNOSTICS_DIR"
 fi
 
 PLAYWRIGHT_REVISION=$(cd "$NPM" && "$NODE_BIN" -e '
@@ -108,12 +108,18 @@ if [ "$MODE" = "ci" ]; then
   HEADLESS=1
   CHANNEL="${WEB_E2E_CHANNEL:-chromium}"
 fi
+if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
+  # Add process logging only for Linux CI diagnostics; preserve the selected
+  # preset or user override and every existing browser launch flag.
+  LAUNCH_ARGS="$LAUNCH_ARGS --enable-logging=stderr --log-level=0"
+fi
 
 info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
 info "launch args: $LAUNCH_ARGS"
 (
   cd "$E2E_DIR"
   if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
+    DEBUG=pw:browser \
     WEB_APP_URL="$URL" \
     WEB_E2E_CHANNEL="$CHANNEL" \
     WEB_E2E_HEADLESS="$HEADLESS" \
