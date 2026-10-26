@@ -46,6 +46,268 @@ fn path_with_cargo(extra: &Path) -> String {
     )
 }
 
+fn host_program(name: &str) -> PathBuf {
+    let path = std::env::var_os("PATH").expect("host PATH is set");
+    for directory in std::env::split_paths(&path) {
+        let candidate = directory.join(name);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    panic!("host PATH has no {name}");
+}
+
+fn executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::write(path, contents).expect("write fake executable");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
+fn linux_ab_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
+    let temp = TempDir::new("linux-ab");
+    let root = temp.path().to_path_buf();
+    let script_dir = root.join("scripts");
+    let dist = root.join("output/web-dist");
+    let server_dir = root.join("target/web/debug");
+    let node_dir = root.join("target/tools/node-pinned/bin");
+    let playwright_dir = root.join("target/web-tools/npm/node_modules/@playwright/test");
+    let browser_cache = root.join("home/Library/Caches/ms-playwright/chromium-test-revision");
+    let apps_web = root.join("apps/web");
+    let bin = root.join("bin");
+    for directory in [
+        &script_dir,
+        &dist,
+        &server_dir,
+        &node_dir,
+        &playwright_dir,
+        &browser_cache,
+        &apps_web,
+        &bin,
+    ] {
+        std::fs::create_dir_all(directory).expect("create web E2E fixture directory");
+    }
+
+    let repo = repo_root();
+    for script in ["lib.sh", "web-e2e.sh", "web-gpu-launch-args.sh"] {
+        std::fs::copy(repo.join("scripts").join(script), script_dir.join(script))
+            .expect("copy web E2E script");
+    }
+    for source in [
+        "playwright.config.ts",
+        "playwright.screenshots.config.ts",
+        "tests/functional.spec.ts",
+    ] {
+        let destination = apps_web.join(source);
+        std::fs::create_dir_all(destination.parent().expect("source parent"))
+            .expect("create copied source parent");
+        std::fs::copy(repo.join("apps/web").join(source), destination)
+            .expect("copy Playwright config or suite");
+    }
+    std::fs::write(dist.join("index.html"), "fixture").expect("write fixture bundle");
+    std::fs::write(dist.join("app.css"), "fixture").expect("write fixture CSS");
+    std::fs::write(
+        playwright_dir.join("cli.js"),
+        "// fake Playwright entry point\n",
+    )
+    .expect("write fake Playwright entry point");
+
+    executable(
+        &server_dir.join("gba-native-web-serve"),
+        "#!/bin/sh\nprintf 'listening on http://127.0.0.1:43210\\n'\nexec sleep 900\n",
+    );
+    executable(
+        &node_dir.join("node"),
+        r##"#!/bin/sh
+if [ "${1:-}" = "-e" ]; then
+  printf 'test-revision\n'
+  exit 0
+fi
+count=0
+if [ -f "$AB_CALL_LOG.count" ]; then read count < "$AB_CALL_LOG.count"; fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$AB_CALL_LOG.count"
+printf '%s\t%s\n' "$WEB_E2E_LAUNCH_ARGS" "$WEB_E2E_OUTPUT_DIR" >> "$AB_CALL_LOG"
+printf 'fake Playwright run %s\n' "$count"
+if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$count" -eq 1 ]; then exit 17; fi
+if [ "${AB_FAIL_VARIANT:-}" = B ] && [ "$count" -eq 2 ]; then exit 18; fi
+exit 0
+"##,
+    );
+    executable(&bin.join("uname"), "#!/bin/sh\nprintf 'Linux\\n'\n");
+
+    let calls = root.join("calls.log");
+    (temp, root, bin, calls)
+}
+
+fn run_linux_ab_fixture(
+    root: &Path,
+    bin: &Path,
+    calls: &Path,
+    launch_args: &str,
+    fail_variant: Option<&str>,
+) -> Output {
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut command = Command::new(host_program("bash"));
+    command
+        .arg(root.join("scripts/web-e2e.sh"))
+        .arg("ci")
+        .current_dir(root)
+        .env("PATH", path)
+        .env("HOME", root.join("home"))
+        .env_remove("XDG_CACHE_HOME")
+        .env("CI", "true")
+        .env("WEB_LINUX_AB_DIAGNOSTICS", "1")
+        .env("WEB_E2E_LAUNCH_ARGS", launch_args)
+        .env("AB_CALL_LOG", calls);
+    if let Some(variant) = fail_variant {
+        command.env("AB_FAIL_VARIANT", variant);
+    } else {
+        command.env_remove("AB_FAIL_VARIANT");
+    }
+    command.output().expect("run Linux A/B E2E fixture")
+}
+
+fn newest_linux_ab_dir(root: &Path) -> PathBuf {
+    let mut diagnostics: Vec<_> = std::fs::read_dir(root.join("output"))
+        .expect("read fixture output directory")
+        .map(|entry| entry.expect("read output entry").path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("web-linux-ab-"))
+        })
+        .collect();
+    diagnostics.sort();
+    diagnostics.pop().expect("Linux A/B diagnostics directory")
+}
+
+fn assert_linux_ab_diagnostic_contract() {
+    let (temp, root, bin, calls) = linux_ab_fixture();
+    let launch_args = concat!(
+        "--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader ",
+        "--enable-dawn-features=allow_unsafe_apis --disable-dawn-features=use_dxc ",
+        "--enable-webgpu-developer-features --use-gpu-in-tests ",
+        "--enable-accelerated-2d-canvas --enable-features=Vulkan ",
+        "--use-angle=vulkan --use-vulkan=swiftshader --disable-vulkan-surface"
+    );
+
+    // A failure is a reported failure, but must not suppress the same full B run.
+    let a_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("A"));
+    assert!(!a_failure.status.success());
+    let output_text = String::from_utf8_lossy(&a_failure.stderr);
+    assert!(output_text.contains("A=17 B=0"), "{output_text}");
+    let first_calls = std::fs::read_to_string(&calls).expect("read both variant calls");
+    let first_lines: Vec<_> = first_calls.lines().collect();
+    assert_eq!(
+        first_lines.len(),
+        2,
+        "both variants must run: {first_calls}"
+    );
+    let (a_args, a_output) = first_lines[0].split_once('\t').expect("A call fields");
+    let (b_args, b_output) = first_lines[1].split_once('\t').expect("B call fields");
+    assert_eq!(
+        a_args
+            .split_whitespace()
+            .filter(|arg| *arg == "--use-angle=vulkan")
+            .count(),
+        1
+    );
+    assert_eq!(
+        a_args.replace("--use-angle=vulkan", "--use-angle=opengl"),
+        b_args,
+        "B changes only the exact ANGLE token"
+    );
+    for required in [
+        "--use-webgpu-adapter=swiftshader",
+        "--enable-features=Vulkan",
+        "--use-vulkan=swiftshader",
+        "--disable-vulkan-surface",
+        "--enable-logging=stderr",
+        "--log-level=0",
+    ] {
+        assert!(
+            a_args.split_whitespace().any(|arg| arg == required),
+            "A missing {required}"
+        );
+        assert!(
+            b_args.split_whitespace().any(|arg| arg == required),
+            "B missing {required}"
+        );
+    }
+    assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
+    assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
+    let first_dir = newest_linux_ab_dir(&root);
+    assert_eq!(
+        std::fs::read_to_string(first_dir.join("summary.txt")).expect("read A/B summary"),
+        "A=17\nB=0\n"
+    );
+    for variant in ["variant-a", "variant-b"] {
+        assert!(first_dir.join(variant).join("playwright.log").is_file());
+        assert!(first_dir.join(variant).join("launch-args.txt").is_file());
+        assert!(first_dir.join(variant).join("test-results").is_dir());
+    }
+
+    // B failures also fail the overall gate, after A has completed successfully.
+    std::fs::write(&calls, "").expect("reset fixture calls");
+    std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
+    let b_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("B"));
+    assert!(!b_failure.status.success());
+    let output_text = String::from_utf8_lossy(&b_failure.stderr);
+    assert!(output_text.contains("A=0 B=18"), "{output_text}");
+    let second_dir = newest_linux_ab_dir(&root);
+    assert_eq!(
+        std::fs::read_to_string(second_dir.join("summary.txt")).expect("read B-failure summary"),
+        "A=0\nB=18\n"
+    );
+
+    // A missing exact token is rejected before either browser run is started.
+    std::fs::write(&calls, "").expect("reset fixture calls");
+    std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
+    let missing_angle = run_linux_ab_fixture(
+        &root,
+        &bin,
+        &calls,
+        "--use-webgpu-adapter=swiftshader",
+        None,
+    );
+    assert!(!missing_angle.status.success());
+    let output_text = String::from_utf8_lossy(&missing_angle.stderr);
+    assert!(
+        output_text.contains("exactly one --use-angle=vulkan token (found 0)"),
+        "{output_text}"
+    );
+    assert!(
+        std::fs::read_to_string(&calls)
+            .expect("read empty fixture calls")
+            .is_empty()
+    );
+
+    // Duplicate exact tokens are equally ambiguous and rejected before launch.
+    let duplicate_angle = run_linux_ab_fixture(
+        &root,
+        &bin,
+        &calls,
+        "--use-angle=vulkan --use-angle=vulkan",
+        None,
+    );
+    assert!(!duplicate_angle.status.success());
+    let output_text = String::from_utf8_lossy(&duplicate_angle.stderr);
+    assert!(
+        output_text.contains("exactly one --use-angle=vulkan token (found 2)"),
+        "{output_text}"
+    );
+    assert!(
+        std::fs::read_to_string(&calls)
+            .expect("read empty fixture calls")
+            .is_empty()
+    );
+    drop(temp);
+}
+
 fn fake_ratchet(directory: &Path, version: &str, name: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
@@ -122,7 +384,7 @@ fn web_bootstrap_self_test_runs_before_clean_checkout_provisioning() {
 }
 
 #[test]
-fn browser_gpu_launch_args_are_platform_specific_and_shared_by_both_paths() {
+fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     let root = repo_root();
     let helper = root.join("scripts/web-gpu-launch-args.sh");
     let metadata = std::fs::metadata(&helper).expect("WebGPU launch-args helper exists");
@@ -197,4 +459,22 @@ fn browser_gpu_launch_args_are_platform_specific_and_shared_by_both_paths() {
             "{script} must pass its final launch args to Playwright"
         );
     }
+
+    let workflow =
+        std::fs::read_to_string(root.join(".github/workflows/web.yml")).expect("browser workflow");
+    let foundation_step = workflow
+        .split("- name: Browser foundation gate")
+        .nth(1)
+        .expect("browser foundation gate step")
+        .split("\n      - name:")
+        .next()
+        .expect("browser foundation gate step body");
+    assert!(
+        foundation_step.contains("WEB_LINUX_AB_DIAGNOSTICS: \"1\""),
+        "only the Web foundation step opts into Linux A/B diagnostics"
+    );
+    assert!(workflow.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"));
+    assert!(workflow.contains("name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"));
+    assert!(workflow.contains("path: output/web-linux-ab-*/"));
+    assert_linux_ab_diagnostic_contract();
 }

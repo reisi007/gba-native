@@ -8,6 +8,7 @@
 # Usage: ./scripts/web-e2e.sh [local|ci]
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
 #   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
+#   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into the matched Vulkan/OpenGL run
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -21,6 +22,17 @@ MODE="${1:-local}"
 case "$MODE" in
   local | ci) ;;
   *) fail "scripts/web-e2e.sh: mode must be local or ci (got: $MODE)" ;;
+esac
+
+LINUX_AB_DIAGNOSTICS=0
+case "${WEB_LINUX_AB_DIAGNOSTICS:-}" in
+  "" | 0) ;;
+  1)
+    [ "$MODE" = ci ] && [ "$(uname -s)" = Linux ] && [ "${CI:-}" = true ] ||
+      fail "WEB_LINUX_AB_DIAGNOSTICS=1 is supported only for Linux CI runs of scripts/web-e2e.sh ci"
+    LINUX_AB_DIAGNOSTICS=1
+    ;;
+  *) fail "WEB_LINUX_AB_DIAGNOSTICS must be unset, 0, or 1" ;;
 esac
 
 DIST="$ROOT/output/web-dist"
@@ -40,8 +52,12 @@ LINUX_DIAGNOSTICS_ENABLED=""
 if [ "$MODE" = "ci" ] && [ "$(uname -s)" = Linux ] && [ "${CI:-}" = true ]; then
   mkdir -p "$ROOT/output"
   DIAGNOSTIC_STAMP=$(date -u '+%Y%m%dT%H%M%SZ')
+  DIAGNOSTIC_PREFIX="web-linux-proc"
+  if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
+    DIAGNOSTIC_PREFIX="web-linux-ab"
+  fi
   for suffix in $(seq 0 99); do
-    candidate="$ROOT/output/web-linux-proc-$DIAGNOSTIC_STAMP-$$-$suffix"
+    candidate="$ROOT/output/$DIAGNOSTIC_PREFIX-$DIAGNOSTIC_STAMP-$$-$suffix"
     if mkdir "$candidate" 2>/dev/null; then
       LINUX_DIAGNOSTICS_DIR="$candidate"
       break
@@ -114,29 +130,95 @@ if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
   LAUNCH_ARGS="$LAUNCH_ARGS --enable-logging=stderr --log-level=0"
 fi
 
-info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
-info "launch args: $LAUNCH_ARGS"
-(
-  cd "$E2E_DIR"
-  if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
-    DEBUG=pw:browser \
-    WEB_APP_URL="$URL" \
-    WEB_E2E_CHANNEL="$CHANNEL" \
-    WEB_E2E_HEADLESS="$HEADLESS" \
-    WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
-    WEB_E2E_LINUX_DIAGNOSTICS="$LINUX_DIAGNOSTICS_ENABLED" \
-    WEB_E2E_OUTPUT_DIR="$LINUX_DIAGNOSTICS_DIR/test-results" \
-      "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts \
-      2>&1 | tee "$LINUX_DIAGNOSTICS_DIR/playwright.log"
-  else
-    WEB_APP_URL="$URL" \
-    WEB_E2E_CHANNEL="$CHANNEL" \
-    WEB_E2E_HEADLESS="$HEADLESS" \
-    WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
-    WEB_E2E_LINUX_DIAGNOSTICS="" \
-    WEB_E2E_OUTPUT_DIR="" \
-      "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts
+if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
+  read -r -a A_LAUNCH_ARGS <<<"$LAUNCH_ARGS"
+  ANGLE_VULKAN_COUNT=0
+  for arg in "${A_LAUNCH_ARGS[@]}"; do
+    if [ "$arg" = "--use-angle=vulkan" ]; then
+      ANGLE_VULKAN_COUNT=$((ANGLE_VULKAN_COUNT + 1))
+    fi
+  done
+  [ "$ANGLE_VULKAN_COUNT" -eq 1 ] ||
+    fail "Linux A/B diagnostics require exactly one --use-angle=vulkan token (found $ANGLE_VULKAN_COUNT); refusing to form variant B"
+
+  B_LAUNCH_ARGS=()
+  for arg in "${A_LAUNCH_ARGS[@]}"; do
+    if [ "$arg" = "--use-angle=vulkan" ]; then
+      B_LAUNCH_ARGS+=(--use-angle=opengl)
+    else
+      B_LAUNCH_ARGS+=("$arg")
+    fi
+  done
+  B_LAUNCH_ARGS_TEXT="${B_LAUNCH_ARGS[*]}"
+
+  A_STATUS=""
+  B_STATUS=""
+  for variant in A B; do
+    if [ "$variant" = A ]; then
+      variant_dir="$LINUX_DIAGNOSTICS_DIR/variant-a"
+      variant_launch_args="$LAUNCH_ARGS"
+    else
+      variant_dir="$LINUX_DIAGNOSTICS_DIR/variant-b"
+      variant_launch_args="$B_LAUNCH_ARGS_TEXT"
+    fi
+    mkdir -p "$variant_dir/test-results"
+    printf '%s\n' "$variant_launch_args" >"$variant_dir/launch-args.txt"
+    info "functional E2E variant $variant (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
+    info "variant $variant launch args: $variant_launch_args"
+    if (
+      cd "$E2E_DIR"
+      DEBUG=pw:browser \
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_HEADLESS="$HEADLESS" \
+      WEB_E2E_LAUNCH_ARGS="$variant_launch_args" \
+      WEB_E2E_LINUX_DIAGNOSTICS="$LINUX_DIAGNOSTICS_ENABLED" \
+      WEB_E2E_OUTPUT_DIR="$variant_dir/test-results" \
+        "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts \
+        2>&1 | tee "$variant_dir/playwright.log"
+    ); then
+      variant_status=0
+    else
+      variant_status=$?
+    fi
+    printf '%s\n' "$variant_status" >"$variant_dir/exit-status.txt"
+    if [ "$variant" = A ]; then
+      A_STATUS="$variant_status"
+    else
+      B_STATUS="$variant_status"
+    fi
+  done
+
+  printf 'A=%s\nB=%s\n' "$A_STATUS" "$B_STATUS" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
+  if [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then
+    fail "Linux A/B browser E2E failed (A=$A_STATUS, B=$B_STATUS); see $LINUX_DIAGNOSTICS_DIR/summary.txt"
   fi
-)
+else
+  info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
+  info "launch args: $LAUNCH_ARGS"
+  (
+    cd "$E2E_DIR"
+    if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
+      DEBUG=pw:browser \
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_HEADLESS="$HEADLESS" \
+      WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
+      WEB_E2E_LINUX_DIAGNOSTICS="$LINUX_DIAGNOSTICS_ENABLED" \
+      WEB_E2E_OUTPUT_DIR="$LINUX_DIAGNOSTICS_DIR/test-results" \
+        "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts \
+        2>&1 | tee "$LINUX_DIAGNOSTICS_DIR/playwright.log"
+    else
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_HEADLESS="$HEADLESS" \
+      WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
+      WEB_E2E_LINUX_DIAGNOSTICS="" \
+      WEB_E2E_OUTPUT_DIR="" \
+        "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts
+    fi
+  )
+fi
 
 info "functional E2E passed"

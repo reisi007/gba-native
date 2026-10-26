@@ -39,4 +39,17 @@ jobs:
       # The same gate a developer runs locally. WebGPU is exercised with the
       # public SwiftShader flags; the UI reports the observed adapter honestly.
       - name: Browser foundation gate
+        env:
+          WEB_LINUX_AB_DIAGNOSTICS: "1"
         run: bash scripts/web.sh --ci
+
+      # Preserve each matched variant's Playwright output, browser logs, and
+      # status summary even when either full suite fails.
+      - name: Upload Linux A/B browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/web-linux-ab-*/
+          if-no-files-found: ignore
+          retention-days: 14
