@@ -199,9 +199,9 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 272, "full workspace test inventory changed");
+    assert_eq!(total, 273, "full workspace test inventory changed");
 
-    // Exact inventory retains prior families and adds only the clean-checkout bootstrap test.
+    // Exact inventory retains prior families and adds the browser_gpu_launch_args test.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -251,7 +251,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("cli_output", 5),
         ("frontend_gates", 4),
         ("quality_counter", 10),
-        ("scripts", 4),
+        ("scripts", 5),
     ];
     let mut baseline = 0;
     for (name, expected) in core_targets {
@@ -298,7 +298,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 268, "selected package test inventory changed");
+    assert_eq!(baseline, 269, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.
