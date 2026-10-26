@@ -27,6 +27,8 @@ DIST="$ROOT/output/web-dist"
 NPM="$ROOT/target/web-tools/npm"
 SERVER="$ROOT/target/web/debug/gba-native-web-serve"
 NODE_BIN="$ROOT/target/tools/node-pinned/bin/node"
+LINUX_DIAGNOSTICS_DIR=""
+LINUX_DIAGNOSTICS_ENABLED=""
 
 [ -f "$DIST/index.html" ] && [ -s "$DIST/app.css" ] ||
   fail "the bundle is missing; run ./scripts/web.sh --build-only first"
@@ -34,6 +36,22 @@ NODE_BIN="$ROOT/target/tools/node-pinned/bin/node"
 [ -x "$NODE_BIN" ] || fail "the pinned Node runtime is missing; run ./scripts/bootstrap-web-tools.sh"
 [ -f "$NPM/node_modules/@playwright/test/cli.js" ] ||
   fail "Playwright tooling is missing; run ./scripts/bootstrap-web-tools.sh"
+
+if [ "$MODE" = "ci" ] && [ "$(uname -s)" = Linux ] && [ "${CI:-}" = true ]; then
+  mkdir -p "$ROOT/output"
+  DIAGNOSTIC_STAMP=$(date -u '+%Y%m%dT%H%M%SZ')
+  for suffix in $(seq 0 99); do
+    candidate="$ROOT/output/web-linux-diag-$DIAGNOSTIC_STAMP-$$-$suffix"
+    if mkdir "$candidate" 2>/dev/null; then
+      LINUX_DIAGNOSTICS_DIR="$candidate"
+      break
+    fi
+  done
+  [ -n "$LINUX_DIAGNOSTICS_DIR" ] ||
+    fail "could not allocate a fresh output/web-linux-diag-* directory"
+  LINUX_DIAGNOSTICS_ENABLED=1
+  info "Linux browser diagnostics will be saved under $LINUX_DIAGNOSTICS_DIR"
+fi
 
 PLAYWRIGHT_REVISION=$(cd "$NPM" && "$NODE_BIN" -e '
 const fs = require("fs");
@@ -51,6 +69,10 @@ done
 mkdir -p "$ROOT/output"
 TMP=$(mktemp -d "$ROOT/output/web-e2e.XXXXXX")
 SERVER_PID=""
+SERVER_LOG="$TMP/server.log"
+if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
+  SERVER_LOG="$LINUX_DIAGNOSTICS_DIR/server.log"
+fi
 cleanup() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
@@ -61,15 +83,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 info "starting loopback server for $DIST"
-"$SERVER" --root "$DIST" --bind 127.0.0.1:0 --lifetime-secs 900 >"$TMP/server.log" 2>&1 &
+"$SERVER" --root "$DIST" --bind 127.0.0.1:0 --lifetime-secs 900 >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 100); do
-  if grep -q '^listening on ' "$TMP/server.log"; then break; fi
-  kill -0 "$SERVER_PID" 2>/dev/null || fail "server exited early: $(cat "$TMP/server.log")"
+  if grep -q '^listening on ' "$SERVER_LOG"; then break; fi
+  kill -0 "$SERVER_PID" 2>/dev/null || fail "server exited early: $(cat "$SERVER_LOG")"
   sleep 0.1
 done
-URL=$(sed -n 's/^listening on //p' "$TMP/server.log" | head -1)
-[ -n "$URL" ] || fail "server did not report a URL: $(cat "$TMP/server.log")"
+URL=$(sed -n 's/^listening on //p' "$SERVER_LOG" | head -1)
+[ -n "$URL" ] || fail "server did not report a URL: $(cat "$SERVER_LOG")"
 info "test origin: $URL"
 
 E2E_DIR="$NPM/e2e"
@@ -91,11 +113,24 @@ info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
 info "launch args: $LAUNCH_ARGS"
 (
   cd "$E2E_DIR"
-  WEB_APP_URL="$URL" \
-  WEB_E2E_CHANNEL="$CHANNEL" \
-  WEB_E2E_HEADLESS="$HEADLESS" \
-  WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
-    "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts
+  if [ -n "$LINUX_DIAGNOSTICS_DIR" ]; then
+    WEB_APP_URL="$URL" \
+    WEB_E2E_CHANNEL="$CHANNEL" \
+    WEB_E2E_HEADLESS="$HEADLESS" \
+    WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
+    WEB_E2E_LINUX_DIAGNOSTICS="$LINUX_DIAGNOSTICS_ENABLED" \
+    WEB_E2E_OUTPUT_DIR="$LINUX_DIAGNOSTICS_DIR/test-results" \
+      "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts \
+      2>&1 | tee "$LINUX_DIAGNOSTICS_DIR/playwright.log"
+  else
+    WEB_APP_URL="$URL" \
+    WEB_E2E_CHANNEL="$CHANNEL" \
+    WEB_E2E_HEADLESS="$HEADLESS" \
+    WEB_E2E_LAUNCH_ARGS="$LAUNCH_ARGS" \
+    WEB_E2E_LINUX_DIAGNOSTICS="" \
+    WEB_E2E_OUTPUT_DIR="" \
+      "$NODE_BIN" "$NPM/node_modules/@playwright/test/cli.js" test -c playwright.config.ts
+  fi
 )
 
 info "functional E2E passed"

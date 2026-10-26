@@ -18,6 +18,7 @@ const launchArgs = (
 )
   .split(/\s+/)
   .filter(Boolean);
+const outputDir = process.env.WEB_E2E_OUTPUT_DIR || './test-results/functional';
 
 export default defineConfig({
   testDir: '.',
@@ -29,7 +30,7 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 30_000 },
   reporter: [['list']],
-  outputDir: './test-results/functional',
+  outputDir,
   use: {
     baseURL,
     headless: process.env.WEB_E2E_HEADLESS !== '0',

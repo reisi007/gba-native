@@ -86,6 +86,212 @@ function problemFailureMessage(summary: ProblemSummary): string {
 const browserEventTrails = new WeakMap<Page, BrowserEvent[]>();
 const webGpuFormatWarnings = new WeakMap<Page, string[]>();
 
+// This preload is deliberately diagnostic-only. In particular it never adds a
+// reaction to GPUDevice.lost: doing so could mark an otherwise-unhandled
+// rejection as handled. Native unhandledrejection events are observed without
+// preventDefault(), while fulfilled loss is available through app status history.
+function installLinuxE2EDiagnostics(): void {
+  const key = '__gbaLinuxE2EDiagnostics';
+  const existing = (window as unknown as Record<string, unknown>)[key];
+  if (existing) return;
+
+  const MAX_EVENTS = 48;
+  const MAX_EVENT_TEXT = 512;
+  const MAX_STACK_TEXT = 1_200;
+  const MAX_HOOKS = 8;
+  const events: Array<Record<string, unknown>> = [];
+  const hooks: Array<{ name: string; installed: boolean; detail: string }> = [];
+  const deviceIds = new WeakMap<object, number>();
+  const lostPromises = new WeakMap<object, number>();
+  let eventCount = 0;
+  let droppedEvents = 0;
+  let nextDeviceId = 1;
+
+  const clip = (value: unknown, limit: number): string => {
+    try {
+      if (typeof value === 'string') return value.slice(0, limit);
+      if (value instanceof Error) return `${value.name}: ${value.message}`.slice(0, limit);
+      if (value === null) return 'null';
+      return `[${typeof value}]`;
+    } catch {
+      return '[unprintable]';
+    }
+  };
+  const deviceId = (device: object): number => {
+    const known = deviceIds.get(device);
+    if (known !== undefined) return known;
+    const assigned = nextDeviceId;
+    nextDeviceId = Math.min(nextDeviceId + 1, 1_000_000);
+    deviceIds.set(device, assigned);
+    return assigned;
+  };
+  const record = (kind: string, details: Record<string, unknown> = {}): void => {
+    try {
+      eventCount = Math.min(eventCount + 1, Number.MAX_SAFE_INTEGER);
+      const event: Record<string, unknown> = {
+        kind: clip(kind, 64),
+        atMs: Math.round(performance.now()),
+        wallTimeMs: Date.now(),
+      };
+      for (const field of [
+        'deviceId', 'event', 'visibilityState', 'hidden', 'persisted', 'reason', 'stack',
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(details, field)) continue;
+        const value = details[field];
+        if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+          event[field] = value;
+        } else if (typeof value === 'string') {
+          event[field] = value.slice(0, field === 'stack' ? MAX_STACK_TEXT : MAX_EVENT_TEXT);
+        }
+      }
+      if (events.length === MAX_EVENTS) {
+        events.shift();
+        droppedEvents = Math.min(droppedEvents + 1, Number.MAX_SAFE_INTEGER);
+      }
+      events.push(event);
+    } catch {
+      // Diagnostics must never change browser API or application behavior.
+    }
+  };
+  const hookResult = (name: string, installed: boolean, detail: string): void => {
+    if (hooks.length < MAX_HOOKS) {
+      hooks.push({ name: clip(name, 64), installed, detail: clip(detail, MAX_EVENT_TEXT) });
+    }
+  };
+  const lifecycle = (event: Event): void => {
+    const persisted = (event as Event & { persisted?: boolean }).persisted;
+    record('page-lifecycle', {
+      event: event.type,
+      visibilityState: document.visibilityState,
+      hidden: document.hidden,
+      ...(typeof persisted === 'boolean' ? { persisted } : {}),
+    });
+  };
+
+  document.addEventListener('visibilitychange', lifecycle);
+  window.addEventListener('pagehide', lifecycle);
+  window.addEventListener('pageshow', lifecycle);
+  document.addEventListener('freeze', lifecycle);
+  document.addEventListener('resume', lifecycle);
+  window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
+    const id = lostPromises.get(event.promise);
+    if (id === undefined) return;
+    record('device-lost-promise-unhandled-rejection', {
+      deviceId: id,
+      reason: clip(event.reason, MAX_EVENT_TEXT),
+    });
+    // Intentionally do not call preventDefault(): retain native error reporting.
+  });
+  window.addEventListener('rejectionhandled', (event: PromiseRejectionEvent) => {
+    const id = lostPromises.get(event.promise);
+    if (id !== undefined) record('device-lost-promise-rejectionhandled', { deviceId: id });
+  });
+
+  const gpuDevice = (globalThis as unknown as {
+    GPUDevice?: { prototype?: object };
+  }).GPUDevice;
+  const prototype = gpuDevice?.prototype;
+  if (!prototype) {
+    hookResult('GPUDevice.prototype', false, 'GPUDevice was not exposed at preload time');
+  } else {
+    const findDescriptor = (property: string): { owner: object; descriptor: PropertyDescriptor } | null => {
+      let owner: object | null = prototype;
+      while (owner) {
+        const descriptor = Object.getOwnPropertyDescriptor(owner, property);
+        if (descriptor) return { owner, descriptor };
+        owner = Object.getPrototypeOf(owner) as object | null;
+      }
+      return null;
+    };
+
+    const destroy = findDescriptor('destroy');
+    if (!destroy || typeof destroy.descriptor.value !== 'function') {
+      hookResult('GPUDevice.destroy', false, 'method descriptor was unavailable');
+    } else if (!destroy.descriptor.configurable && !destroy.descriptor.writable) {
+      hookResult('GPUDevice.destroy', false, 'method descriptor was not replaceable');
+    } else {
+      const original = destroy.descriptor.value as (...args: unknown[]) => unknown;
+      const wrapped = function (this: object, ...args: unknown[]): unknown {
+        let stack = '';
+        try {
+          stack = new Error().stack ?? '';
+        } catch {
+          // Timestamp and device identity remain useful without a stack.
+        }
+        try {
+          record('device-destroy', { deviceId: deviceId(this), stack });
+        } catch {
+          // A failed diagnostic must not replace the native method's behavior.
+        }
+        return Reflect.apply(original, this, args);
+      };
+      try {
+        Object.defineProperty(destroy.owner, 'destroy', {
+          ...destroy.descriptor,
+          value: wrapped,
+        });
+        hookResult('GPUDevice.destroy', true, 'calls, timestamps, and bounded stacks recorded');
+      } catch (error) {
+        hookResult('GPUDevice.destroy', false, clip(error, MAX_EVENT_TEXT));
+      }
+    }
+
+    const lost = findDescriptor('lost');
+    if (!lost || typeof lost.descriptor.get !== 'function') {
+      hookResult('GPUDevice.lost', false, 'getter descriptor was unavailable');
+    } else if (!lost.descriptor.configurable) {
+      hookResult('GPUDevice.lost', false, 'getter descriptor was not replaceable');
+    } else {
+      const original = lost.descriptor.get;
+      const wrapped = function (this: object): unknown {
+        let promise: unknown;
+        try {
+          promise = Reflect.apply(original, this, []);
+        } catch (error) {
+          try {
+            record('device-lost-getter-error', {
+              deviceId: deviceId(this),
+              reason: clip(error, MAX_EVENT_TEXT),
+            });
+          } catch {
+            // Preserve the original getter exception even if diagnostics fail.
+          }
+          throw error;
+        }
+        if (promise !== null && (typeof promise === 'object' || typeof promise === 'function')) {
+          try {
+            lostPromises.set(promise as object, deviceId(this));
+          } catch {
+            // The original promise is always returned unchanged.
+          }
+        }
+        return promise;
+      };
+      try {
+        Object.defineProperty(lost.owner, 'lost', { ...lost.descriptor, get: wrapped });
+        hookResult(
+          'GPUDevice.lost',
+          true,
+          'tracks native unhandled-rejection events only; fulfilled loss is in app status history',
+        );
+      } catch (error) {
+        hookResult('GPUDevice.lost', false, clip(error, MAX_EVENT_TEXT));
+      }
+    }
+  }
+
+  (window as unknown as Record<string, unknown>)[key] = {
+    snapshot: () => ({
+      enabled: true,
+      limits: { maxEvents: MAX_EVENTS, maxEventText: MAX_EVENT_TEXT, maxStackText: MAX_STACK_TEXT },
+      eventCount,
+      droppedEvents,
+      events: events.map((event) => ({ ...event })),
+      hooks: hooks.map((hook) => ({ ...hook })),
+    }),
+  };
+}
+
 async function browserDiagnosticSnapshot(page: Page, reason: string): Promise<unknown> {
   return page.evaluate(({ reason, fields }) => {
     const api = (window as unknown as {
@@ -95,6 +301,9 @@ async function browserDiagnosticSnapshot(page: Page, reason: string): Promise<un
         statusHistory?: () => unknown[];
       };
     }).__gbaNative;
+    const linuxDiagnostics = (window as unknown as {
+      __gbaLinuxE2EDiagnostics?: { snapshot?: () => unknown };
+    }).__gbaLinuxE2EDiagnostics;
     const pick = (value: unknown): unknown => {
       if (value === null || typeof value !== 'object') return value ?? null;
       const record = value as Record<string, unknown>;
@@ -139,6 +348,7 @@ async function browserDiagnosticSnapshot(page: Page, reason: string): Promise<un
       currentStatus,
       statusHistory: history,
       statusReadError,
+      linuxDiagnostics: linuxDiagnostics?.snapshot?.() ?? null,
       ui: {
         statusMessage: byId('status-message')?.textContent?.slice(0, 500) ?? null,
         statusDetail: byId('status-detail')?.textContent?.slice(0, 500) ?? null,
@@ -190,6 +400,13 @@ const test = base.extend<Fixtures>({
     const events: BrowserEvent[] = [];
     const formatWarnings: string[] = [];
     const problems = createProblemCollector();
+    if (
+      process.platform === 'linux' &&
+      process.env.CI === 'true' &&
+      process.env.WEB_E2E_LINUX_DIAGNOSTICS === '1'
+    ) {
+      await page.addInitScript(installLinuxE2EDiagnostics);
+    }
     browserEventTrails.set(page, events);
     webGpuFormatWarnings.set(page, formatWarnings);
     const addEvent = (event: BrowserEvent) => {
