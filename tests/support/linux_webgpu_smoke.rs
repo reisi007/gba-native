@@ -27,6 +27,26 @@ pub fn assert_probe_source(root: &Path) {
             "missing probe contract: {contract}"
         );
     }
+    for app_contract in [
+        "APP_PATH = '/?autostart=1&backend=webgpu'",
+        "async function inPageAppProbe",
+        "page.evaluate(inPageAppProbe)",
+        "APP_STARTUP_WAIT_MS = 30_000",
+        "APP_POST_WORK_WAIT_MS = 7_000",
+        "state === 'empty'",
+        "const settled = ['ready', 'error', 'lost'].includes(state)",
+        "if (html !== null)",
+        "document.body?.dataset?.appState",
+        "window.__gbaNative",
+        "statusHistory",
+        "deviceLossObserved",
+        "if (page && MODE !== 'app')",
+    ] {
+        assert!(
+            source.contains(app_contract),
+            "missing app probe contract: {app_contract}"
+        );
+    }
 }
 
 pub fn assert_output(calls: &Path, diagnostics: &Path, a_args: &str) {
@@ -35,8 +55,11 @@ pub fn assert_output(calls: &Path, diagnostics: &Path, a_args: &str) {
         .lines()
         .map(str::to_owned)
         .collect();
-    assert_eq!(lines.len(), 2, "both probes must run: {lines:?}");
-    for (line, mode) in lines.iter().zip(["canvas", "offscreen"]) {
+    assert!(
+        lines.len() >= 2,
+        "both standalone probes must run: {lines:?}"
+    );
+    for (line, mode) in lines[..2].iter().zip(["canvas", "offscreen"]) {
         let fields: Vec<_> = line.split('\t').collect();
         assert_eq!(fields[0], mode);
         assert_eq!(fields[1], a_args, "smoke must use exact A arguments");
@@ -44,6 +67,12 @@ pub fn assert_output(calls: &Path, diagnostics: &Path, a_args: &str) {
             fields[2].ends_with(&format!("/smoke-{mode}")),
             "{}",
             fields[2]
+        );
+    }
+    for line in &lines[2..] {
+        assert!(
+            line.contains("/matrix-"),
+            "non-gating matrix probes must stay in their own directories: {line}"
         );
     }
 

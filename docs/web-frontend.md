@@ -203,6 +203,50 @@ result and exits the owned smoke process if cleanup stalls. Playwright's Browser
 API does not expose the launched Chromium child exit code, so the fallback closes
 the harness/control pipe and does not attempt a broad process kill.
 
+The same explicitly gated `WEB_LINUX_AB_DIAGNOSTICS=1` path also runs a
+non-gating flag matrix. Its `app` harness mode navigates the real served bundle
+on its public route `/?autostart=1&backend=webgpu` without `page.route()`,
+injected scripts or a fallback; the standalone `canvas`/`offscreen` modes keep
+using the routed, CSP-restricted document from the existing loopback origin. The
+app probe waits through the app's initial `empty` and subsequent `loading`
+states for a terminal `ready`, `error` or `lost` outcome (30-second bound), and
+requires a matching terminal state from the read-only app diagnostic API before
+reporting a completed observation. It captures an initial snapshot and a
+seven-second post-work snapshot of `window.__gbaNative.status()`, its bounded
+history, and canvas
+geometry and visibility, and records lost/error state as an observation instead
+of suppressing it. Console, page-error and request-failure diagnostics stay in
+`result.json`; only harness integrity fails closed.
+
+The matrix baseline is the app with the exact current Variant A flags. Four
+omission controls then remove exactly one token each — `--enable-features=Vulkan`,
+`--use-angle=vulkan`, `--use-vulkan=swiftshader` or `--disable-vulkan-surface` —
+while every other token, including `--enable-logging=stderr --log-level=0`, is
+retained, and each resulting flag set probes both the real app route and the
+standalone canvas document. Omission is the only control; the matrix adds no
+`--use-angle=opengl` variant because the recorded logs showed no available GL
+backend. Every combination owns a directory below
+`output/web-linux-ab-*/matrix-<control>-<mode>/` with `launch-args.txt`,
+`omitted-flag.txt`, `run-info.txt` (entry, origin, channel, revision),
+`exit-status.txt` and `process-status.json`; probed combinations add
+`playwright.log`, and completed ones `result.json`. For a missing or duplicated
+omission token, the directory keeps the exact Variant A flags it was derived
+from in `launch-args.txt` plus an `invalid-input.txt` reason; the combination is
+recorded as an explicit `invalid-input` result (exit 126) and is not probed. A
+probe that exits without `result.json` is recorded as `harness-failure`. All
+remaining combinations are still attempted and no process is killed broadly.
+`outcome` (`completed`, `probe-reported-failure`, `harness-failure`,
+`invalid-input`) and the recorded exit status describe harness completion, not
+GPU health; the app probe's `deviceLossObserved`/`errorStateObserved` carry the
+observed app outcome separately.
+
+Matrix statuses are listed in `summary.txt` after `matrix-non-gating=true`, in
+`matrix.txt`, and as a separately labelled non-gating table in the GitHub step
+summary. They never change the job status: only the two standalone probes and
+the full A/B functional suites gate, exactly as before. Match or mismatch of a
+control is a diagnostic signal, not root-cause proof, and this document makes no
+Linux matrix result claim.
+
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
 pixelated`, no CSS blur. The surface is deferred until a non-zero canvas size;

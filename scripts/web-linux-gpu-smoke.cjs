@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Standalone Linux CI WebGPU diagnostics. This is not app code and never loads
-// the app bundle: each probe gets a CSP-restricted document via page.route().
+// Linux CI WebGPU diagnostics. Modes canvas/offscreen are standalone probes:
+// each gets a CSP-restricted document via page.route() and never loads the app
+// bundle. Mode app observes the real served app on its public route, forcing
+// WebGPU startup through the ordinary query parameters and changing nothing.
 'use strict';
 
 const fs = require('node:fs');
@@ -32,6 +34,9 @@ const PLAYWRIGHT_TIMEOUTS_MS = {
 };
 const HARNESS_HARD_DEADLINE_MS = 150_000;
 const PROBE_PATH = '/__linux_webgpu_smoke__';
+// Real app entry for mode app. The query parameters are the documented public
+// ones the functional suite already uses; the harness installs no fallback.
+const APP_PATH = '/?autostart=1&backend=webgpu';
 let activeResult = null;
 let hardDeadlineTimer = null;
 
@@ -91,6 +96,7 @@ function persistHardDeadlineFailure() {
   const result = activeResult || {
     schemaVersion: 1,
     mode: MODE,
+    entry: MODE === 'app' ? APP_PATH : PROBE_PATH,
     launch: {
       channel: CHANNEL,
       headless: true,
@@ -130,7 +136,7 @@ function validateEnvironment() {
   if (!OUTPUT_DIR || !fs.statSync(OUTPUT_DIR).isDirectory()) {
     throw new Error('WEBGPU_SMOKE_OUTPUT_DIR must name the fresh probe directory');
   }
-  if (!['canvas', 'offscreen'].includes(MODE)) throw new Error(`unknown probe mode: ${MODE}`);
+  if (!['canvas', 'offscreen', 'app'].includes(MODE)) throw new Error(`unknown probe mode: ${MODE}`);
   const origin = new URL(ORIGIN);
   if (
     origin.protocol !== 'http:' ||
@@ -432,6 +438,173 @@ async function inPageProbe(mode) {
   return report;
 }
 
+async function inPageAppProbe() {
+  const APP_STARTUP_WAIT_MS = 30_000;
+  const APP_POST_WORK_WAIT_MS = 7_000;
+  const POLL_INTERVAL_MS = 100;
+  const MAX_ENTRIES = 32;
+  const STATUS_TEXT_LIMIT = 500;
+  const STATUS_FIELDS = [
+    'state', 'message', 'requested', 'actual', 'autoFallback', 'action', 'detail', 'presented',
+    'sourceSha256', 'guestBudget', 'imageWidth', 'imageHeight', 'surfaceCapEdge', 'surfaceCapPixels',
+    'viewportX', 'viewportY', 'viewportWidth', 'viewportHeight', 'viewportScale', 'viewportClipped',
+    'adapterName', 'backend', 'deviceType', 'driver', 'driverInfo', 'vendorId', 'deviceId',
+    'surfaceFormat', 'renderFormat', 'presentMode', 'maxTextureDimension2d', 'maxBufferSize',
+  ];
+  const started = performance.now();
+  const elapsed = () => Math.round(performance.now() - started);
+  const safeText = (value) => {
+    if (value instanceof Error) return `${value.name}: ${value.message}`;
+    try {
+      return String(value);
+    } catch {
+      return '[unprintable]';
+    }
+  };
+  const clip = (value) => (typeof value === 'string' ? value.slice(0, STATUS_TEXT_LIMIT) : value ?? null);
+  const pickStatus = (status) => {
+    if (status === null || typeof status !== 'object') return null;
+    const snapshot = {};
+    for (const field of STATUS_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(status, field)) continue;
+      const value = status[field];
+      if (typeof value === 'string') snapshot[field] = clip(value);
+      else if (
+        value === null ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+      ) {
+        snapshot[field] = value;
+      }
+    }
+    return snapshot;
+  };
+  const transitions = [];
+  let lastState = null;
+  // Reading the public state attribute never writes to the app.
+  const noteState = () => {
+    const state = document.body?.dataset?.appState ?? null;
+    if (state !== lastState && transitions.length < MAX_ENTRIES) {
+      transitions.push({ state, atMs: elapsed() });
+      lastState = state;
+    }
+    return state;
+  };
+  try {
+    const snapshot = (phase) => {
+      const api = window.__gbaNative;
+      let apiState = null;
+      let status = null;
+      let statusHistory = [];
+      let fallbackNotice = null;
+      let statusReadError = null;
+      try {
+        apiState = typeof api?.state === 'function' ? clip(api.state()) : null;
+        status = pickStatus(typeof api?.status === 'function' ? api.status() : null);
+        statusHistory = (typeof api?.statusHistory === 'function' ? api.statusHistory() : [])
+          .slice(-MAX_ENTRIES)
+          .map(pickStatus);
+        fallbackNotice = typeof api?.fallbackNotice === 'function' ? clip(api.fallbackNotice()) : null;
+      } catch (error) {
+        statusReadError = safeText(error);
+      }
+      const canvas = document.getElementById('gba-canvas') || document.querySelector('canvas');
+      const style = canvas ? getComputedStyle(canvas) : null;
+      const box = canvas ? canvas.getBoundingClientRect() : null;
+      const visible = Boolean(
+        canvas &&
+        canvas.isConnected &&
+        canvas.getClientRects().length > 0 &&
+        box.width > 0 &&
+        box.height > 0 &&
+        !canvas.hidden &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number(style.opacity) > 0,
+      );
+      return {
+        phase,
+        atMs: elapsed(),
+        bodyState: noteState(),
+        apiState,
+        status,
+        statusHistory,
+        statusReadError,
+        fallbackNotice,
+        canvas: canvas ? {
+          width: canvas.width,
+          height: canvas.height,
+          isConnected: canvas.isConnected,
+          hiddenAttribute: canvas.hidden,
+          ariaHidden: canvas.getAttribute('aria-hidden'),
+          clientRectCount: canvas.getClientRects().length,
+          rect: { x: box.x, y: box.y, width: box.width, height: box.height },
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+          visible,
+        } : null,
+      };
+    };
+
+    const startupStarted = performance.now();
+    let state = noteState();
+    while (
+      performance.now() - startupStarted < APP_STARTUP_WAIT_MS &&
+      (state === null || state === 'empty' || state === 'loading')
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      state = noteState();
+    }
+    const settled = ['ready', 'error', 'lost'].includes(state);
+    const startup = {
+      waitLimitMs: APP_STARTUP_WAIT_MS,
+      waitMs: Math.round(performance.now() - startupStarted),
+      settled,
+      state,
+    };
+    const initial = snapshot('initial');
+    const postWorkStarted = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, APP_POST_WORK_WAIT_MS));
+    const postWork = snapshot('post-work');
+    postWork.boundedWaitMs = Math.round(performance.now() - postWorkStarted);
+
+    const lossPattern = /device lost|device was destroyed/i;
+    const known = [postWork.status, ...postWork.statusHistory].filter(Boolean);
+    const deviceLossSignals = known.filter(
+      (entry) => entry.state === 'lost' || lossPattern.test(`${entry.message ?? ''} ${entry.detail ?? ''}`),
+    ).length;
+    const bodyStates = transitions.map((entry) => entry.state);
+    return {
+      mode: 'app',
+      secureContext: window.isSecureContext,
+      origin: location.origin,
+      route: `${location.pathname}${location.search}`,
+      requestedBackend: new URLSearchParams(location.search).get('backend'),
+      startup,
+      initial,
+      postWork,
+      stateTransitions: transitions,
+      observed: {
+        deviceLoss: bodyStates.includes('lost') || deviceLossSignals > 0,
+        errorState: bodyStates.includes('error') || known.some((entry) => entry.state === 'error'),
+        readyState: bodyStates.includes('ready'),
+        stillLoading: postWork.bodyState === 'loading',
+        deviceLossSignals,
+      },
+    };
+  } catch (error) {
+    return {
+      mode: 'app',
+      secureContext: window.isSecureContext,
+      origin: location.origin,
+      route: `${location.pathname}${location.search}`,
+      probeError: safeText(error),
+      stateTransitions: transitions,
+    };
+  }
+}
+
 async function main() {
   const origin = validateEnvironment();
   const { chromium } = require(process.env.PLAYWRIGHT_PACKAGE_PATH || 'playwright');
@@ -441,6 +614,7 @@ async function main() {
     mode: MODE,
     ok: false,
     origin,
+    entry: MODE === 'app' ? APP_PATH : PROBE_PATH,
     secureOrigin: true,
     launch: { channel: CHANNEL, headless: true, args, chromiumRevision: CHROMIUM_REVISION },
     browserVersion: null,
@@ -459,7 +633,9 @@ async function main() {
   };
   const html = MODE === 'canvas'
     ? '<!doctype html><meta charset="utf-8"><canvas width="64" height="64"></canvas>'
-    : '<!doctype html><meta charset="utf-8"><title>offscreen WebGPU probe</title>';
+    : MODE === 'offscreen'
+      ? '<!doctype html><meta charset="utf-8"><title>offscreen WebGPU probe</title>'
+      : null;
   let browser = null;
   let context = null;
   let page = null;
@@ -507,26 +683,36 @@ async function main() {
       }
     });
     const probeUrl = new URL(PROBE_PATH, `${origin}/`).toString();
-    await withDeadline(() => page.route(probeUrl, async (route) => {
-      await withDeadline(() => route.fulfill({
-        status: 200,
-        contentType: 'text/html; charset=utf-8',
-        headers: {
-          'Content-Security-Policy': "default-src 'none'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
-          'Cache-Control': 'no-store',
-          'X-Content-Type-Options': 'nosniff',
-        },
-        body: html,
-      }), 'route.fulfill', PLAYWRIGHT_TIMEOUTS_MS.route);
-    }), 'page.route', PLAYWRIGHT_TIMEOUTS_MS.route);
+    if (html !== null) {
+      await withDeadline(() => page.route(probeUrl, async (route) => {
+        await withDeadline(() => route.fulfill({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          headers: {
+            'Content-Security-Policy': "default-src 'none'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+          body: html,
+        }), 'route.fulfill', PLAYWRIGHT_TIMEOUTS_MS.route);
+      }), 'page.route', PLAYWRIGHT_TIMEOUTS_MS.route);
+    }
+    // App mode navigates the real served bundle; the standalone modes stay on
+    // the routed CSP-restricted document.
+    const entryUrl = MODE === 'app' ? new URL(APP_PATH, `${origin}/`).toString() : probeUrl;
     await withDeadline(
-      () => page.goto(probeUrl, { waitUntil: 'load', timeout: PLAYWRIGHT_TIMEOUTS_MS.navigation }),
+      () => page.goto(entryUrl, { waitUntil: 'load', timeout: PLAYWRIGHT_TIMEOUTS_MS.navigation }),
       'page.goto', PLAYWRIGHT_TIMEOUTS_MS.navigation,
     );
-    result.probe = await withDeadline(
-      () => page.evaluate(inPageProbe, MODE),
-      'page.evaluate(inPageProbe)', PLAYWRIGHT_TIMEOUTS_MS.evaluation,
-    );
+    result.probe = MODE === 'app'
+      ? await withDeadline(
+        () => page.evaluate(inPageAppProbe),
+        'page.evaluate(inPageAppProbe)', PLAYWRIGHT_TIMEOUTS_MS.evaluation,
+      )
+      : await withDeadline(
+        () => page.evaluate(inPageProbe, MODE),
+        'page.evaluate(inPageProbe)', PLAYWRIGHT_TIMEOUTS_MS.evaluation,
+      );
 
     if (MODE === 'canvas' && result.probe.canvas?.configured) {
       const locator = page.locator('canvas');
@@ -554,7 +740,7 @@ async function main() {
   } catch (error) {
     result.harnessError = safeText(error);
   } finally {
-    if (page) {
+    if (page && MODE !== 'app') {
       try {
         const teardown = await withDeadline(
           () => page.evaluate(async () => {
@@ -586,27 +772,59 @@ async function main() {
   }
 
   const probe = result.probe;
-  const probeWorkSucceeded = MODE === 'canvas'
-    ? Boolean(probe?.canvas?.configured && probe.canvas.submissions === 2 && probe.canvas.screenshot?.pixelVerified)
-    : Boolean(probe?.offscreen?.outputMatches && probe.offscreen.commandSubmissions === 1 && !probe.offscreen.canvasCreated);
-  const earlyDeviceLoss = Boolean(
+  const appOutcomeObserved = [probe?.initial, probe?.postWork].some((snapshot) =>
+    ['ready', 'error', 'lost'].includes(snapshot?.apiState) ||
+    ['ready', 'error', 'lost'].includes(snapshot?.status?.state),
+  );
+  const appDiagnosticsCaptured = Boolean(
+    probe?.startup?.settled &&
+    ['ready', 'error', 'lost'].includes(probe.startup.state) &&
+    appOutcomeObserved &&
+    probe?.initial && probe?.postWork &&
+    !probe?.probeError,
+  );
+  const probeWorkSucceeded = MODE === 'app'
+    ? appDiagnosticsCaptured
+    : MODE === 'canvas'
+      ? Boolean(probe?.canvas?.configured && probe.canvas.submissions === 2 && probe.canvas.screenshot?.pixelVerified)
+      : Boolean(probe?.offscreen?.outputMatches && probe.offscreen.commandSubmissions === 1 && !probe.offscreen.canvasCreated);
+  // In app mode a device loss or an app error state is the observation itself,
+  // not a harness failure. Console, page and request failures stay recorded;
+  // only harness integrity fails closed there.
+  const derivedProblemsClear = MODE === 'app' || (
+    (probe?.uncapturedErrors?.length || 0) === 0 &&
+    result.console.every((entry) => entry.type !== 'error') &&
+    result.pageErrors.length === 0 &&
+    result.requestFailures.length === 0
+  );
+  const earlyDeviceLoss = MODE !== 'app' && Boolean(
     probe?.deviceLossBeforeTeardown || probe?.expectedDeviceTeardown?.preTeardownLoss,
   );
   result.ok = Boolean(
     probeWorkSucceeded &&
     !probe?.workError &&
+    !probe?.probeError &&
     !earlyDeviceLoss &&
+    derivedProblemsClear &&
     result.timeouts.length === 0 &&
-    (probe?.uncapturedErrors?.length || 0) === 0 &&
-    result.console.every((entry) => entry.type !== 'error') &&
-    result.pageErrors.length === 0 &&
-    result.requestFailures.length === 0 &&
     !result.harnessError &&
     !result.deviceTeardownError &&
     !result.earlyBrowserDisconnect &&
     !result.contextCloseError &&
     !result.browserCloseError
   );
+  if (MODE === 'app') {
+    result.app = {
+      route: APP_PATH,
+      startup: probe?.startup ?? null,
+      initialBodyState: probe?.initial?.bodyState ?? null,
+      postWorkBodyState: probe?.postWork?.bodyState ?? null,
+      postWorkStatusState: probe?.postWork?.status?.state ?? null,
+      deviceLossObserved: Boolean(probe?.observed?.deviceLoss),
+      errorStateObserved: Boolean(probe?.observed?.errorState),
+      diagnosticsCaptured: appDiagnosticsCaptured,
+    };
+  }
   result.processExitStatus = result.ok ? 0 : 1;
   result.elapsedMs = Date.now() - launchedAt;
   clearTimeout(hardDeadlineTimer);
@@ -620,6 +838,7 @@ main().catch((error) => {
   const result = activeResult || {
     schemaVersion: 1,
     mode: MODE,
+    entry: MODE === 'app' ? APP_PATH : PROBE_PATH,
     launch: {
       channel: CHANNEL,
       headless: true,

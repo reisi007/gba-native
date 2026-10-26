@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "support/linux_gpu_matrix.rs"]
+mod linux_gpu_matrix;
 #[path = "support/linux_webgpu_smoke.rs"]
 mod linux_webgpu_smoke;
 
@@ -137,6 +139,7 @@ if [ "${1##*/}" = "web-linux-gpu-smoke.cjs" ]; then
   printf '{"mode":"%s","ok":true}\n' "$mode" > "$WEBGPU_SMOKE_OUTPUT_DIR/result.json"
   printf 'fake WebGPU smoke %s\n' "$mode"
   if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$mode" = canvas ]; then exit 19; fi
+  if [ "${SMOKE_HARNESS_FAIL_MODE:-}" = "$mode" ]; then rm -f "$WEBGPU_SMOKE_OUTPUT_DIR/result.json"; exit 23; fi
   exit 0
 fi
 count=0
@@ -206,13 +209,7 @@ fn newest_linux_ab_dir(root: &Path) -> PathBuf {
 fn assert_linux_ab_diagnostic_contract() {
     linux_webgpu_smoke::assert_probe_source(&repo_root());
     let (temp, root, bin, calls) = linux_ab_fixture();
-    let launch_args = concat!(
-        "--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader ",
-        "--enable-dawn-features=allow_unsafe_apis --disable-dawn-features=use_dxc ",
-        "--enable-webgpu-developer-features --use-gpu-in-tests ",
-        "--enable-accelerated-2d-canvas --enable-features=Vulkan ",
-        "--use-angle=vulkan --use-vulkan=swiftshader --disable-vulkan-surface"
-    );
+    let launch_args = linux_gpu_matrix::BASE_ARGS;
 
     let a_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("A"));
     assert!(!a_failure.status.success());
@@ -269,8 +266,7 @@ fn assert_linux_ab_diagnostic_contract() {
         assert!(first_dir.join(variant).join("test-results").is_dir());
     }
 
-    std::fs::write(&calls, "").expect("reset fixture calls");
-    std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
+    linux_gpu_matrix::reset_calls(&calls);
     let b_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("B"));
     assert!(!b_failure.status.success());
     let output_text = String::from_utf8_lossy(&b_failure.stderr);
@@ -285,8 +281,7 @@ fn assert_linux_ab_diagnostic_contract() {
             .contains("smoke-canvas=0\nsmoke-offscreen=0\nA=0\nB=18\n")
     );
 
-    std::fs::write(&calls, "").expect("reset fixture calls");
-    std::fs::remove_file(calls.with_extension("log.count")).expect("reset fixture call count");
+    linux_gpu_matrix::reset_calls(&calls);
     let missing_angle = run_linux_ab_fixture(
         &root,
         &bin,
@@ -496,4 +491,5 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     assert!(workflow.contains("name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"));
     assert!(workflow.contains("path: output/web-linux-ab-*/"));
     assert_linux_ab_diagnostic_contract();
+    linux_gpu_matrix::assert_contract(&repo_root());
 }

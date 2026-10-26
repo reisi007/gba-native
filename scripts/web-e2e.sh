@@ -9,7 +9,8 @@
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
 #   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
 #   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
-#     plus the existing matched Vulkan/OpenGL full-suite diagnostics
+#     plus the existing matched Vulkan/OpenGL full-suite diagnostics and a
+#     non-gating one-flag omission matrix (real app vs standalone canvas)
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -139,8 +140,50 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
       ANGLE_VULKAN_COUNT=$((ANGLE_VULKAN_COUNT + 1))
     fi
   done
-  [ "$ANGLE_VULKAN_COUNT" -eq 1 ] ||
+  MATRIX_INVALID_INPUT_STATUS=126
+  record_invalid_angle_omission() {
+    invalid_angle_reason="--use-angle=vulkan appears $ANGLE_VULKAN_COUNT times in Variant A flags; exactly one token is required for this omission control"
+    : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
+    printf 'matrix-preflight=invalid-input\nmatrix-non-gating=true\n' \
+      >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+    for invalid_mode in canvas app; do
+      invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-omit-use-angle-vulkan-$invalid_mode"
+      if ! mkdir "$invalid_dir"; then
+        info "could not allocate fresh $invalid_dir; retaining the existing A/B validation failure"
+        continue
+      fi
+      if [ "$invalid_mode" = app ]; then
+        invalid_entry='app:/?autostart=1&backend=webgpu'
+      else
+        invalid_entry='standalone:/__linux_webgpu_smoke__'
+      fi
+      printf '%s\n' "$LAUNCH_ARGS" >"$invalid_dir/launch-args.txt"
+      printf '%s\n' '--use-angle=vulkan' >"$invalid_dir/omitted-flag.txt"
+      printf '%s\n' "$invalid_angle_reason" >"$invalid_dir/invalid-input.txt"
+      printf 'label=omit-use-angle-vulkan\nmode=%s\nomitted_flag=--use-angle=vulkan\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
+        "$invalid_mode" "$invalid_entry" "$URL" "$CHANNEL" "$HEADLESS" \
+        "$PLAYWRIGHT_REVISION" >"$invalid_dir/run-info.txt"
+      printf '%s\n' "$MATRIX_INVALID_INPUT_STATUS" >"$invalid_dir/exit-status.txt"
+      printf '{"label":"omit-use-angle-vulkan","mode":"%s","entry":"%s","omittedFlag":"--use-angle=vulkan","processExitStatus":%s,"resultWritten":false,"outcome":"invalid-input","nonGating":true}\n' \
+        "$invalid_mode" "$invalid_entry" "$MATRIX_INVALID_INPUT_STATUS" \
+        >"$invalid_dir/process-status.json"
+      printf 'omit-use-angle-vulkan/%s omitted=--use-angle=vulkan exit=%s outcome=invalid-input nonGating=true\n' \
+        "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
+      printf 'matrix-omit-use-angle-vulkan-%s=%s\n' \
+        "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+    done
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      {
+        printf '\n### Non-gating GPU flag matrix preflight\n\n'
+        printf 'The `omit-use-angle-vulkan` control is recorded as `invalid-input` for both entries because Variant A contains the flag %s times. The existing A/B validation still fails closed before launching probes.\n' \
+          "$ANGLE_VULKAN_COUNT"
+      } >>"$GITHUB_STEP_SUMMARY"
+    fi
+  }
+  if [ "$ANGLE_VULKAN_COUNT" -ne 1 ]; then
+    record_invalid_angle_omission
     fail "Linux A/B diagnostics require exactly one --use-angle=vulkan token (found $ANGLE_VULKAN_COUNT); refusing to form variant B"
+  fi
 
   B_LAUNCH_ARGS=()
   for arg in "${A_LAUNCH_ARGS[@]}"; do
@@ -231,6 +274,152 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     fi
   done
 
+  # Non-gating diagnostics matrix: the real served app versus the standalone
+  # canvas probe, with exactly one Vulkan/ANGLE control token removed from the
+  # Variant A flags at a time. A missing token is an explicit invalid-input
+  # result, never a silently skipped combination. These probes run after the
+  # gated smoke/A/B suites and never influence their statuses or CI gating.
+  APP_ENTRY="/?autostart=1&backend=webgpu"
+  CANVAS_ENTRY="/__linux_webgpu_smoke__"
+  MATRIX_OMISSION_FLAGS=(
+    "--enable-features=Vulkan:omit-enable-features-vulkan"
+    "--use-angle=vulkan:omit-use-angle-vulkan"
+    "--use-vulkan=swiftshader:omit-use-vulkan-swiftshader"
+    "--disable-vulkan-surface:omit-disable-vulkan-surface"
+  )
+  MATRIX_RECORDS=()
+
+  matrix_entry() {
+    if [ "$1" = app ]; then
+      printf 'app:%s' "$APP_ENTRY"
+    else
+      printf 'standalone:%s' "$CANVAS_ENTRY"
+    fi
+  }
+
+  json_escape() {
+    escape_text="${1//\\/\\\\}"
+    printf '%s' "${escape_text//\"/\\\"}"
+  }
+
+  write_matrix_record() {
+    record_label="$1"
+    record_mode="$2"
+    record_omitted="$3"
+    record_status="$4"
+    record_outcome="$5"
+    record_args="$6"
+    record_reason="$7"
+    record_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$record_label-$record_mode"
+    record_result_written=false
+    if [ -s "$record_dir/result.json" ]; then record_result_written=true; fi
+    printf '%s\n' "$record_status" >"$record_dir/exit-status.txt"
+    printf '{"label":"%s","mode":"%s","entry":"%s","omittedFlag":"%s","launchArgs":"%s","processExitStatus":%s,"resultWritten":%s,"outcome":"%s","reason":"%s","nonGating":true}\n' \
+      "$record_label" "$record_mode" "$(matrix_entry "$record_mode")" "$record_omitted" \
+      "$(json_escape "$record_args")" "$record_status" "$record_result_written" \
+      "$record_outcome" "$(json_escape "$record_reason")" >"$record_dir/process-status.json"
+    MATRIX_RECORDS+=("$record_label|$record_mode|$record_omitted|$record_status|$record_outcome")
+  }
+
+  write_matrix_run_info() {
+    info_label="$1"
+    info_mode="$2"
+    info_omitted="$3"
+    info_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$info_label-$info_mode"
+    printf 'label=%s\nmode=%s\nomitted_flag=%s\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
+      "$info_label" "$info_mode" "$info_omitted" "$(matrix_entry "$info_mode")" \
+      "$URL" "$CHANNEL" "$HEADLESS" "$PLAYWRIGHT_REVISION" >"$info_dir/run-info.txt"
+  }
+
+  run_matrix_probe() {
+    probe_label="$1"
+    probe_mode="$2"
+    probe_omitted="$3"
+    probe_args="$4"
+    probe_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$probe_label-$probe_mode"
+    if ! mkdir "$probe_dir"; then
+      info "could not allocate fresh $probe_dir; recording matrix failure and continuing"
+      MATRIX_RECORDS+=("$probe_label|$probe_mode|$probe_omitted|125|probe-directory-unavailable")
+      return 0
+    fi
+    printf '%s\n' "$probe_args" >"$probe_dir/launch-args.txt"
+    printf '%s\n' "$probe_omitted" >"$probe_dir/omitted-flag.txt"
+    write_matrix_run_info "$probe_label" "$probe_mode" "$probe_omitted"
+    info "non-gating GPU matrix probe: $probe_label mode=$probe_mode omitted=$probe_omitted"
+    if (
+      cd "$ROOT"
+      DEBUG=pw:browser \
+      WEBGPU_SMOKE_OUTPUT_DIR="$probe_dir" \
+      WEB_PLAYWRIGHT_CHROMIUM_REVISION="$PLAYWRIGHT_REVISION" \
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_LAUNCH_ARGS="$probe_args" \
+      PLAYWRIGHT_PACKAGE_PATH="$NPM/node_modules/playwright" \
+        "$NODE_BIN" "$ROOT/scripts/web-linux-gpu-smoke.cjs" "$probe_mode" \
+        2>&1 | tee "$probe_dir/playwright.log"
+    ); then
+      probe_status=0
+    else
+      probe_status=$?
+    fi
+    probe_outcome=harness-failure
+    if [ -s "$probe_dir/result.json" ]; then
+      if [ "$probe_status" -eq 0 ]; then
+        probe_outcome=completed
+      else
+        probe_outcome=probe-reported-failure
+      fi
+    fi
+    write_matrix_record "$probe_label" "$probe_mode" "$probe_omitted" "$probe_status" \
+      "$probe_outcome" "$probe_args" ""
+    return 0
+  }
+
+  record_matrix_invalid_input() {
+    invalid_label="$1"
+    invalid_mode="$2"
+    invalid_omitted="$3"
+    invalid_count="$4"
+    invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$invalid_label-$invalid_mode"
+    if ! mkdir "$invalid_dir"; then
+      info "could not allocate fresh $invalid_dir; recording matrix failure and continuing"
+      MATRIX_RECORDS+=("$invalid_label|$invalid_mode|$invalid_omitted|125|probe-directory-unavailable")
+      return 0
+    fi
+    invalid_reason="$invalid_omitted appears $invalid_count times in the Variant A flags; exactly one omission control is required, so this combination was not probed"
+    printf '%s\n' "$LAUNCH_ARGS" >"$invalid_dir/launch-args.txt"
+    printf '%s\n' "$invalid_reason" >"$invalid_dir/invalid-input.txt"
+    printf '%s\n' "$invalid_omitted" >"$invalid_dir/omitted-flag.txt"
+    write_matrix_run_info "$invalid_label" "$invalid_mode" "$invalid_omitted"
+    info "non-gating GPU matrix probe: $invalid_label mode=$invalid_mode invalid input ($invalid_omitted count $invalid_count)"
+    write_matrix_record "$invalid_label" "$invalid_mode" "$invalid_omitted" \
+      "$MATRIX_INVALID_INPUT_STATUS" invalid-input "$LAUNCH_ARGS" "$invalid_reason"
+    return 0
+  }
+
+  run_matrix_probe baseline app - "$LAUNCH_ARGS"
+  for omission_control in "${MATRIX_OMISSION_FLAGS[@]}"; do
+    omission="${omission_control%%:*}"
+    omission_label="${omission_control#*:}"
+    omission_count=0
+    matrix_variant_args=()
+    for arg in "${A_LAUNCH_ARGS[@]}"; do
+      if [ "$arg" = "$omission" ]; then
+        omission_count=$((omission_count + 1))
+        if [ "$omission_count" -eq 1 ]; then continue; fi
+      fi
+      matrix_variant_args+=("$arg")
+    done
+    if [ "$omission_count" -ne 1 ]; then
+      record_matrix_invalid_input "$omission_label" canvas "$omission" "$omission_count"
+      record_matrix_invalid_input "$omission_label" app "$omission" "$omission_count"
+      continue
+    fi
+    matrix_variant_text="${matrix_variant_args[*]}"
+    run_matrix_probe "$omission_label" canvas "$omission" "$matrix_variant_text"
+    run_matrix_probe "$omission_label" app "$omission" "$matrix_variant_text"
+  done
+
   SHARED_IMAGE_LOGS=(
     "$LINUX_DIAGNOSTICS_DIR/smoke-canvas/playwright.log"
     "$LINUX_DIAGNOSTICS_DIR/smoke-offscreen/playwright.log"
@@ -265,9 +454,18 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     fi
   fi
 
-  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nSharedImageBackingFactoryFailures=%s\n' \
+  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nSharedImageBackingFactoryFailures=%s\nmatrix-non-gating=true\n' \
     "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS" \
     "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+  : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
+  for matrix_record in "${MATRIX_RECORDS[@]}"; do
+    IFS='|' read -r matrix_label matrix_mode matrix_omitted matrix_status matrix_outcome <<<"$matrix_record"
+    printf 'matrix-%s-%s=%s\n' "$matrix_label" "$matrix_mode" "$matrix_status" \
+      >>"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+    printf '%s/%s omitted=%s exit=%s outcome=%s nonGating=true\n' \
+      "$matrix_label" "$matrix_mode" "$matrix_omitted" "$matrix_status" "$matrix_outcome" \
+      >>"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
+  done
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       printf '## Linux WebGPU diagnostic experiment\n\n'
@@ -277,10 +475,20 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
       printf '\nSharedImageBackingFactory failures: **%s**.\n\n' "$SHARED_IMAGE_FAILURES"
       printf 'Artifacts: `%s`. These are software-runner diagnostics, not GPU hardware evidence or root-cause proof.\n' \
         "$LINUX_DIAGNOSTICS_DIR"
+      printf '\n### Non-gating GPU flag matrix (diagnostics only)\n\n'
+      printf '| Control | Mode | Omitted flag | Exit | Outcome |\n| --- | --- | --- | ---: | --- |\n'
+      for matrix_record in "${MATRIX_RECORDS[@]}"; do
+        IFS='|' read -r matrix_label matrix_mode matrix_omitted matrix_status matrix_outcome <<<"$matrix_record"
+        printf '| `%s` | %s | `%s` | %s | %s |\n' \
+          "$matrix_label" "$matrix_mode" "$matrix_omitted" "$matrix_status" "$matrix_outcome"
+      done
+      printf '\nThese matrix rows are **non-gating**: they never change the job status. The same two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof.\n'
+      printf 'Matrix details: `%s/matrix.txt`.\n' "$LINUX_DIAGNOSTICS_DIR"
     } >>"$GITHUB_STEP_SUMMARY"
   fi
   info "Linux WebGPU smoke statuses: canvas=$SMOKE_CANVAS_STATUS offscreen=$SMOKE_OFFSCREEN_STATUS"
   info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
+  info "non-gating GPU flag matrix results: $LINUX_DIAGNOSTICS_DIR/matrix.txt (these statuses never gate CI)"
   if [ "$SMOKE_CANVAS_STATUS" -ne 0 ] || [ "$SMOKE_OFFSCREEN_STATUS" -ne 0 ] ||
     [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then
     fail "Linux WebGPU diagnostics/browser E2E failed (canvas=$SMOKE_CANVAS_STATUS, offscreen=$SMOKE_OFFSCREEN_STATUS, A=$A_STATUS, B=$B_STATUS); see $LINUX_DIAGNOSTICS_DIR/summary.txt"
