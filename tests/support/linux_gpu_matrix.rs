@@ -91,6 +91,8 @@ pub(super) fn reset_calls(calls: &Path) {
 /// Invalid A/B flags must fail before any browser probe is launched.
 pub(super) fn assert_no_calls(calls: &Path) {
     assert!(read(calls).is_empty(), "invalid A/B flags launch no probes");
+    let smoke_log = calls.with_extension("smokes.log");
+    assert!(std::fs::read_to_string(smoke_log).map_or(true, |log| log.is_empty()));
 }
 
 /// The diagnostics directory of a run, taken from the exact A/B output path the
@@ -238,13 +240,19 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(ab_lines.len(), 2, "A and B must still run: {ab}");
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
-    assert_eq!(
-        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
-        b_args,
-        "the existing A/B keeps changing only the ANGLE token"
+    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
+    let omitted = "--disable-vulkan-surface";
+    let surface_count = base_tokens.iter().filter(|t| *t == omitted).count();
+    assert_eq!(surface_count, 1, "A must contain one {omitted}");
+    assert!(
+        !b_args.split_whitespace().any(|t| t == omitted),
+        "B must not contain {omitted}"
     );
-    assert!(b_args.contains("--use-angle=vulkan"));
-    assert!(!a_args.contains("--use-angle=vulkan"));
+    assert_eq!(
+        omit_first(&base_tokens, omitted).join(" "),
+        b_args,
+        "B removes only {omitted}"
+    );
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
 
@@ -261,7 +269,6 @@ pub fn assert_contract(root: &Path) {
         assert!(probe.2.ends_with(&format!("/smoke-{mode}")), "{}", probe.2);
     }
 
-    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
     let mut expected: Vec<(&str, &str, &str, Vec<String>)> =
         vec![("baseline", "app", "-", base_tokens.clone())];
     for (omitted, label) in OMISSIONS {
@@ -333,11 +340,10 @@ pub fn assert_contract(root: &Path) {
         );
     }
 
-    // A base preset that lacks an omission control is an explicit invalid-input
-    // result for that combination; every other combination is still attempted
-    // and the run stays non-gating.
+    // A base preset with exactly one --disable-vulkan-surface passes the B
+    // preflight; other missing omission controls are explicit invalid-input rows.
     reset_calls(&calls);
-    let partial = "--use-angle=swiftshader --use-webgpu-adapter=swiftshader";
+    let partial = "--use-webgpu-adapter=swiftshader --disable-vulkan-surface";
     let output = run_fixture(&fixture_root, &bin, &calls, partial, None);
     assert!(
         output.status.success(),
@@ -354,8 +360,8 @@ pub fn assert_contract(root: &Path) {
     let partial_args = format!("{partial} --enable-logging=stderr --log-level=0");
     for (label, omitted) in [
         ("omit-enable-features-vulkan", "--enable-features=Vulkan"),
+        ("omit-use-angle-swiftshader", "--use-angle=swiftshader"),
         ("omit-use-vulkan-swiftshader", "--use-vulkan=swiftshader"),
-        ("omit-disable-vulkan-surface", "--disable-vulkan-surface"),
     ] {
         for mode in ["canvas", "app"] {
             let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
@@ -375,7 +381,7 @@ pub fn assert_contract(root: &Path) {
             );
         }
     }
-    for label in ["omit-use-angle-swiftshader", "baseline"] {
+    for label in ["omit-disable-vulkan-surface", "baseline"] {
         for mode in ["canvas", "app"] {
             let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
             if dir.exists() {
@@ -389,7 +395,7 @@ pub fn assert_contract(root: &Path) {
         "{summary}"
     );
     assert!(
-        summary.contains("matrix-omit-use-angle-swiftshader-canvas=0\n"),
+        summary.contains("matrix-omit-disable-vulkan-surface-canvas=0\n"),
         "{summary}"
     );
 
@@ -415,16 +421,16 @@ pub fn assert_contract(root: &Path) {
     assert!(status.contains("\"resultWritten\":false"), "{status}");
     assert!(read(&diagnostics.join("summary.txt")).contains("matrix-baseline-app=23\n"));
 
-    let without_angle = BASE_ARGS.replace("--use-angle=swiftshader ", "");
-    assert_invalid_angle_preflight(&fixture_root, &bin, &calls, &without_angle, 0);
-    let duplicate_angle = BASE_ARGS.replace(
-        "--use-angle=swiftshader",
-        "--use-angle=swiftshader --use-angle=swiftshader",
+    let without_surface = BASE_ARGS.replace(" --disable-vulkan-surface", "");
+    assert_invalid_surface_preflight(&fixture_root, &bin, &calls, &without_surface, 0);
+    let duplicate_surface = BASE_ARGS.replace(
+        "--disable-vulkan-surface",
+        "--disable-vulkan-surface --disable-vulkan-surface",
     );
-    assert_invalid_angle_preflight(&fixture_root, &bin, &calls, &duplicate_angle, 2);
+    assert_invalid_surface_preflight(&fixture_root, &bin, &calls, &duplicate_surface, 2);
 }
 
-fn assert_invalid_angle_preflight(
+fn assert_invalid_surface_preflight(
     root: &Path,
     bin: &Path,
     calls: &Path,
@@ -440,7 +446,7 @@ fn assert_invalid_angle_preflight(
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(&format!(
-            "exactly one --use-angle=swiftshader token (found {count})"
+            "exactly one --disable-vulkan-surface token (found {count})"
         )),
         "{stderr}"
     );
@@ -457,7 +463,7 @@ fn assert_invalid_angle_preflight(
     let matrix = read(&diagnostics.join("matrix.txt"));
     assert_eq!(matrix.lines().count(), 2, "{matrix}");
     for mode in ["canvas", "app"] {
-        let dir = diagnostics.join(format!("matrix-omit-use-angle-swiftshader-{mode}"));
+        let dir = diagnostics.join(format!("matrix-omit-disable-vulkan-surface-{mode}"));
         for artifact in [
             "launch-args.txt",
             "omitted-flag.txt",
@@ -469,11 +475,19 @@ fn assert_invalid_angle_preflight(
             assert!(dir.join(artifact).is_file(), "missing {mode}/{artifact}");
         }
         assert_eq!(read(&dir.join("launch-args.txt")).trim_end(), expected_args);
+        assert_eq!(
+            read(&dir.join("omitted-flag.txt")).trim_end(),
+            "--disable-vulkan-surface"
+        );
         assert!(read(&dir.join("invalid-input.txt")).contains(&format!("{count} times")));
         assert_eq!(read(&dir.join("exit-status.txt")).trim_end(), "126");
         let status = read(&dir.join("process-status.json"));
         assert!(status.contains("\"outcome\":\"invalid-input\""), "{status}");
         assert!(status.contains("\"nonGating\":true"), "{status}");
+        assert!(
+            status.contains("\"omittedFlag\":\"--disable-vulkan-surface\""),
+            "{status}"
+        );
         let entry = if mode == "app" {
             "app:/?autostart=1&backend=webgpu"
         } else {

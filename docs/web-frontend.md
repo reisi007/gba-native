@@ -182,15 +182,18 @@ helper adds `--enable-features=Vulkan --use-angle=swiftshader
 under test, see below). macOS and Windows do not receive those Linux-specific
 switches. A non-empty `WEB_E2E_LAUNCH_ARGS` remains a complete user override (it
 replaces the preset); unset or empty values use the platform-aware default.
-Playwright still reports forced WebGPU failures and device loss; these switches
-do not introduce fallback or relaxed assertions.
+For Linux CI A/B diagnostics, the effective flags must contain exactly one
+`--disable-vulkan-surface` token; an override with zero or multiple copies fails
+the preflight before browser probes. Playwright still reports forced WebGPU
+failures and device loss; these switches do not introduce fallback or relaxed
+assertions.
 
-Linux candidate configuration under test (issue #24). Compared with the previous
-preset it substitutes only the ANGLE token: `--use-angle=swiftshader` (ANGLE's
-SwiftShader backend) instead of `--use-angle=vulkan`. This is a candidate, not an
-established root cause; it makes no physical-GPU, driver, vendor or
-retail-compatibility claim and does not claim that a switch enables GPU
-rendering.
+Linux candidate configuration under test (issue #24). Variant A is unchanged by
+this follow-up: compared with the previous preset it substitutes only the ANGLE
+token `--use-angle=swiftshader` (ANGLE's SwiftShader backend) instead of
+`--use-angle=vulkan`. This is a candidate, not an established root cause; it
+makes no physical-GPU, driver, vendor or retail-compatibility claim and does not
+claim that a switch enables GPU rendering.
 
 Recorded facts from run 40501875768 (software runner, Playwright Chromium
 156.0.8078.4):
@@ -210,9 +213,10 @@ Recorded facts from run 40501875768 (software runner, Playwright Chromium
   and the post-work snapshot at ~7.1 s still reported `lost` (`WebGPU device lost
   (Destroyed): Device was destroyed.`) with the canvas hidden and Restart
   offered;
-- with `--use-angle=vulkan` the GPU process also logged repeated initialization
-  failures (`Extension not supported: VK_KHR_surface`/`VK_KHR_xcb_surface`,
-  `Exiting GPU process due to errors during initialization`).
+- with the earlier explicit `--use-angle=vulkan` preset in run 40501875768, the
+  GPU process also logged repeated initialization failures (`Extension not
+  supported: VK_KHR_surface`/`VK_KHR_xcb_surface`, `Exiting GPU process due to
+  errors during initialization`).
 
 Those observations do not establish cause: they do not show whether the display
 configuration, the ANGLE backend, a shared-image/backing condition or another
@@ -281,9 +285,11 @@ omission controls then remove exactly one token each — `--enable-features=Vulk
 `--use-angle=swiftshader`, `--use-vulkan=swiftshader` or
 `--disable-vulkan-surface` — while every other token, including
 `--enable-logging=stderr --log-level=0`, is retained, and each resulting flag set
-probes both the real app route and the standalone canvas document. These
-one-flag omissions are the only removal controls; the matrix adds no
-`--use-angle=opengl` variant because the recorded control produced
+probes both the real app route and the standalone canvas document. The
+`--disable-vulkan-surface` omission is also exactly the difference between the
+gated Variant A and Variant B. These one-flag omissions are the only removal
+controls; the matrix adds no `--use-angle=opengl` variant because the recorded
+control produced
 `Requested GL implementation (gl=none,angle=none) not found in allowed
 implementations`, so it was not a usable backend comparison. Every combination
 owns a directory below
@@ -325,15 +331,29 @@ Matrix statuses are listed in `summary.txt` after `matrix-non-gating=true`, in
 summary; the additive `features-vulkan-from-angle` rows are included there.
 They never change the job status: only the two standalone probes and the full
 A/B functional suites gate, exactly as before. The A/B pair keeps its one-token
-contrast — variant A is the candidate preset and variant B substitutes only the
-ANGLE token with `--use-angle=vulkan` — and both variants gate the job. Variant B
-is the previous preset, and run 40501875768 recorded GPU-process initialization
-failures for that backend, so CI has to confirm that both variants pass; the known
-risk is recorded here and is not suppressed by the candidate. Their directories,
-`launch-args.txt`, Playwright output and exit statuses stay recorded, and
-`summary.txt` still reports `A=<status>` and `B=<status>`. Match or mismatch of a
-control is a diagnostic signal, not root-cause proof, and this document makes no
-Linux matrix result claim.
+contrast — variant A is the unchanged candidate preset, and variant B removes
+exactly the single `--disable-vulkan-surface` token from A, adds no OpenGL/ANGLE
+control and changes no other token — and both variants gate the job. The
+`omit-disable-vulkan-surface` matrix row uses the same flag set as variant B, but
+its standalone canvas/app probes are not the full 19-test suites.
+
+In the retained artifacts of Linux WebGPU CI run 40516175997
+(`output/web-linux-ab-40516175997-review/.../web-linux-ab-20261027T135653Z-9085-0`),
+the non-gating `omit-disable-vulkan-surface` rows for both the standalone canvas
+and the app entry exited 0, and the canvas screenshot's centre pixel matched the
+expected magenta (`pixelVerified=true`). That is probe evidence for those flag
+sets only. In that run the standalone canvas smoke and both gated full-suite
+processes exited 1; its Variant B still used `--use-angle=vulkan`, not the new
+one-token omission comparison. These facts do not show that the current gated
+19-test A/B suites pass, do not establish a cause for the earlier device loss,
+and do not establish that removing the token helps beyond those probes. A
+different feature-substitution candidate stayed ready in its app probe but
+failed its canvas pixel probe, so it was not promoted. Both variants still have
+to pass on CI; a matching probe does not remove that requirement. Their
+directories, `launch-args.txt`, Playwright output and exit statuses stay
+recorded, and `summary.txt` still reports `A=<status>` and `B=<status>`. Match or
+mismatch of a control is a diagnostic signal, not root-cause proof, and this
+document makes no Linux matrix result claim.
 
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
@@ -399,16 +419,22 @@ Local runs on 2026-10-25 with this repository, Playwright Chromium
 | Linux CI run 40236292333, before the Vulkan launch switches (only the two original SwiftShader flags) | `auto`/`webgpu` | WebGPU initialized with `Rgba8Unorm` render/surface and acknowledged two presents, then reported `WebGPU device lost (Destroyed): Device was destroyed.`; four tests failed and 15 passed. The WebGL2 path passed. |
 | Linux CI run 40501875768, native-Vulkan ANGLE preset, software adapter, standalone canvas probe | `webgpu` | SwiftShader adapter `google`/`swiftshader`/`Vulkan` obtained, device created, and the matched offscreen compute probe succeeded; the canvas probe alone lost the device at 32–36 ms with `OperationError: A valid external Instance reference no longer exists.` after `Could not find SharedImageBackingFactory ... WebgpuSwapChainTexture` and repeated `VK_KHR_surface`/`VK_KHR_xcb_surface` init errors. |
 | Linux CI run 40501875768, same preset, real app route | `webgpu` | Reached `ready` at ~112 ms with `presented=1`, applied `lost` at ~745–749 ms with `presented=2` and `WebGPU device lost (Destroyed): Device was destroyed.`; the post-work snapshot at ~7.1 s still reported `lost` with the canvas hidden. |
+| Linux WebGPU CI run 40516175997, non-gating `omit-disable-vulkan-surface` probes (Variant A with that one token removed) | `webgpu` | Both the standalone canvas and the real app probe exited 0; the canvas screenshot's centre pixel matched the expected magenta (`pixelVerified=true`). In that run the canvas smoke and both gated full-suite processes exited 1; its Variant B used `--use-angle=vulkan`, not the current omission comparison. This is probe evidence, not full-suite success or root-cause proof. |
 
 Adapter names/device types are browser-redacted in some WebGPU runs; they are
-reported as “(not exposed by this browser)”. The Linux gate now exercises a
-candidate configuration (ANGLE's SwiftShader backend for the Linux preset, with
-the Linux CI functional E2E re-executed under `xvfb-run` when no display is set)
-whose result has not yet been observed in CI. The recorded Linux runs established
-WebGPU API initialization, the RGBA format and a working offscreen device, not a
-stable canvas presentation or a successful Linux suite. This is software-backend
-configuration/evidence, not a physical-GPU claim. A browser without the required
-backend fails the forced-backend test; the suite does not skip it.
+reported as “(not exposed by this browser)”. The Linux gate exercises the
+unchanged candidate preset (ANGLE's SwiftShader backend for Linux, with the Linux
+CI functional E2E re-executed under `xvfb-run` when no display is set) as Variant
+A and the matched Variant B that removes exactly one
+`--disable-vulkan-surface` token. Linux WebGPU CI run 40516175997 failed: the
+gated A/B suites did not all pass, while the artifacts additionally recorded the
+non-gating one-token omission probes described above. Those results do not show
+a passing Linux suite and do not identify a cause. The recorded Linux runs
+established WebGPU API initialization, the RGBA format and a working offscreen
+device, not a stable canvas presentation or a successful Linux suite. This is
+software-backend configuration/evidence, not a physical-GPU claim. A browser
+without the required backend fails the forced-backend test; the suite does not
+skip it.
 
 Playwright's `deviceScaleFactor` emulation has been observed reporting
 `devicePixelContentBoxSize` in CSS pixels. The application independently checks

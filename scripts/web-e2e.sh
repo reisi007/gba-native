@@ -9,8 +9,9 @@
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
 #   ci     same entry point, headless; Linux selects ANGLE's SwiftShader backend
 #   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
-#     plus a matched A/B full-suite comparison, a non-gating one-flag omission
-#     matrix (real app vs standalone canvas) and one additive
+#     plus a matched A/B full-suite comparison (variant B removes exactly one
+#     --disable-vulkan-surface token from variant A), a non-gating one-flag
+#     omission matrix (real app vs standalone canvas) and one additive
 #     feature-combination candidate (not an omission)
 #
 # Candidate configuration under test (issue #24): Linux CI functional E2E runs
@@ -19,6 +20,8 @@
 # WebGPU canvas path but do not establish that a display or these launch
 # switches fix them. The wrapper is limited to `ci` mode with CI=true on Linux;
 # local Linux runs keep their previous behaviour. The gate stays fail-closed.
+# In Linux A/B diagnostics mode, the effective flags must contain exactly one
+# --disable-vulkan-surface token; missing/duplicate tokens fail before probes.
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -156,22 +159,24 @@ fi
 
 if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
   read -r -a A_LAUNCH_ARGS <<<"$LAUNCH_ARGS"
-  ANGLE_TOKEN="--use-angle=swiftshader"
-  ANGLE_CONTROL="--use-angle=vulkan"
-  ANGLE_TOKEN_COUNT=0
+  # Variant B is the matched one-token omission: it keeps Variant A unchanged
+  # and removes exactly one --disable-vulkan-surface token. It adds no
+  # OpenGL/ANGLE control and substitutes no other flag.
+  B_OMITTED_TOKEN="--disable-vulkan-surface"
+  B_OMITTED_COUNT=0
   for arg in "${A_LAUNCH_ARGS[@]}"; do
-    if [ "$arg" = "$ANGLE_TOKEN" ]; then
-      ANGLE_TOKEN_COUNT=$((ANGLE_TOKEN_COUNT + 1))
+    if [ "$arg" = "$B_OMITTED_TOKEN" ]; then
+      B_OMITTED_COUNT=$((B_OMITTED_COUNT + 1))
     fi
   done
   MATRIX_INVALID_INPUT_STATUS=126
-  record_invalid_angle_omission() {
-    invalid_angle_reason="--use-angle=swiftshader appears $ANGLE_TOKEN_COUNT times in Variant A flags; exactly one token is required for this omission control"
+  record_invalid_surface_omission() {
+    invalid_surface_reason="--disable-vulkan-surface appears $B_OMITTED_COUNT times in Variant A flags; exactly one token is required for this omission control"
     : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
     printf 'matrix-preflight=invalid-input\nmatrix-non-gating=true\n' \
       >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
     for invalid_mode in canvas app; do
-      invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-omit-use-angle-swiftshader-$invalid_mode"
+      invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-omit-disable-vulkan-surface-$invalid_mode"
       if ! mkdir "$invalid_dir"; then
         info "could not allocate fresh $invalid_dir; retaining the existing A/B validation failure"
         continue
@@ -182,40 +187,39 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
         invalid_entry='standalone:/__linux_webgpu_smoke__'
       fi
       printf '%s\n' "$LAUNCH_ARGS" >"$invalid_dir/launch-args.txt"
-      printf '%s\n' '--use-angle=swiftshader' >"$invalid_dir/omitted-flag.txt"
-      printf '%s\n' "$invalid_angle_reason" >"$invalid_dir/invalid-input.txt"
-      printf 'label=omit-use-angle-swiftshader\nmode=%s\nomitted_flag=--use-angle=swiftshader\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
+      printf '%s\n' '--disable-vulkan-surface' >"$invalid_dir/omitted-flag.txt"
+      printf '%s\n' "$invalid_surface_reason" >"$invalid_dir/invalid-input.txt"
+      printf 'label=omit-disable-vulkan-surface\nmode=%s\nomitted_flag=--disable-vulkan-surface\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
         "$invalid_mode" "$invalid_entry" "$URL" "$CHANNEL" "$HEADLESS" \
         "$PLAYWRIGHT_REVISION" >"$invalid_dir/run-info.txt"
       printf '%s\n' "$MATRIX_INVALID_INPUT_STATUS" >"$invalid_dir/exit-status.txt"
-      printf '{"label":"omit-use-angle-swiftshader","mode":"%s","entry":"%s","omittedFlag":"--use-angle=swiftshader","processExitStatus":%s,"resultWritten":false,"outcome":"invalid-input","nonGating":true}\n' \
+      printf '{"label":"omit-disable-vulkan-surface","mode":"%s","entry":"%s","omittedFlag":"--disable-vulkan-surface","processExitStatus":%s,"resultWritten":false,"outcome":"invalid-input","nonGating":true}\n' \
         "$invalid_mode" "$invalid_entry" "$MATRIX_INVALID_INPUT_STATUS" \
         >"$invalid_dir/process-status.json"
-      printf 'omit-use-angle-swiftshader/%s omitted=--use-angle=swiftshader exit=%s outcome=invalid-input nonGating=true\n' \
+      printf 'omit-disable-vulkan-surface/%s omitted=--disable-vulkan-surface exit=%s outcome=invalid-input nonGating=true\n' \
         "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
-      printf 'matrix-omit-use-angle-swiftshader-%s=%s\n' \
+      printf 'matrix-omit-disable-vulkan-surface-%s=%s\n' \
         "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/summary.txt"
     done
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       {
         printf '\n### Non-gating GPU flag matrix preflight\n\n'
-        printf 'The `omit-use-angle-swiftshader` control is recorded as `invalid-input` for both entries because Variant A contains the flag %s times. The existing A/B validation still fails closed before launching probes.\n' \
-          "$ANGLE_TOKEN_COUNT"
+        printf 'The `omit-disable-vulkan-surface` control is recorded as `invalid-input` for both entries because Variant A contains the flag %s times. The existing A/B validation still fails closed before launching probes.\n' \
+          "$B_OMITTED_COUNT"
       } >>"$GITHUB_STEP_SUMMARY"
     fi
   }
-  if [ "$ANGLE_TOKEN_COUNT" -ne 1 ]; then
-    record_invalid_angle_omission
-    fail "Linux A/B diagnostics require exactly one --use-angle=swiftshader token (found $ANGLE_TOKEN_COUNT); refusing to form variant B"
+  if [ "$B_OMITTED_COUNT" -ne 1 ]; then
+    record_invalid_surface_omission
+    fail "Linux A/B diagnostics require exactly one --disable-vulkan-surface token (found $B_OMITTED_COUNT); refusing to form variant B"
   fi
 
   B_LAUNCH_ARGS=()
   for arg in "${A_LAUNCH_ARGS[@]}"; do
-    if [ "$arg" = "$ANGLE_TOKEN" ]; then
-      B_LAUNCH_ARGS+=("$ANGLE_CONTROL")
-    else
-      B_LAUNCH_ARGS+=("$arg")
+    if [ "$arg" = "$B_OMITTED_TOKEN" ]; then
+      continue
     fi
+    B_LAUNCH_ARGS+=("$arg")
   done
   B_LAUNCH_ARGS_TEXT="${B_LAUNCH_ARGS[*]}"
 
@@ -262,8 +266,9 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
 
   A_STATUS=""
   B_STATUS=""
-  # Variant A is the product preset; variant B is the matched one-token ANGLE
-  # contrast. Both full suites gate the CI result exactly as before.
+  # Variant A is the product preset unchanged; variant B removes exactly one
+  # --disable-vulkan-surface token from A and adds no OpenGL/ANGLE control.
+  # Both full suites gate the CI result exactly as before.
   for variant in A B; do
     if [ "$variant" = A ]; then
       variant_dir="$LINUX_DIAGNOSTICS_DIR/variant-a"
@@ -302,11 +307,12 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
 
   # Non-gating diagnostics matrix: the real served app versus the standalone
   # canvas probe, with exactly one GL/ANGLE or Vulkan control token removed from
-  # the Variant A flags at a time. One additional candidate substitutes only the
-  # --enable-features=Vulkan token (see FEATURE_CONTROL_* below); it is not an
-  # omission. A missing token is an explicit invalid-input result, never a
-  # silently skipped combination. These probes run after the gated smoke/A
-  # suites and never influence their statuses or CI gating.
+  # the Variant A flags at a time. The `omit-disable-vulkan-surface` row is the
+  # same one-token difference used to form Variant B. One additional candidate
+  # substitutes only the --enable-features=Vulkan token (see FEATURE_CONTROL_*
+  # below); it is not an omission. A missing token is an explicit invalid-input
+  # result, never a silently skipped combination. These probes run after the
+  # gated smoke/A suites and never influence their statuses or CI gating.
   APP_ENTRY="/?autostart=1&backend=webgpu"
   CANVAS_ENTRY="/__linux_webgpu_smoke__"
   MATRIX_OMISSION_FLAGS=(
@@ -634,7 +640,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
         printf '| `%s` | %s | `%s` | %s | %s |\n' \
           "$matrix_label" "$matrix_mode" "$matrix_control" "$matrix_status" "$matrix_outcome"
       done
-      printf '\nThese matrix rows are **non-gating**: they never change the job status. The two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token and is not an omission.\n'
+      printf '\nThese matrix rows are **non-gating**: they never change the job status. The two standalone probes and the full A/B suites above remain the only gated results. Variant B is Variant A with exactly one `--disable-vulkan-surface` token removed. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token and is not an omission.\n'
       printf 'Matrix details: `%s/matrix.txt`.\n' "$LINUX_DIAGNOSTICS_DIR"
     } >>"$GITHUB_STEP_SUMMARY"
   fi

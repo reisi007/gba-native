@@ -242,10 +242,25 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(ab_lines.len(), 2, "A and B must still run: {ab}");
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
+    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
     assert_eq!(
-        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
+        base_tokens
+            .iter()
+            .filter(|token| *token == "--disable-vulkan-surface")
+            .count(),
+        1,
+        "Variant A must contain exactly one --disable-vulkan-surface token"
+    );
+    assert!(
+        !b_args
+            .split_whitespace()
+            .any(|token| token == "--disable-vulkan-surface"),
+        "Variant B must not contain --disable-vulkan-surface"
+    );
+    assert_eq!(
+        omit_first(&base_tokens, "--disable-vulkan-surface").join(" "),
         b_args,
-        "the existing A/B keeps changing only the ANGLE token"
+        "Variant B is Variant A with exactly the one --disable-vulkan-surface token removed"
     );
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
@@ -256,7 +271,6 @@ pub fn assert_contract(root: &Path) {
         13,
         "two standalone probes, one baseline, eight omission and two feature probes: {smokes:?}"
     );
-    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
     let substituted = substitute_feature(&base_tokens);
     assert_eq!(
         substituted.len(),
@@ -407,7 +421,8 @@ pub fn assert_contract(root: &Path) {
     }
 
     // A duplicated control token is recorded as invalid-input too, and it does
-    // not trip the existing A/B preflight (which only guards --use-angle).
+    // not trip the existing A/B preflight (which only guards
+    // --disable-vulkan-surface).
     let (_duplicate_temp, duplicate_root, duplicate_bin, duplicate_calls) = linux_ab_fixture();
     let duplicate_text = override_tokens
         .join(" ")

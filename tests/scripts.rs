@@ -231,23 +231,20 @@ fn assert_linux_ab_diagnostic_contract() {
     );
     let (a_args, a_output) = first_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = first_lines[1].split_once('\t').expect("B call fields");
-    assert_eq!(
-        a_args
-            .split_whitespace()
-            .filter(|arg| *arg == "--use-angle=swiftshader")
-            .count(),
-        1
-    );
-    assert_eq!(
-        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
-        b_args,
-        "B changes only the exact ANGLE token"
-    );
+    let a_tokens: Vec<_> = a_args.split_whitespace().collect();
+    let b_tokens: Vec<_> = b_args.split_whitespace().collect();
+    let omitted = "--disable-vulkan-surface";
+    let a_surface_count = a_tokens.iter().filter(|t| **t == omitted).count();
+    assert_eq!(a_surface_count, 1, "A has one {omitted}");
+    assert!(!b_tokens.contains(&omitted), "B has no {omitted}");
+    let mut expected_b = a_tokens.clone();
+    expected_b.retain(|token| *token != omitted);
+    assert_eq!(expected_b, b_tokens, "B differs only by {omitted}");
     for required in [
         "--use-webgpu-adapter=swiftshader",
         "--enable-features=Vulkan",
+        "--use-angle=swiftshader",
         "--use-vulkan=swiftshader",
-        "--disable-vulkan-surface",
         "--enable-logging=stderr",
         "--log-level=0",
     ] {
@@ -289,32 +286,32 @@ fn assert_linux_ab_diagnostic_contract() {
     );
 
     linux_gpu_matrix::reset_calls(&calls);
-    let missing_angle = run_linux_ab_fixture(
+    let missing_surface = run_linux_ab_fixture(
         &root,
         &bin,
         &calls,
         "--use-webgpu-adapter=swiftshader",
         None,
     );
-    assert!(!missing_angle.status.success());
-    let output_text = String::from_utf8_lossy(&missing_angle.stderr);
+    assert!(!missing_surface.status.success());
+    let output_text = String::from_utf8_lossy(&missing_surface.stderr);
     assert!(
-        output_text.contains("exactly one --use-angle=swiftshader token (found 0)"),
+        output_text.contains("exactly one --disable-vulkan-surface token (found 0)"),
         "{output_text}"
     );
     linux_gpu_matrix::assert_no_calls(&calls);
 
-    let duplicate_angle = run_linux_ab_fixture(
+    let duplicate_surface = run_linux_ab_fixture(
         &root,
         &bin,
         &calls,
-        "--use-angle=swiftshader --use-angle=swiftshader",
+        "--disable-vulkan-surface --disable-vulkan-surface",
         None,
     );
-    assert!(!duplicate_angle.status.success());
-    let output_text = String::from_utf8_lossy(&duplicate_angle.stderr);
+    assert!(!duplicate_surface.status.success());
+    let output_text = String::from_utf8_lossy(&duplicate_surface.stderr);
     assert!(
-        output_text.contains("exactly one --use-angle=swiftshader token (found 2)"),
+        output_text.contains("exactly one --disable-vulkan-surface token (found 2)"),
         "{output_text}"
     );
     linux_gpu_matrix::assert_no_calls(&calls);
