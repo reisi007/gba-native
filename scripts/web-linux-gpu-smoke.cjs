@@ -221,6 +221,8 @@ async function inPageProbe(mode) {
   const OPERATION_TIMEOUT_MS = 10_000;
   const TEARDOWN_LOSS_WAIT_MS = 1_000;
   const RAF_TIMEOUT_MS = 1_500;
+  const MAX_UNCAPTURED_ERRORS = 100;
+  const ERROR_TEXT_LIMIT = 2_000;
   const safeText = (value) => {
     if (value instanceof Error) return `${value.name}: ${value.message}`;
     try {
@@ -240,6 +242,7 @@ async function inPageProbe(mode) {
     offscreen: null,
     workError: null,
     uncapturedErrors: [],
+    uncapturedErrorsTruncated: false,
     deviceLoss: null,
     boundedWaitMs: 0,
     boundedWaitLimitMs: 7_000,
@@ -251,10 +254,14 @@ async function inPageProbe(mode) {
   const lossSignal = new Promise((resolve) => { lossResolve = resolve; });
   let lossEvent = null;
   const addError = (event) => {
+    if (report.uncapturedErrors.length >= MAX_UNCAPTURED_ERRORS) {
+      report.uncapturedErrorsTruncated = true;
+      return;
+    }
     const error = event.error;
     report.uncapturedErrors.push({
-      name: error?.name || 'GPUUncapturedError',
-      message: error?.message || safeText(error),
+      name: safeText(error?.name || 'GPUUncapturedError').slice(0, ERROR_TEXT_LIMIT),
+      message: safeText(error?.message || error).slice(0, ERROR_TEXT_LIMIT),
       phase,
       atMs: Math.round(performance.now() - started),
     });

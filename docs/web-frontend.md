@@ -223,9 +223,9 @@ omission controls then remove exactly one token each — `--enable-features=Vulk
 `--use-angle=vulkan`, `--use-vulkan=swiftshader` or `--disable-vulkan-surface` —
 while every other token, including `--enable-logging=stderr --log-level=0`, is
 retained, and each resulting flag set probes both the real app route and the
-standalone canvas document. Omission is the only control; the matrix adds no
-`--use-angle=opengl` variant because the recorded logs showed no available GL
-backend. Every combination owns a directory below
+standalone canvas document. These one-flag omissions are the only removal
+controls; the matrix adds no `--use-angle=opengl` variant because the recorded
+logs showed no available GL backend. Every combination owns a directory below
 `output/web-linux-ab-*/matrix-<control>-<mode>/` with `launch-args.txt`,
 `omitted-flag.txt`, `run-info.txt` (entry, origin, channel, revision),
 `exit-status.txt` and `process-status.json`; probed combinations add
@@ -240,12 +240,32 @@ remaining combinations are still attempted and no process is killed broadly.
 GPU health; the app probe's `deviceLossObserved`/`errorStateObserved` carry the
 observed app outcome separately.
 
+One additional candidate, `features-vulkan-from-angle`, belongs to the same
+non-gating matrix but is not an omission. Starting from the same effective
+Variant A arguments (including `--enable-logging=stderr --log-level=0`), it
+replaces exactly the single argv token `--enable-features=Vulkan` with
+`--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan` and retains every
+other token byte-for-byte in the same order. It does not add `--use-gl=angle`,
+does not change `--use-angle`, does not use OpenGL and changes no app/runtime
+code. The candidate was inspired by a public WebGPU-on-Linux report but is only
+a candidate control: it proves neither causality nor a root cause and makes no
+general Linux compatibility claim. Both the standalone canvas document and the
+real app route are attempted even if one of them fails. Its directory keeps
+`launch-args.txt`, `changed-arg.txt` (the changed and replacement token),
+`run-info.txt` with `control=feature-substitution` (no `omitted_flag`),
+`exit-status.txt` and `process-status.json` with
+`changedFlag`/`replacementFlag` instead of `omittedFlag`; probes add
+`playwright.log` and completed probes `result.json`. A missing or duplicated
+`--enable-features=Vulkan` token is recorded as `invalid-input` (exit 126) for
+both entries, while every other matrix row is still run.
+
 Matrix statuses are listed in `summary.txt` after `matrix-non-gating=true`, in
 `matrix.txt`, and as a separately labelled non-gating table in the GitHub step
-summary. They never change the job status: only the two standalone probes and
-the full A/B functional suites gate, exactly as before. Match or mismatch of a
-control is a diagnostic signal, not root-cause proof, and this document makes no
-Linux matrix result claim.
+summary; the additive `features-vulkan-from-angle` rows are included there.
+They never change the job status: only the two standalone probes and the full
+A/B functional suites gate, exactly as before. Match or mismatch of a control
+is a diagnostic signal, not root-cause proof, and this document makes no Linux
+matrix result claim.
 
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:

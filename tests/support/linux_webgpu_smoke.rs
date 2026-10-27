@@ -21,6 +21,13 @@ pub fn assert_probe_source(root: &Path) {
         "HARNESS_HARD_DEADLINE_MS = 150_000",
         "process.exit(result.processExitStatus)",
         "browserTerminationFallback",
+        "MAX_UNCAPTURED_ERRORS = 100",
+        "ERROR_TEXT_LIMIT = 2_000",
+        "uncapturedErrorsTruncated: false",
+        "report.uncapturedErrors.length >= MAX_UNCAPTURED_ERRORS",
+        "report.uncapturedErrorsTruncated = true",
+        "safeText(error?.name || 'GPUUncapturedError').slice(0, ERROR_TEXT_LIMIT)",
+        "safeText(error?.message || error).slice(0, ERROR_TEXT_LIMIT)",
     ] {
         assert!(
             source.contains(contract),

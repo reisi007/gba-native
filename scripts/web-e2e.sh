@@ -9,8 +9,9 @@
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
 #   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
 #   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
-#     plus the existing matched Vulkan/OpenGL full-suite diagnostics and a
-#     non-gating one-flag omission matrix (real app vs standalone canvas)
+#     plus the existing matched Vulkan/OpenGL full-suite diagnostics, a
+#     non-gating one-flag omission matrix (real app vs standalone canvas) and one
+#     additive feature-combination candidate (not an omission)
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -276,9 +277,11 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
 
   # Non-gating diagnostics matrix: the real served app versus the standalone
   # canvas probe, with exactly one Vulkan/ANGLE control token removed from the
-  # Variant A flags at a time. A missing token is an explicit invalid-input
-  # result, never a silently skipped combination. These probes run after the
-  # gated smoke/A/B suites and never influence their statuses or CI gating.
+  # Variant A flags at a time. One additional candidate substitutes only the
+  # --enable-features=Vulkan token (see FEATURE_CONTROL_* below); it is not an
+  # omission. A missing token is an explicit invalid-input result, never a
+  # silently skipped combination. These probes run after the gated smoke/A/B
+  # suites and never influence their statuses or CI gating.
   APP_ENTRY="/?autostart=1&backend=webgpu"
   CANVAS_ENTRY="/__linux_webgpu_smoke__"
   MATRIX_OMISSION_FLAGS=(
@@ -287,6 +290,10 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     "--use-vulkan=swiftshader:omit-use-vulkan-swiftshader"
     "--disable-vulkan-surface:omit-disable-vulkan-surface"
   )
+  FEATURE_CONTROL_LABEL="features-vulkan-from-angle"
+  FEATURE_CONTROL_FROM="--enable-features=Vulkan"
+  FEATURE_CONTROL_TO="--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan"
+  FEATURE_CONTROL_SUMMARY="changed=$FEATURE_CONTROL_FROM -> $FEATURE_CONTROL_TO"
   MATRIX_RECORDS=()
 
   matrix_entry() {
@@ -298,8 +305,15 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
   }
 
   json_escape() {
-    escape_text="${1//\\/\\\\}"
-    printf '%s' "${escape_text//\"/\\\"}"
+    local escape_text="$1" control code replacement
+    escape_text="${escape_text//\\/\\\\}"
+    escape_text="${escape_text//\"/\\\"}"
+    for code in {1..31}; do
+      printf -v control '%b' "\\$(printf '%03o' "$code")"
+      printf -v replacement '\\u%04x' "$code"
+      escape_text="${escape_text//"$control"/"$replacement"}"
+    done
+    printf '%s' "$escape_text"
   }
 
   write_matrix_record() {
@@ -318,7 +332,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
       "$record_label" "$record_mode" "$(matrix_entry "$record_mode")" "$record_omitted" \
       "$(json_escape "$record_args")" "$record_status" "$record_result_written" \
       "$record_outcome" "$(json_escape "$record_reason")" >"$record_dir/process-status.json"
-    MATRIX_RECORDS+=("$record_label|$record_mode|$record_omitted|$record_status|$record_outcome")
+    MATRIX_RECORDS+=("$record_label|$record_mode|omitted=$record_omitted|$record_status|$record_outcome")
   }
 
   write_matrix_run_info() {
@@ -339,7 +353,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     probe_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$probe_label-$probe_mode"
     if ! mkdir "$probe_dir"; then
       info "could not allocate fresh $probe_dir; recording matrix failure and continuing"
-      MATRIX_RECORDS+=("$probe_label|$probe_mode|$probe_omitted|125|probe-directory-unavailable")
+      MATRIX_RECORDS+=("$probe_label|$probe_mode|omitted=$probe_omitted|125|probe-directory-unavailable")
       return 0
     fi
     printf '%s\n' "$probe_args" >"$probe_dir/launch-args.txt"
@@ -383,7 +397,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$invalid_label-$invalid_mode"
     if ! mkdir "$invalid_dir"; then
       info "could not allocate fresh $invalid_dir; recording matrix failure and continuing"
-      MATRIX_RECORDS+=("$invalid_label|$invalid_mode|$invalid_omitted|125|probe-directory-unavailable")
+      MATRIX_RECORDS+=("$invalid_label|$invalid_mode|omitted=$invalid_omitted|125|probe-directory-unavailable")
       return 0
     fi
     invalid_reason="$invalid_omitted appears $invalid_count times in the Variant A flags; exactly one omission control is required, so this combination was not probed"
@@ -394,6 +408,97 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     info "non-gating GPU matrix probe: $invalid_label mode=$invalid_mode invalid input ($invalid_omitted count $invalid_count)"
     write_matrix_record "$invalid_label" "$invalid_mode" "$invalid_omitted" \
       "$MATRIX_INVALID_INPUT_STATUS" invalid-input "$LAUNCH_ARGS" "$invalid_reason"
+    return 0
+  }
+
+  # Additive feature-combination candidate (never an omission): substitute only
+  # the single --enable-features=Vulkan argv token and keep every other token.
+  write_feature_run_info() {
+    feature_info_mode="$1"
+    feature_info_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$FEATURE_CONTROL_LABEL-$feature_info_mode"
+    printf 'label=%s\nmode=%s\ncontrol=feature-substitution\nchanged_flag=%s\nreplacement_flag=%s\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
+      "$FEATURE_CONTROL_LABEL" "$feature_info_mode" "$FEATURE_CONTROL_FROM" \
+      "$FEATURE_CONTROL_TO" "$(matrix_entry "$feature_info_mode")" "$URL" "$CHANNEL" \
+      "$HEADLESS" "$PLAYWRIGHT_REVISION" >"$feature_info_dir/run-info.txt"
+  }
+
+  write_feature_record() {
+    feature_mode="$1"
+    feature_status="$2"
+    feature_outcome="$3"
+    feature_args="$4"
+    feature_reason="$5"
+    feature_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$FEATURE_CONTROL_LABEL-$feature_mode"
+    feature_result_written=false
+    if [ -s "$feature_dir/result.json" ]; then feature_result_written=true; fi
+    printf '%s\n' "$feature_status" >"$feature_dir/exit-status.txt"
+    printf '{"label":"%s","mode":"%s","control":"feature-substitution","entry":"%s","changedFlag":"%s","replacementFlag":"%s","launchArgs":"%s","processExitStatus":%s,"resultWritten":%s,"outcome":"%s","reason":"%s","nonGating":true}\n' \
+      "$FEATURE_CONTROL_LABEL" "$feature_mode" "$(matrix_entry "$feature_mode")" \
+      "$FEATURE_CONTROL_FROM" "$FEATURE_CONTROL_TO" "$(json_escape "$feature_args")" \
+      "$feature_status" "$feature_result_written" "$feature_outcome" \
+      "$(json_escape "$feature_reason")" >"$feature_dir/process-status.json"
+    MATRIX_RECORDS+=("$FEATURE_CONTROL_LABEL|$feature_mode|$FEATURE_CONTROL_SUMMARY|$feature_status|$feature_outcome")
+  }
+
+  run_feature_control_probe() {
+    feature_probe_mode="$1"
+    feature_probe_args="$2"
+    feature_probe_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$FEATURE_CONTROL_LABEL-$feature_probe_mode"
+    if ! mkdir "$feature_probe_dir"; then
+      info "could not allocate fresh $feature_probe_dir; recording matrix failure and continuing"
+      MATRIX_RECORDS+=("$FEATURE_CONTROL_LABEL|$feature_probe_mode|$FEATURE_CONTROL_SUMMARY|125|probe-directory-unavailable")
+      return 0
+    fi
+    printf '%s\n' "$feature_probe_args" >"$feature_probe_dir/launch-args.txt"
+    printf '%s\n' "$FEATURE_CONTROL_SUMMARY" >"$feature_probe_dir/changed-arg.txt"
+    write_feature_run_info "$feature_probe_mode"
+    info "non-gating GPU matrix probe: $FEATURE_CONTROL_LABEL mode=$feature_probe_mode $FEATURE_CONTROL_SUMMARY"
+    if (
+      cd "$ROOT"
+      DEBUG=pw:browser \
+      WEBGPU_SMOKE_OUTPUT_DIR="$feature_probe_dir" \
+      WEB_PLAYWRIGHT_CHROMIUM_REVISION="$PLAYWRIGHT_REVISION" \
+      WEB_APP_URL="$URL" \
+      WEB_E2E_CHANNEL="$CHANNEL" \
+      WEB_E2E_LAUNCH_ARGS="$feature_probe_args" \
+      PLAYWRIGHT_PACKAGE_PATH="$NPM/node_modules/playwright" \
+        "$NODE_BIN" "$ROOT/scripts/web-linux-gpu-smoke.cjs" "$feature_probe_mode" \
+        2>&1 | tee "$feature_probe_dir/playwright.log"
+    ); then
+      feature_probe_status=0
+    else
+      feature_probe_status=$?
+    fi
+    feature_probe_outcome=harness-failure
+    if [ -s "$feature_probe_dir/result.json" ]; then
+      if [ "$feature_probe_status" -eq 0 ]; then
+        feature_probe_outcome=completed
+      else
+        feature_probe_outcome=probe-reported-failure
+      fi
+    fi
+    write_feature_record "$feature_probe_mode" "$feature_probe_status" \
+      "$feature_probe_outcome" "$feature_probe_args" ""
+    return 0
+  }
+
+  record_feature_invalid_input() {
+    feature_invalid_mode="$1"
+    feature_invalid_count="$2"
+    feature_invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-$FEATURE_CONTROL_LABEL-$feature_invalid_mode"
+    if ! mkdir "$feature_invalid_dir"; then
+      info "could not allocate fresh $feature_invalid_dir; recording matrix failure and continuing"
+      MATRIX_RECORDS+=("$FEATURE_CONTROL_LABEL|$feature_invalid_mode|$FEATURE_CONTROL_SUMMARY|125|probe-directory-unavailable")
+      return 0
+    fi
+    feature_invalid_reason="$FEATURE_CONTROL_FROM appears $feature_invalid_count times in the Variant A flags; exactly one token is required to substitute $FEATURE_CONTROL_TO, so this combination was not probed"
+    printf '%s\n' "$LAUNCH_ARGS" >"$feature_invalid_dir/launch-args.txt"
+    printf '%s\n' "$feature_invalid_reason" >"$feature_invalid_dir/invalid-input.txt"
+    printf '%s\n' "$FEATURE_CONTROL_SUMMARY" >"$feature_invalid_dir/changed-arg.txt"
+    write_feature_run_info "$feature_invalid_mode"
+    info "non-gating GPU matrix probe: $FEATURE_CONTROL_LABEL mode=$feature_invalid_mode invalid input ($FEATURE_CONTROL_FROM count $feature_invalid_count)"
+    write_feature_record "$feature_invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" \
+      invalid-input "$LAUNCH_ARGS" "$feature_invalid_reason"
     return 0
   }
 
@@ -419,6 +524,27 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     run_matrix_probe "$omission_label" canvas "$omission" "$matrix_variant_text"
     run_matrix_probe "$omission_label" app "$omission" "$matrix_variant_text"
   done
+
+  feature_control_count=0
+  FEATURE_CONTROL_ARGS=()
+  for arg in "${A_LAUNCH_ARGS[@]}"; do
+    if [ "$arg" = "$FEATURE_CONTROL_FROM" ]; then
+      feature_control_count=$((feature_control_count + 1))
+      if [ "$feature_control_count" -eq 1 ]; then
+        FEATURE_CONTROL_ARGS+=("$FEATURE_CONTROL_TO")
+        continue
+      fi
+    fi
+    FEATURE_CONTROL_ARGS+=("$arg")
+  done
+  if [ "$feature_control_count" -ne 1 ]; then
+    record_feature_invalid_input canvas "$feature_control_count"
+    record_feature_invalid_input app "$feature_control_count"
+  else
+    FEATURE_CONTROL_ARGS_TEXT="${FEATURE_CONTROL_ARGS[*]}"
+    run_feature_control_probe canvas "$FEATURE_CONTROL_ARGS_TEXT"
+    run_feature_control_probe app "$FEATURE_CONTROL_ARGS_TEXT"
+  fi
 
   SHARED_IMAGE_LOGS=(
     "$LINUX_DIAGNOSTICS_DIR/smoke-canvas/playwright.log"
@@ -459,11 +585,11 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
   : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
   for matrix_record in "${MATRIX_RECORDS[@]}"; do
-    IFS='|' read -r matrix_label matrix_mode matrix_omitted matrix_status matrix_outcome <<<"$matrix_record"
+    IFS='|' read -r matrix_label matrix_mode matrix_control matrix_status matrix_outcome <<<"$matrix_record"
     printf 'matrix-%s-%s=%s\n' "$matrix_label" "$matrix_mode" "$matrix_status" \
       >>"$LINUX_DIAGNOSTICS_DIR/summary.txt"
-    printf '%s/%s omitted=%s exit=%s outcome=%s nonGating=true\n' \
-      "$matrix_label" "$matrix_mode" "$matrix_omitted" "$matrix_status" "$matrix_outcome" \
+    printf '%s/%s %s exit=%s outcome=%s nonGating=true\n' \
+      "$matrix_label" "$matrix_mode" "$matrix_control" "$matrix_status" "$matrix_outcome" \
       >>"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
   done
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -476,13 +602,13 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
       printf 'Artifacts: `%s`. These are software-runner diagnostics, not GPU hardware evidence or root-cause proof.\n' \
         "$LINUX_DIAGNOSTICS_DIR"
       printf '\n### Non-gating GPU flag matrix (diagnostics only)\n\n'
-      printf '| Control | Mode | Omitted flag | Exit | Outcome |\n| --- | --- | --- | ---: | --- |\n'
+      printf '| Control | Mode | Change | Exit | Outcome |\n| --- | --- | --- | ---: | --- |\n'
       for matrix_record in "${MATRIX_RECORDS[@]}"; do
-        IFS='|' read -r matrix_label matrix_mode matrix_omitted matrix_status matrix_outcome <<<"$matrix_record"
+        IFS='|' read -r matrix_label matrix_mode matrix_control matrix_status matrix_outcome <<<"$matrix_record"
         printf '| `%s` | %s | `%s` | %s | %s |\n' \
-          "$matrix_label" "$matrix_mode" "$matrix_omitted" "$matrix_status" "$matrix_outcome"
+          "$matrix_label" "$matrix_mode" "$matrix_control" "$matrix_status" "$matrix_outcome"
       done
-      printf '\nThese matrix rows are **non-gating**: they never change the job status. The same two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof.\n'
+      printf '\nThese matrix rows are **non-gating**: they never change the job status. The same two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token and is not an omission.\n'
       printf 'Matrix details: `%s/matrix.txt`.\n' "$LINUX_DIAGNOSTICS_DIR"
     } >>"$GITHUB_STEP_SUMMARY"
   fi

@@ -36,11 +36,11 @@ const MATRIX_ARTIFACTS: [&str; 7] = [
     "result.json",
 ];
 
-fn read(path: &Path) -> String {
+pub(super) fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
-fn run_fixture(
+pub(super) fn run_fixture(
     root: &Path,
     bin: &Path,
     calls: &Path,
@@ -89,7 +89,7 @@ pub(super) fn reset_calls(calls: &Path) {
 
 /// The diagnostics directory of a run, taken from the exact A/B output path the
 /// script passes to Playwright instead of guessing the newest timestamp.
-fn diagnostics_dir(calls: &Path) -> PathBuf {
+pub(super) fn diagnostics_dir(calls: &Path) -> PathBuf {
     let log = read(calls);
     let (_, output_dir) = log
         .lines()
@@ -104,7 +104,7 @@ fn diagnostics_dir(calls: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-fn newest_diagnostics_dir(root: &Path) -> PathBuf {
+pub(super) fn newest_diagnostics_dir(root: &Path) -> PathBuf {
     let mut directories: Vec<_> = std::fs::read_dir(root.join("output"))
         .expect("read fixture output")
         .map(|entry| entry.expect("read fixture output entry").path())
@@ -117,7 +117,7 @@ fn newest_diagnostics_dir(root: &Path) -> PathBuf {
     directories.pop().expect("Linux diagnostic directory")
 }
 
-fn smoke_lines(calls: &Path) -> Vec<(String, String, String)> {
+pub(super) fn smoke_lines(calls: &Path) -> Vec<(String, String, String)> {
     read(&calls.with_extension("smokes.log"))
         .lines()
         .map(|line| {
@@ -131,7 +131,7 @@ fn smoke_lines(calls: &Path) -> Vec<(String, String, String)> {
         .collect()
 }
 
-fn omit_first(tokens: &[String], omitted: &str) -> Vec<String> {
+pub(super) fn omit_first(tokens: &[String], omitted: &str) -> Vec<String> {
     let mut remaining = Vec::new();
     let mut removed = false;
     for token in tokens {
@@ -246,8 +246,8 @@ pub fn assert_contract(root: &Path) {
     let smokes = smoke_lines(&calls);
     assert_eq!(
         smokes.len(),
-        11,
-        "two standalone probes, one app baseline and eight omission probes: {smokes:?}"
+        13,
+        "two standalone probes, one app baseline, eight omission probes and two feature-combination probes: {smokes:?}"
     );
     for (probe, mode) in smokes[..2].iter().zip(["canvas", "offscreen"]) {
         assert_eq!(probe.0, mode);

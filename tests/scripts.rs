@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "support/linux_gpu_features.rs"]
+mod linux_gpu_features;
 #[path = "support/linux_gpu_matrix.rs"]
 mod linux_gpu_matrix;
 #[path = "support/linux_webgpu_smoke.rs"]
@@ -492,4 +494,5 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     assert!(workflow.contains("path: output/web-linux-ab-*/"));
     assert_linux_ab_diagnostic_contract();
     linux_gpu_matrix::assert_contract(&repo_root());
+    linux_gpu_features::assert_contract(&repo_root());
 }
