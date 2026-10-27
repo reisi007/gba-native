@@ -193,14 +193,22 @@ introduce fallback or relaxed assertions.
 Linux candidate configuration under test (issue #24). Promoted Variant A selects
 ANGLE's SwiftShader backend (`--use-angle=swiftshader`) instead of
 `--use-angle=vulkan` and omits `--disable-vulkan-surface`; it is the
-configuration that, as the then-current Variant B, passed all 19 gated
-functional tests in Linux CI run 40547520962. The promotion rests on that
-matched run but the promoted configuration has not yet been re-executed as the
-new Variant A together with the gated standalone probes. It is a candidate, not
-an established root cause; it makes no physical-GPU, driver, vendor or
-retail-compatibility claim and does not claim that a switch enables GPU
-rendering. The new Variant B appends exactly one `--disable-vulkan-surface`
-token to Variant A and reproduces the earlier surface-on Variant A flag set.
+configuration that, as the then-current Variant B, passed all 19 functional
+tests in Linux CI run 40547520962 under the former gating policy. The promotion
+rests on that matched run. The promoted configuration was later re-executed as
+new Variant A together with the gated standalone probes in
+[run 40557708749](https://github.com/reisi007/gba-native/actions/runs/40557708749):
+Variant A passed 19/19 and both probes exited 0, with the canvas smoke confirming
+the expected magenta. That run still used the former both-gated policy and does
+not establish a root cause; the new A/B gating policy waits for CI validation.
+It is a candidate, not an established root cause; it makes no physical-GPU,
+driver, vendor or retail-compatibility claim and does not claim that a switch
+enables GPU rendering. The new Variant B appends exactly one
+`--disable-vulkan-surface` token to Variant A and reproduces the earlier
+surface-on Variant A flag set. It continues to execute the full functional
+suite in every Linux A/B diagnostics run, and its result, Playwright log,
+`test-results` and exit status are retained, but it is a non-gating diagnostic:
+Variant A and the two standalone probes gate the Linux browser job.
 
 Recorded facts from run 40501875768 (software runner, Playwright Chromium
 156.0.8078.4):
@@ -245,9 +253,13 @@ only `omit-disable-vulkan-surface` exit 0 for both entries. Its canvas and app
 results recorded no device loss or SharedImageBackingFactory errors; other
 omission rows did record such observations. That matched run supports the
 promoted configuration but is not
-root-cause proof, and it does not show that the gated standalone canvas smoke
-passes under it. Those run labels are the old pairing: old A failed, old B
-passed; the promoted configuration has not yet been re-run as new A.
+root-cause proof, and that matched run alone does not show that the standalone
+canvas smoke passes under the promoted configuration. Those run labels are the
+old pairing: old A failed, old B passed. A later run, 40557708749, re-ran new
+Variant A with both standalone probes: Variant A passed 19/19, the canvas smoke
+exited 0 with the expected magenta and the offscreen smoke exited 0. That run
+used the former policy that gated both full suites and does not establish a root
+cause.
 
 Display wrapper scope: only Linux CI functional E2E. `scripts/web-e2e.sh`
 validates its mode first, then re-executes itself under the runner image's
@@ -283,10 +295,13 @@ canvas. Each records console/page errors, adapter details, a bounded post-work
 wait and `device.lost` separately from its deliberate teardown. These
 diagnostics are not GPU-hardware evidence and do not establish root cause;
 either probe failing fails the CI browser gate after both full A/B functional
-suites have run. The last recorded canvas smoke used the earlier surface-on
-flags and failed its white-versus-magenta pixel comparison; under the promoted
-flags it has not been re-run and stays gated. Artifacts are retained below
-`output/web-linux-ab-*/smoke-{canvas,offscreen}`.
+suites have run. Variant A gates that result; Variant B still executes and
+records its status as a non-gating diagnostic. An earlier recorded canvas smoke
+used the earlier surface-on flags and failed its white-versus-magenta pixel
+comparison. Run 40557708749 later re-ran both standalone probes under the
+promoted flags: the canvas smoke exited 0 with the expected magenta confirmed
+and the offscreen smoke exited 0. Both probes remain gated.
+Artifacts are retained below `output/web-linux-ab-*/smoke-{canvas,offscreen}`.
 Animation-frame waits and Playwright navigation, evaluation, screenshot and
 cleanup calls have deadlines; a 150-second harness ceiling persists a failed
 result and exits the owned smoke process if cleanup stalls. Playwright's Browser
@@ -380,41 +395,49 @@ Matrix statuses are listed in `summary.txt` after `matrix-non-gating=true`, in
 `matrix.txt`, and as a separately labelled non-gating table in the GitHub step
 summary; the additive `features-vulkan-from-angle` rows are included there.
 They never change the job status: only the two standalone probes and the full
-A/B functional suites gate, exactly as before. The A/B pair keeps its one-token
-contrast — variant A is the promoted candidate preset, variant B appends
-exactly the single `--disable-vulkan-surface` token to A, adds no OpenGL/ANGLE
-control and changes no other token, and both variants gate the job. The
+Variant A functional suite gate. Variant B continues to execute the full
+19-test suite; its exit status, Playwright log, `test-results` and `summary.txt`
+row stay recorded, but a Variant B failure is a non-gating diagnostic and does
+not turn the job red. Neither a B failure nor a B success is hidden: the step
+summary labels B as diagnostic/non-gating and never reports it as gated. The
+A/B pair keeps its one-token contrast — variant A is the promoted candidate
+preset, variant B appends exactly the single `--disable-vulkan-surface` token
+to A, adds no OpenGL/ANGLE control and changes no other token. The
 `omit-disable-vulkan-surface` matrix row therefore reproduces variant A's flag
 set, while the matrix baseline and the other three omission rows use the
 reference preset (variant B). Because the prior surface-on configuration failed
-17/19 as old A in run 40547520962, the job intentionally remains red if that
-configuration repeats the failures as new B, even if new A passes. The reference
-preset's standalone canvas/app probes are not the full 19-test suites.
+17/19 as old A in run 40547520962, the new policy records the same result as a
+B diagnostic instead of gating on it; it does not claim that B passes. The
+reference preset's standalone canvas/app probes are not the full 19-test
+suites.
 
 In the retained artifacts of Linux WebGPU CI run 40516175997
 (`output/web-linux-ab-40516175997-review/.../web-linux-ab-20261027T135653Z-9085-0`),
 the non-gating `omit-disable-vulkan-surface` rows for both the standalone canvas
 and the app entry exited 0, and the canvas screenshot's centre pixel matched the
 expected magenta (`pixelVerified=true`). That is probe evidence for those flag
-sets only. In that run the standalone canvas smoke and both gated full-suite
-processes exited 1; its Variant B still used `--use-angle=vulkan`, not the
-current one-token comparison. Linux CI run 40547520962 then compared the
-surface-on configuration (old Variant A: exit 1, 17/19, two black-pixel WebGPU
-canvas goldens) with the token-omitted configuration (old Variant B: exit 0,
-19/19) and recorded the standalone canvas smoke failing white against the
-expected magenta while the offscreen probe passed; only the
+sets only. In that run the standalone canvas smoke and both full-suite processes
+exited 1; its Variant B still used `--use-angle=vulkan`, not the current
+one-token comparison. Linux CI run 40547520962 then compared the surface-on
+configuration (old Variant A: exit 1, 17/19, two black-pixel WebGPU canvas
+goldens) with the token-omitted configuration (old Variant B: exit 0, 19/19)
+and recorded the standalone canvas smoke failing white against the expected
+magenta while the offscreen probe passed; only the
 `omit-disable-vulkan-surface` matrix row exited 0 for both entries. Those run
-labels are the old pairing and the promoted configuration has not been re-run as
-new Variant A. These facts do not show that the current gated 19-test A/B suites
-pass, do not establish a cause for the earlier device loss, and do not establish
-that removing the token helps beyond those probes. A different
-feature-substitution candidate stayed ready in its app probe but failed its
-canvas pixel probe, so it was not promoted. Both variants still have to pass on
-CI; a matching probe does not remove that requirement. Their directories,
-`launch-args.txt`, Playwright output and exit statuses stay recorded, and
-`summary.txt` still reports `A=<status>` and `B=<status>`. Match or mismatch of a
-control is a diagnostic signal, not root-cause proof, and this document makes no
-Linux matrix result claim.
+labels are the old pairing. Run 40557708749 later re-ran new Variant A and both
+standalone probes under the promoted flags: Variant A passed 19/19, the canvas
+smoke exited 0 with the expected magenta and the offscreen smoke exited 0; that
+run used the former both-gated policy. These facts do not establish a cause for
+the earlier device loss and do not establish that removing the token helps
+beyond those probes. A different feature-substitution
+candidate stayed ready in its app probe but failed its canvas pixel probe, so it
+was not promoted. Variant A and both standalone probes still have to pass on CI;
+Variant B must still execute and be recorded, but it does not gate. Their
+directories, `launch-args.txt`, Playwright output and exit statuses stay
+recorded, and `summary.txt` still reports `A=<status>`, `B=<status>`,
+`A-gated=true` and `B-non-gating=true`. Match or mismatch of a control is a
+diagnostic signal, not root-cause proof, and this document makes no Linux matrix
+result claim.
 
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
@@ -480,29 +503,48 @@ Local runs on 2026-10-25 with this repository, Playwright Chromium
 | Linux CI run 40236292333, before the Vulkan launch switches (only the two original SwiftShader flags) | `auto`/`webgpu` | WebGPU initialized with `Rgba8Unorm` render/surface and acknowledged two presents, then reported `WebGPU device lost (Destroyed): Device was destroyed.`; four tests failed and 15 passed. The WebGL2 path passed. |
 | Linux CI run 40501875768, native-Vulkan ANGLE preset, software adapter, standalone canvas probe | `webgpu` | SwiftShader adapter `google`/`swiftshader`/`Vulkan` obtained, device created, and the matched offscreen compute probe succeeded; the canvas probe alone lost the device at 32–36 ms with `OperationError: A valid external Instance reference no longer exists.` after `Could not find SharedImageBackingFactory ... WebgpuSwapChainTexture` and repeated `VK_KHR_surface`/`VK_KHR_xcb_surface` init errors. |
 | Linux CI run 40501875768, same preset, real app route | `webgpu` | Reached `ready` at ~112 ms with `presented=1`, applied `lost` at ~745–749 ms with `presented=2` and `WebGPU device lost (Destroyed): Device was destroyed.`; the post-work snapshot at ~7.1 s still reported `lost` with the canvas hidden. |
-| Linux WebGPU CI run 40516175997, non-gating `omit-disable-vulkan-surface` probes (then-Variant A with that one token removed) | `webgpu` | Both the standalone canvas and the real app probe exited 0; the canvas screenshot's centre pixel matched the expected magenta (`pixelVerified=true`). In that run the canvas smoke and both gated full-suite processes exited 1; its Variant B used `--use-angle=vulkan`, not the current one-token comparison. This is probe evidence, not full-suite success or root-cause proof. |
-| Linux WebGPU CI run 40547520962, then-current Variant A (surface token present; now new B), gated full suite | `webgpu` | Exit 1 with 17/19 passing; two WebGPU canvas golden tests failed although the app reported ready on SwiftShader/Vulkan with two presentations and all sampled source pixels were black. This surface-on configuration remains gated as new B. |
-| Linux WebGPU CI run 40547520962, then-current Variant B (surface token omitted; now new A), gated full suite | `webgpu` | Exit 0 with 19/19 passing. This is the configuration promoted to Variant A; it has not yet been re-run as new Variant A with the gated standalone probes. |
+| Linux WebGPU CI run 40516175997, non-gating `omit-disable-vulkan-surface` probes (then-Variant A with that one token removed) | `webgpu` | Both the standalone canvas and the real app probe exited 0; the canvas screenshot's centre pixel matched the expected magenta (`pixelVerified=true`). In that run the canvas smoke and both full-suite processes exited 1; its Variant B used `--use-angle=vulkan`, not the current one-token comparison. This is probe evidence, not full-suite success or root-cause proof. |
+| Linux WebGPU CI run 40547520962, then-current Variant A (surface token present; now new B), full suite under the former both-gated policy | `webgpu` | Exit 1 with 17/19 passing; two WebGPU canvas golden tests failed although the app reported ready on SwiftShader/Vulkan with two presentations and all sampled source pixels were black. Under the new policy this surface-on configuration runs as the non-gating Variant B diagnostic. |
+| Linux WebGPU CI run 40547520962, then-current Variant B (surface token omitted; now new A), full suite under the former both-gated policy | `webgpu` | Exit 0 with 19/19 passing. This is the configuration promoted to Variant A; it was later re-run as new Variant A in run 40557708749 (19/19), where both standalone probes also exited 0. |
 | Linux WebGPU CI run 40547520962, standalone canvas and offscreen probes (then-current surface-on A) | `webgpu` | The offscreen probe passed; the canvas smoke still compared white against the expected magenta and failed. Both probes remain gated. |
 | Linux WebGPU CI run 40547520962, four non-gating one-flag omission controls (eight app/canvas probe rows) | `webgpu` | Only `omit-disable-vulkan-surface` exited 0 for both entries. Its canvas/app results recorded no device loss or SharedImageBackingFactory errors; other omission rows did record such observations. This is not root-cause proof. |
+| Linux WebGPU CI run 40557708749, promoted Variant A, full suite, former both-gated policy | `webgpu` | Exit 0 with 19/19 passing. The overall workflow still failed because Variant B was gated in that run. |
+| Linux WebGPU CI run 40557708749, new Variant B (A plus exactly one `--disable-vulkan-surface`), full suite, former both-gated policy | `webgpu` | Exit 1 with 17/19 passing; the same two WebGPU pixel-golden failures as run 40547520962. The app reported ready on SwiftShader/Vulkan with two presentations and all sampled source pixels were black. No SharedImageBackingFactory failure was observed. The functional logs contain a deliberate synthetic device-loss message from a diagnostics-regression fixture; it is test data, not evidence of runtime device loss. Under the new policy this result is recorded as a non-gating diagnostic; the new policy has not yet been validated by CI, and this run does not prove a root cause. |
+| Linux WebGPU CI run 40557708749, standalone canvas and offscreen probes | `webgpu` | Canvas smoke exited 0 with the expected magenta confirmed; offscreen exited 0. Both probes remain gated. No SharedImageBackingFactory failure was observed in the probe logs. |
 
 Adapter names/device types are browser-redacted in some WebGPU runs; they are
 reported as “(not exposed by this browser)”. The Linux gate exercises the
 promoted candidate preset (ANGLE's SwiftShader backend for Linux without the
 surface token, with the Linux CI functional E2E re-executed under `xvfb-run`
-when no display is set) as Variant A and the matched Variant B that appends
-exactly one `--disable-vulkan-surface` token. Linux WebGPU CI run 40516175997
-failed: the gated A/B suites did not all pass, while the artifacts additionally
-recorded the non-gating one-token omission probes described above. Run
-40547520962 used the old pairing — old A (surface token present) failed 17/19
-and old B (token omitted) passed 19/19 — and its standalone canvas smoke failed
-the magenta comparison; the promoted configuration has not been re-run as new
-Variant A. Those results do not show a passing Linux suite under the promoted
-flags and do not identify a cause. The recorded Linux runs established WebGPU
-API initialization, the RGBA format and a working offscreen device, not a stable
-canvas presentation or a successful Linux suite. This is software-backend
-configuration/evidence, not a physical-GPU claim. A browser without the
-required backend fails the forced-backend test; the suite does not skip it.
+when no display is set) as Variant A, which gates the job together with both
+standalone probes, and the matched Variant B that appends exactly one
+`--disable-vulkan-surface` token. Variant B continues to execute the full suite
+and is recorded as a non-gating diagnostic. Linux WebGPU CI run 40516175997
+failed under the then-current policy: both full suites did not all pass, while
+the artifacts additionally recorded the non-gating one-token omission probes
+described above. Run 40547520962 used the old pairing — old A (surface token
+present) failed 17/19 and old B (token omitted) passed 19/19 — and its
+standalone canvas smoke failed the magenta comparison. The promoted
+configuration was later re-run as new Variant A in run 40557708749
+([CI run](https://github.com/reisi007/gba-native/actions/runs/40557708749))
+under the former both-gated policy: the canvas smoke exited 0 with the expected
+magenta confirmed, the offscreen smoke exited 0, Variant A exited 0 with 19/19
+passing and Variant B exited 1 with 17/19 (the same two WebGPU pixel-golden
+failures; the app reported ready on SwiftShader/Vulkan with two presentations
+and all sampled source pixels black). No SharedImageBackingFactory failure was
+observed in that run's smoke/A/B logs. The functional-suite logs contain a
+deliberate synthetic device-loss message from a diagnostics-regression fixture;
+it is test data, not evidence of runtime device loss. Its overall workflow
+failed because Variant B was gated. That run does not prove a root cause. The
+new policy — Variant A and both standalone probes gate; Variant B
+executes and is recorded as a non-gating diagnostic — has not yet been
+validated by CI. Those results do not show a passing Linux suite under the
+promoted flags and do not identify a cause. The recorded Linux runs established
+WebGPU API initialization, the RGBA format and a working offscreen device, not a
+stable canvas presentation or a successful Linux suite. This is
+software-backend configuration/evidence, not a physical-GPU claim. A browser
+without the required backend fails the forced-backend test; the suite does not
+skip it.
 
 Playwright's `deviceScaleFactor` emulation has been observed reporting
 `devicePixelContentBoxSize` in CSS pixels. The application independently checks

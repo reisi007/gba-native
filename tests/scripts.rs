@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "support/linux_ab_diagnostics.rs"]
+mod linux_ab_diagnostics;
 #[path = "support/linux_gpu_features.rs"]
 mod linux_gpu_features;
 #[path = "support/linux_gpu_matrix.rs"]
@@ -151,6 +153,7 @@ if [ -f "$AB_CALL_LOG.count" ]; then read count < "$AB_CALL_LOG.count"; fi
 count=$((count + 1))
 printf '%s\n' "$count" > "$AB_CALL_LOG.count"
 printf '%s\t%s\n' "$WEB_E2E_LAUNCH_ARGS" "$WEB_E2E_OUTPUT_DIR" >> "$AB_CALL_LOG"
+printf '%s\n' "$*" > "$WEB_E2E_OUTPUT_DIR/command.txt"
 printf 'fake Playwright run %s\n' "$count"
 if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$count" -eq 1 ]; then exit 17; fi
 if [ "${AB_FAIL_VARIANT:-}" = B ] && [ "$count" -eq 2 ]; then exit 18; fi
@@ -197,123 +200,6 @@ fn run_linux_ab_fixture(
         command.env_remove("AB_FAIL_VARIANT");
     }
     command.output().expect("run Linux A/B E2E fixture")
-}
-
-fn newest_linux_ab_dir(root: &Path) -> PathBuf {
-    let mut diagnostics: Vec<_> = std::fs::read_dir(root.join("output"))
-        .expect("read fixture output directory")
-        .map(|entry| entry.expect("read output entry").path())
-        .filter(|path| {
-            path.file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with("web-linux-ab-"))
-        })
-        .collect();
-    diagnostics.sort();
-    diagnostics.pop().expect("Linux A/B diagnostics directory")
-}
-
-fn assert_linux_ab_diagnostic_contract() {
-    linux_webgpu_smoke::assert_probe_source(&repo_root());
-    let (temp, root, bin, calls) = linux_ab_fixture();
-    let launch_args = linux_gpu_matrix::BASE_ARGS;
-
-    let a_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("A"));
-    assert!(!a_failure.status.success());
-    let output_text = String::from_utf8_lossy(&a_failure.stderr);
-    assert!(
-        output_text.contains("canvas=19, offscreen=0, A=17, B=0"),
-        "{output_text}"
-    );
-    let first_calls = std::fs::read_to_string(&calls).expect("read both variant calls");
-    let first_lines: Vec<_> = first_calls.lines().collect();
-    assert_eq!(
-        first_lines.len(),
-        2,
-        "both variants must run: {first_calls}"
-    );
-    let (a_args, a_output) = first_lines[0].split_once('\t').expect("A call fields");
-    let (b_args, b_output) = first_lines[1].split_once('\t').expect("B call fields");
-    let omitted = linux_gpu_matrix::SURFACE_FLAG;
-    assert!(
-        !a_args.split_whitespace().any(|arg| arg == omitted),
-        "promoted Variant A must not contain {omitted}"
-    );
-    assert_eq!(
-        b_args
-            .split_whitespace()
-            .filter(|token| *token == omitted)
-            .count(),
-        1,
-        "B appends exactly one {omitted}"
-    );
-    assert_eq!(
-        b_args,
-        format!("{a_args} {omitted}"),
-        "B appends {omitted} to the exact A flags"
-    );
-    for required in [
-        "--use-webgpu-adapter=swiftshader",
-        "--enable-features=Vulkan",
-        "--use-angle=swiftshader",
-        "--use-vulkan=swiftshader",
-        "--enable-logging=stderr",
-        "--log-level=0",
-    ] {
-        assert!(
-            a_args.split_whitespace().any(|arg| arg == required),
-            "A missing {required}"
-        );
-    }
-    assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
-    assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
-    let first_dir = newest_linux_ab_dir(&root);
-    linux_webgpu_smoke::assert_output(&calls, &first_dir, a_args);
-    for variant in ["variant-a", "variant-b"] {
-        assert!(first_dir.join(variant).join("playwright.log").is_file());
-        assert!(first_dir.join(variant).join("launch-args.txt").is_file());
-        assert!(first_dir.join(variant).join("test-results").is_dir());
-    }
-
-    linux_gpu_matrix::reset_calls(&calls);
-    let b_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("B"));
-    assert!(
-        !b_failure.status.success(),
-        "variant B must keep gating the browser result"
-    );
-    let output_text = String::from_utf8_lossy(&b_failure.stderr);
-    assert!(
-        output_text.contains("canvas=0, offscreen=0, A=0, B=18"),
-        "{output_text}"
-    );
-    let second_dir = newest_linux_ab_dir(&root);
-    assert!(
-        std::fs::read_to_string(second_dir.join("summary.txt"))
-            .expect("read B-failure summary")
-            .contains("smoke-canvas=0\nsmoke-offscreen=0\nA=0\nB=18\n")
-    );
-
-    for count in [1usize, 2] {
-        linux_gpu_matrix::reset_calls(&calls);
-        let mut override_args = format!("{launch_args} {omitted}");
-        for _ in 1..count {
-            override_args.push(' ');
-            override_args.push_str(omitted);
-        }
-        let invalid = run_linux_ab_fixture(&root, &bin, &calls, &override_args, None);
-        assert!(
-            !invalid.status.success(),
-            "an override with {count} surface tokens must fail closed"
-        );
-        let output_text = String::from_utf8_lossy(&invalid.stderr);
-        assert!(
-            output_text.contains(&format!(
-                "to contain no --disable-vulkan-surface token (found {count})"
-            )),
-            "{output_text}"
-        );
-        linux_gpu_matrix::assert_no_calls(&calls);
-    }
-    drop(temp);
 }
 
 fn fake_ratchet(directory: &Path, version: &str, name: &str) -> PathBuf {
@@ -490,7 +376,7 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     assert!(workflow.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"));
     assert!(workflow.contains("name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"));
     assert!(workflow.contains("path: output/web-linux-ab-*/"));
-    assert_linux_ab_diagnostic_contract();
+    linux_ab_diagnostics::assert_contract();
     linux_webgpu_smoke::assert_display_contract(&root);
     linux_gpu_matrix::assert_contract(&repo_root());
     linux_gpu_features::assert_contract(&repo_root());

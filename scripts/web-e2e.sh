@@ -10,10 +10,12 @@
 #   ci     same entry point, headless; Linux selects ANGLE's SwiftShader backend
 #   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
 #     plus a matched A/B full-suite comparison: variant A is the promoted Linux
-#     preset (no --disable-vulkan-surface token) and variant B appends exactly
-#     one such token to A. The non-gating one-flag omission matrix (real app vs
-#     standalone canvas) and one additive feature-combination candidate derive
-#     from an explicit reference preset equal to variant B (the earlier
+#     preset (no --disable-vulkan-surface token) and gates the job together with
+#     both standalone probes; variant B appends exactly one such token to A and
+#     still executes the full suite, but is a non-gating diagnostic whose result
+#     and artifacts are retained. The non-gating one-flag omission matrix (real
+#     app vs standalone canvas) and one additive feature-combination candidate
+#     derive from an explicit reference preset equal to variant B (the earlier
 #     surface-on A), so every control stays a real one-token omission
 #
 # Candidate configuration under test (issue #24): Linux CI functional E2E runs
@@ -35,6 +37,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 . "$ROOT/scripts/lib.sh"
 
 cd "$ROOT"
+
+RESULT_MESSAGE="functional E2E passed"
 
 MODE="${1:-local}"
 case "$MODE" in
@@ -283,9 +287,10 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
 
   A_STATUS=""
   B_STATUS=""
-  # Variant A is the promoted product preset unchanged; variant B appends
-  # exactly one --disable-vulkan-surface token to A and adds no OpenGL/ANGLE
-  # control. Both full suites gate the CI result exactly as before.
+  # Variant A is the promoted product preset and gates the CI result together
+  # with the two standalone probes. Variant B appends exactly one
+  # --disable-vulkan-surface token to A, still executes the full suite and keeps
+  # its result, logs and artifacts, but never changes the job status.
   for variant in A B; do
     if [ "$variant" = A ]; then
       variant_dir="$LINUX_DIAGNOSTICS_DIR/variant-a"
@@ -620,7 +625,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     fi
   fi
 
-  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nxvfb-run-wrapper=%s\nSharedImageBackingFactoryFailures=%s\nmatrix-non-gating=true\n' \
+  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nA-gated=true\nB-non-gating=true\nxvfb-run-wrapper=%s\nSharedImageBackingFactoryFailures=%s\nmatrix-non-gating=true\n' \
     "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS" \
     "${WEB_E2E_XVFB:-0}" "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
   : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
@@ -636,10 +641,11 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     {
       printf '## Linux WebGPU diagnostic experiment\n\n'
       printf '| Check | Exit/status |\n| --- | ---: |\n'
-      printf '| Canvas smoke | %s |\n| Offscreen smoke | %s |\n| Functional E2E A | %s |\n| Functional E2E B | %s |\n' \
+      printf '| Canvas smoke (gated) | %s |\n| Offscreen smoke (gated) | %s |\n| Functional E2E A (gated) | %s |\n| Functional E2E B (diagnostic, non-gating) | %s |\n' \
         "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS"
       printf '\nE2E re-executed under `xvfb-run`: **%s** (records wrapper use only; it does not show that Chromium consumed a virtual display).\n' "${WEB_E2E_XVFB:-0}"
       printf '\nSharedImageBackingFactory failures: **%s**.\n\n' "$SHARED_IMAGE_FAILURES"
+      printf 'Variant B still executes the full functional suite; its exit status, Playwright log and `test-results` stay recorded below as a non-gating diagnostic. Only the two standalone probes and Variant A determine the job status.\n\n'
       printf 'Artifacts: `%s`. These are software-runner diagnostics, not GPU hardware evidence or root-cause proof.\n' \
         "$LINUX_DIAGNOSTICS_DIR"
       printf '\n### Non-gating GPU flag matrix (diagnostics only)\n\n'
@@ -649,16 +655,22 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
         printf '| `%s` | %s | `%s` | %s | %s |\n' \
           "$matrix_label" "$matrix_mode" "$matrix_control" "$matrix_status" "$matrix_outcome"
       done
-      printf '\nThese matrix rows are **non-gating**: they never change the job status. The two standalone probes and the full A/B suites above remain the only gated results. Variant B appends exactly one `--disable-vulkan-surface` token to Variant A; the matrix baseline and the four omission controls use the documented reference preset, which is exactly Variant B, so `omit-disable-vulkan-surface` reproduces Variant A. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token of the reference preset and is not an omission.\n'
+      printf '\nThese matrix rows are **non-gating**: they never change the job status. The two standalone probes and the full Variant A suite above are the only gated results; Variant B still executes the full suite and is recorded as a non-gating diagnostic. Variant B appends exactly one `--disable-vulkan-surface` token to Variant A; the matrix baseline and the four omission controls use the documented reference preset, which is exactly Variant B, so `omit-disable-vulkan-surface` reproduces Variant A. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token of the reference preset and is not an omission.\n'
       printf 'Matrix details: `%s/matrix.txt`.\n' "$LINUX_DIAGNOSTICS_DIR"
     } >>"$GITHUB_STEP_SUMMARY"
   fi
-  info "Linux WebGPU smoke statuses: canvas=$SMOKE_CANVAS_STATUS offscreen=$SMOKE_OFFSCREEN_STATUS"
-  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; xvfb-run wrapper=${WEB_E2E_XVFB:-0}; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
+  info "Linux WebGPU gated smoke statuses: canvas=$SMOKE_CANVAS_STATUS offscreen=$SMOKE_OFFSCREEN_STATUS"
+  info "Linux A/B E2E statuses: A=$A_STATUS (gated) B=$B_STATUS (variant B diagnostic, non-gating); xvfb-run wrapper=${WEB_E2E_XVFB:-0}; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
   info "non-gating GPU flag matrix results: $LINUX_DIAGNOSTICS_DIR/matrix.txt (these statuses never gate CI)"
   if [ "$SMOKE_CANVAS_STATUS" -ne 0 ] || [ "$SMOKE_OFFSCREEN_STATUS" -ne 0 ] ||
-    [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then
-    fail "Linux WebGPU diagnostics/browser E2E failed (canvas=$SMOKE_CANVAS_STATUS, offscreen=$SMOKE_OFFSCREEN_STATUS, A=$A_STATUS, B=$B_STATUS); see $LINUX_DIAGNOSTICS_DIR/summary.txt"
+    [ "$A_STATUS" -ne 0 ]; then
+    fail "Linux WebGPU gated browser E2E failed (canvas=$SMOKE_CANVAS_STATUS, offscreen=$SMOKE_OFFSCREEN_STATUS, A=$A_STATUS); variant B diagnostic status=$B_STATUS; see $LINUX_DIAGNOSTICS_DIR/summary.txt"
+  fi
+  if [ "$B_STATUS" -ne 0 ]; then
+    info "variant B failed with status $B_STATUS; its result, Playwright log, test-results and exit-status stay recorded under $LINUX_DIAGNOSTICS_DIR/variant-b as a non-gating diagnostic"
+    RESULT_MESSAGE="functional E2E gate passed; variant B failed with status $B_STATUS as a recorded non-gating diagnostic"
+  else
+    RESULT_MESSAGE="functional E2E passed; variant B diagnostic status 0"
   fi
 else
   info "functional E2E (mode=$MODE channel=$CHANNEL headless=$HEADLESS)"
@@ -687,4 +699,4 @@ else
   )
 fi
 
-info "functional E2E passed"
+info "$RESULT_MESSAGE"

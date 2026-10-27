@@ -85,6 +85,7 @@ pub fn assert_output(calls: &Path, diagnostics: &Path, a_args: &str) {
 
     let summary = std::fs::read_to_string(diagnostics.join("summary.txt")).expect("read summary");
     assert!(summary.contains("smoke-canvas=19\nsmoke-offscreen=0\nA=17\nB=0\n"));
+    assert!(summary.contains("A-gated=true\nB-non-gating=true\n"));
     assert!(summary.contains("SharedImageBackingFactoryFailures=not-observed\n"));
     for mode in ["canvas", "offscreen"] {
         let smoke = diagnostics.join(format!("smoke-{mode}"));
@@ -173,7 +174,8 @@ fn fixture_path_with_host(bin: &Path) -> String {
 }
 
 /// The Linux gate must stay fail-closed on the candidate display wrapper, keep
-/// both A/B variants gating, and keep its documentation accurate.
+/// the two standalone probes and Variant A gating while Variant B still runs as
+/// a recorded non-gating diagnostic, and keep its documentation accurate.
 pub fn assert_display_contract(root: &Path) {
     let script = std::fs::read_to_string(root.join("scripts/web-e2e.sh"))
         .expect("read the functional browser E2E script");
@@ -224,21 +226,41 @@ pub fn assert_display_contract(root: &Path) {
         "WEB_E2E_XVFB=1",
         "xvfb-run-wrapper=%s",
         "candidate configuration under test",
-        "[ \"$A_STATUS\" -ne 0 ] || [ \"$B_STATUS\" -ne 0 ]",
+        "A-gated=true\\nB-non-gating=true\\n",
+        "B_STATUS (variant B diagnostic, non-gating)",
     ] {
         assert!(
             script.contains(contract),
             "missing display contract: {contract}"
         );
     }
+
+    // The final failure condition gates both standalone probes and Variant A,
+    // but must never include Variant B.
+    let gate_start = script
+        .find("if [ \"$SMOKE_CANVAS_STATUS\" -ne 0 ]")
+        .expect("the final gate condition starts with the canvas probe");
+    let gate_tail = &script[gate_start..];
+    let gate_condition = &gate_tail[..gate_tail
+        .find("]; then")
+        .expect("the final gate condition ends with then")
+        + "]; then".len()];
+    for gated in ["SMOKE_CANVAS_STATUS", "SMOKE_OFFSCREEN_STATUS", "A_STATUS"] {
+        assert!(
+            gate_condition.contains(gated),
+            "the final gate must include {gated}: {gate_condition}"
+        );
+    }
     assert!(
-        !script.contains("variant-b-non-gating"),
-        "variant B must keep gating the job"
+        !gate_condition.contains("B_STATUS"),
+        "the final gate must exclude the Variant B diagnostic: {gate_condition}"
     );
 
     for wording in [
         "candidate configuration",
-        "both variants gate the job",
+        "Variant A and the two standalone probes gate",
+        "Variant B continues to execute",
+        "non-gating diagnostic",
         "xvfb-run-wrapper=1",
         "reference preset",
         "The screenshot runner (`scripts/web-screenshots.sh`) is not wrapped",
@@ -246,8 +268,12 @@ pub fn assert_display_contract(root: &Path) {
         assert!(docs.contains(wording), "documentation missing: {wording}");
     }
     for wording in [
+        "both variants gate the job",
+        "both full suites gate",
+        "Variant B keeps gating",
+        "remains gated as new B",
+        "Both variants still have to pass",
         "non-gating comparison",
-        "variant-b-non-gating",
         "disables GL",
         "Xvfb solves",
         "--enable-gpu",
@@ -259,8 +285,8 @@ pub fn assert_display_contract(root: &Path) {
         );
     }
 
-    // Linux CI without DISPLAY re-executes through the wrapper, keeps A and B
-    // gated, and records only that the wrapper was used.
+    // Linux CI without DISPLAY re-executes through the wrapper, keeps the
+    // probes and A gated, and records only that the wrapper was used.
     let (_temp, fixture_root, bin, calls) = super::linux_ab_fixture();
     let launch_args = super::linux_gpu_matrix::BASE_ARGS;
     let output = super::run_linux_ab_fixture(&fixture_root, &bin, &calls, launch_args, None);
@@ -277,8 +303,24 @@ pub fn assert_display_contract(root: &Path) {
     assert!(summary.contains("xvfb-run-wrapper=1\n"), "{summary}");
     assert!(summary.contains("A=0\nB=0\n"), "{summary}");
     assert!(
-        !summary.contains("variant-b-non-gating"),
-        "the summary must keep A and B as gated results: {summary}"
+        summary.contains("A-gated=true\nB-non-gating=true\n"),
+        "the summary must keep A gated and B non-gating: {summary}"
+    );
+    for variant in ["variant-a", "variant-b"] {
+        let dir = diagnostics.join(variant);
+        for artifact in ["launch-args.txt", "playwright.log", "exit-status.txt"] {
+            assert!(dir.join(artifact).is_file(), "missing {variant}/{artifact}");
+        }
+        assert!(
+            dir.join("test-results").is_dir(),
+            "missing {variant}/test-results"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(diagnostics.join("variant-b/exit-status.txt"))
+            .expect("read variant B status")
+            .trim_end(),
+        "0"
     );
 
     // A local Linux run without CI must not be wrapped.

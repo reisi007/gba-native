@@ -5,7 +5,8 @@
 # earlier preset it selects ANGLE's SwiftShader backend
 # (--use-angle=swiftshader) instead of the native Vulkan ANGLE backend and omits
 # --disable-vulkan-surface. That configuration, then-current Variant B, passed
-# all 19 gated functional tests in Linux run 40547520962. The recorded Linux
+# all 19 functional tests in Linux run 40547520962 under the former policy that
+# gated both suites. The recorded Linux
 # runs also show a SharedImageBackingFactory failure and post-init device loss on
 # the WebGPU canvas path; they do not establish that these flags fix it, so this
 # remains a candidate configuration under test, not a root cause. No claim is
