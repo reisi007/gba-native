@@ -1,13 +1,43 @@
 use std::fmt::Write as _;
 
 use super::artifact::AotArtifact;
-use super::emit::block_name;
 use gba_native::error::Result;
 
-/// Emit the harness entry point, ROM binding, dispatch loop and state report.
-/// Known blocks are direct calls; only undiscovered targets use the reference
-/// interpreter.
-pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact) -> Result<()> {
+/// Emit the native harness driver around the target-neutral program section.
+///
+/// The driver owns the host boundary: argument parsing, external ROM loading,
+/// digest+length binding, the state report and exit codes. The program section
+/// owns translated blocks and fallback dispatch. Known blocks are direct calls;
+/// only undiscovered targets use the reference interpreter.
+pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact, budget: u64) -> Result<()> {
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "// Native harness driver: host boundary only. Arguments, external ROM"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// loading, digest+length binding, reporting and exit codes live here."
+    )
+    .unwrap();
+    writeln!(out, "use gba_native::cart::Cartridge;").unwrap();
+    writeln!(out, "use gba_native::display;").unwrap();
+    writeln!(out, "use gba_native::error::Error;").unwrap();
+    writeln!(out, "use gba_native::sha256;").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "const ROM_SHA256: &str = \"{}\";",
+        artifact.rom_sha256_hex()
+    )
+    .unwrap();
+    writeln!(out, "const BUDGET: u64 = {budget};").unwrap();
+    // The artifact binds the ROM by digest and length only. The generated
+    // source deliberately contains no ROM byte array and no raw copy of the
+    // input image; the runtime reads a caller-supplied path.
+    writeln!(out, "const ROM_LEN: usize = {};", artifact.rom_len).unwrap();
+    writeln!(out).unwrap();
     writeln!(out, "fn main() {{").unwrap();
     writeln!(out, "    if let Err(error) = run() {{").unwrap();
     writeln!(out, "        eprintln!(\"error={{error}}\");").unwrap();
@@ -58,31 +88,11 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact) -> Result<()
     writeln!(out, "    cpu.initialize_bios_stacks();").unwrap();
     writeln!(out, "    cpu.set_pc(ENTRY);").unwrap();
     writeln!(out, "    cpu.set_thumb(ENTRY_THUMB);").unwrap();
-    writeln!(out, "    let mut budget = BUDGET;").unwrap();
-    writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
-    writeln!(out, "    while budget > 0 {{").unwrap();
-    writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
-    for block in &artifact.blocks {
-        writeln!(
-            out,
-            "            (0x{:08X}, {}) => {}(&mut cpu, &mut bus, &mut budget)?,",
-            block.addr,
-            block.thumb,
-            block_name(block.addr, block.thumb)
-        )
-        .unwrap();
-    }
-    writeln!(out, "            _ => {{").unwrap();
-    writeln!(out, "                interpret::step(&mut cpu, &mut bus)?;").unwrap();
-    writeln!(out, "                budget -= 1;").unwrap();
-    writeln!(out, "                fallbacks += 1;").unwrap();
-    writeln!(out, "                Next::Continue").unwrap();
-    writeln!(out, "            }}").unwrap();
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        if next == Next::Halt {{").unwrap();
-    writeln!(out, "            break;").unwrap();
-    writeln!(out, "        }}").unwrap();
-    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    let program = run_program(&mut cpu, &mut bus, BUDGET)?;"
+    )
+    .unwrap();
     writeln!(out, "    let image = display::snapshot(&bus)?;").unwrap();
     writeln!(out, "    println!(\"status=ok\");").unwrap();
     writeln!(out, "    println!(\"pc=0x{{:08X}}\", cpu.pc());").unwrap();
@@ -99,9 +109,17 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact) -> Result<()
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
-    writeln!(out, "    println!(\"budget_remaining={{}}\", budget);").unwrap();
-    writeln!(out, "    println!(\"budget_used={{}}\", BUDGET - budget);").unwrap();
-    writeln!(out, "    println!(\"fallbacks={{}}\", fallbacks);").unwrap();
+    writeln!(
+        out,
+        "    println!(\"budget_remaining={{}}\", program.budget_remaining);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"budget_used={{}}\", BUDGET - program.budget_remaining);"
+    )
+    .unwrap();
+    writeln!(out, "    println!(\"fallbacks={{}}\", program.fallbacks);").unwrap();
     writeln!(
         out,
         "    println!(\"cpu_sha256={{}}\", sha256::hex(&cpu.state_digest()));"

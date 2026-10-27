@@ -161,7 +161,7 @@ fn native_ram_self_modification_falls_back_four_times_and_sees_the_patch() {
     assert!(!source.contains("block_02000000_arm"));
     assert!(!source.contains("ROM_BYTES"));
     assert!(!source.contains("GBA-RAM"));
-    assert!(source.contains("interpret::step(&mut cpu, &mut bus)?;"));
+    assert!(source.contains("interpret::step(cpu, bus)?;"));
     assert!(source.contains("bus.write32(address & !3, source)?;"));
 
     let mut expected_cpu = Cpu::direct_entry();

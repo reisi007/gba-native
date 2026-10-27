@@ -206,7 +206,10 @@ fn native_arm_ldm_stm_fixture_matches_hand_expected_state() {
 
     let budget = 13;
     let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit ARM block");
-    let translated = source.split("fn main()").next().expect("block section");
+    let translated = source
+        .split("pub fn run_program")
+        .next()
+        .expect("block section");
     assert!(!translated.contains("interpret::step"));
     assert!(!source.contains("ROM_BYTES"));
     assert!(source.contains("bus.write32(start.wrapping_add(0x0u32), cpu.reg(1))?;"));
@@ -270,7 +273,10 @@ fn native_thumb_stack_and_block_fixture_matches_hand_expected_state() {
 
     let budget = 19;
     let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit Thumb block");
-    let translated = source.split("fn main()").next().expect("block section");
+    let translated = source
+        .split("pub fn run_program")
+        .next()
+        .expect("block section");
     assert!(!translated.contains("interpret::step"));
     assert!(!source.contains("ROM_BYTES"));
     assert!(source.contains("cpu.reg(13)"));

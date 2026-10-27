@@ -176,7 +176,10 @@ fn native_alu_shift_bl_fixture_matches_hand_expected_state_and_bus() {
     assert_eq!(artifact.stats.dynamic_bx, 1);
 
     let source = aot::emit_native_module(&cart, &artifact, BUDGET).expect("emit");
-    let blocks = source.split("fn main()").next().expect("block section");
+    let blocks = source
+        .split("pub fn run_program")
+        .next()
+        .expect("block section");
     assert!(!blocks.contains("interpret::step"));
     assert!(!blocks.contains("decode_arm("));
     assert!(source.contains("gba_native::semantics::operand"));

@@ -115,7 +115,10 @@ fn negative_strh_is_translated_directly_and_matches_hand_expected_bus() {
     assert_eq!(artifact.stats.dynamic_bx, 0);
 
     let source = aot::emit_native_module(&cart, &artifact, BUDGET).expect("emit fixture");
-    let translated = source.split("fn main()").next().expect("block section");
+    let translated = source
+        .split("pub fn run_program")
+        .next()
+        .expect("block section");
     assert!(!translated.contains("interpret::step"));
     assert!(!translated.contains("decode_arm("));
     assert!(source.contains("// 0x08000008 arm 0xE14012B0"));

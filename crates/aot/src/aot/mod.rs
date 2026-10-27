@@ -13,12 +13,14 @@ mod emit;
 mod emit_driver;
 mod emit_mem;
 mod emit_ops;
+mod emit_program;
 mod harness;
 mod report;
 
 pub use artifact::{AotArtifact, AotBlock, DiscoveryStats, Limits};
 pub use discover::discover;
 pub use emit::emit_native_module;
+pub use emit_program::emit_program_module;
 pub use harness::NativeHarness;
 pub use report::NativeReport;
 

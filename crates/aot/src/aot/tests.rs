@@ -1,6 +1,6 @@
 use gba_native::demo;
 
-use crate::aot::{Limits, discover, emit_native_module};
+use crate::aot::{Limits, discover, emit_native_module, emit_program_module};
 
 #[test]
 fn discovery_is_bounded_and_follows_static_bx() {
@@ -140,4 +140,67 @@ fn emitted_source_contains_no_rom_copy() {
     assert!(!source.contains("GBA-NATIVE"));
     assert!(source.contains("--rom"));
     assert!(source.contains("ROM_LEN"));
+}
+
+#[test]
+fn program_module_has_no_host_boundary_or_rom_binding() {
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let source = emit_program_module(&cart, &artifact).expect("emit program");
+    for marker in [
+        "fn main(",
+        "std::",
+        "println!",
+        "eprintln!",
+        "--rom",
+        "ROM_SHA256",
+        "ROM_LEN",
+        "ROM_BYTES",
+        "verify_binding",
+        "Cartridge",
+        "sha256",
+        "GBA-NATIVE",
+    ] {
+        assert!(
+            !source.contains(marker),
+            "program section must not contain {marker:?}"
+        );
+    }
+    assert!(source.contains("pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64)"));
+    assert!(source.contains("pub struct ProgramReport"));
+    assert!(source.contains("pub budget_remaining: u64,"));
+    assert!(source.contains("pub fallbacks: u64,"));
+}
+
+#[test]
+fn program_module_dispatches_translated_blocks_and_falls_back() {
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let source = emit_program_module(&cart, &artifact).expect("emit program");
+    assert!(source.contains("fn block_08000128_thumb"));
+    assert!(source.contains("(0x08000128, true)"));
+    assert!(source.contains("(0x08000100, false)"));
+    assert!(source.contains("interpret::step(cpu, bus)?;"));
+    assert!(source.contains("remaining -= 1;"));
+    assert!(source.contains("fallbacks += 1;"));
+    assert!(source.contains("while remaining > 0"));
+    assert!(source.contains("if next == Next::Halt"));
+}
+
+#[test]
+fn native_module_composes_program_with_binding_driver() {
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let program = emit_program_module(&cart, &artifact).expect("emit program");
+    let source = emit_native_module(&cart, &artifact, 10).expect("emit native");
+    assert!(
+        source.starts_with(&program),
+        "native source must reuse the program section"
+    );
+    assert!(source.contains("run_program(&mut cpu, &mut bus, BUDGET)?;"));
+    assert!(source.contains("fn main()"));
+    assert!(source.contains("verify_binding(&cart)?;"));
+    assert!(source.contains("--rom"));
+    assert!(source.contains("ROM_LEN"));
+    assert!(!source.contains("ROM_BYTES"));
 }

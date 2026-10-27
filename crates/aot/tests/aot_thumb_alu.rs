@@ -134,7 +134,10 @@ fn native_thumb_alu_shift_and_bl_halves_match_hand_expected_state() {
     );
 
     let source = aot::emit_native_module(&cart, &artifact, BUDGET).expect("emit");
-    let blocks = source.split("fn main()").next().expect("block section");
+    let blocks = source
+        .split("pub fn run_program")
+        .next()
+        .expect("block section");
     assert!(!blocks.contains("interpret::step"));
     assert!(source.contains("gba_native::semantics::operand"));
     assert!(source.contains("gba_native::cpu::sbc_flags"));

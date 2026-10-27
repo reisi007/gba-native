@@ -289,7 +289,7 @@ fn native_runtime_uses_fresh_reference_fallback_for_dynamic_target() {
     let source = aot::emit_native_module(&cart, &artifact, demo::FALLBACK_BUDGET)
         .expect("emit fallback source");
     assert!(!source.contains("block_08000128_arm"));
-    assert!(source.contains("interpret::step(&mut cpu, &mut bus)?;"));
+    assert!(source.contains("interpret::step(cpu, bus)?;"));
 
     let (cpu, bus, used) = reference(&cart, demo::FALLBACK_BUDGET);
     assert_eq!(used, demo::FALLBACK_BUDGET);

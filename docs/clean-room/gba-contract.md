@@ -511,6 +511,19 @@ does not write PC and does not itself end the block.
   writeback only after the checked access. Block and stack register lists are
   unrolled in ascending memory order; there is no decoder, interpreter step or
   whole-IR memory wrapper in a translated block.
+- Emission is split into a target-neutral program section and a native harness
+  driver. `emit_program_module` emits the translated block functions, the entry
+  constants and `run_program(cpu, bus, budget)`, which dispatches known blocks,
+  uses the same fresh reference fallback for unknown targets, and returns the
+  remaining budget and fallback count without writing output. That section
+  contains no `main`, argument parsing, file/path/process access, stdout or
+  stderr reporting, ROM digest/length binding or ROM bytes; the caller loads the
+  cartridge and initializes the CPU, bus and entry state. `emit_native_module`
+  remains the compatibility API that composes the program with the native
+  harness driver, which owns the external `--rom PATH` load, SHA-256+length
+  binding, the state report and its exit codes. This is a structural split of
+  the existing synthetic-fixture harness, not a claim of general ROM
+  compilation or playability, and it includes no browser/WASM driver.
 - A CPSR control-field MSR can change the active register bank, so bounded
   discovery invalidates cached r8-r14 constants across it. It never carries a
   stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
