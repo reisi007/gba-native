@@ -28,6 +28,10 @@ not a roadmap promise and not a retail-game compatibility statement.
   depend directly on the std-only `gba-native-core` package, accept no cartridge
   or save data, are not playable/per-ROM frontends, and stay outside the default
   CLI and its headless PPM output.
+- `aot build` compiles a headless release executable for a locally supported
+  Cargo target from an externally bound ROM. It is an experimental artifact, not
+  a playable game, GUI frontend, save-aware application, final app or browser
+  build; target/profile support is not a cross-platform claim.
 - No successful REA Evidence was obtained (`rea-status.md`).
 - This is not a certified separate-team/legal clean-room process.
 - Instruction counts are budgets, not cycles or frames.
@@ -524,6 +528,20 @@ does not write PC and does not itself end the block.
   binding, the state report and its exit codes. This is a structural split of
   the existing synthetic-fixture harness, not a claim of general ROM
   compilation or playability, and it includes no browser/WASM driver.
+- `NativeHarness::build_for_target(source, dir, target)` compiles the composed
+  native module in Cargo release mode (`--offline`, `--release`,
+  `--target <triple>`) with an own `CARGO_TARGET_DIR` inside the fresh crate
+  directory, and returns the target-specific release executable path. It rejects
+  an empty or malformed target before creating `dir`, keeps the
+  `create_dir`/`create_new` ownership rules, and never executes the produced
+  executable. A successful Cargo invocation that does not produce the expected
+  executable fails explicitly; this path supports executable targets only. The
+  target suffix policy only distinguishes Windows triples; every other target
+  keeps the host-independent harness name. Whether a triple can be built is
+  decided by the actual installed Cargo/rustc toolchain, not by this API; the
+  method is not a cross-compilation or platform-support claim.
+  `NativeHarness::build` remains the host/debug API used by the existing
+  differential tests.
 - A CPSR control-field MSR can change the active register bank, so bounded
   discovery invalidates cached r8-r14 constants across it. It never carries a
   stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
@@ -587,13 +605,13 @@ does not write PC and does not itself end the block.
 
 ## CLI output and artifacts
 
-`info`, `demo`, `run`, `aot proof` and `aot emit` are documented in `README.md`.
-PPM is the only image output of the core CLI. The optional, separate
-`apps/desktop` package presents the static synthetic snapshot in a Winit/Pixels
-window, while `apps/web` presents the same synthetic image in a browser through
-WASM/WebGPU or WebGL2. Neither accepts a cartridge or is built by the default
-workspace; neither is a core CLI output format. See `docs/gpu-frontend.md` and
-`docs/web-frontend.md`.
+`info`, `demo`, `run`, `aot proof`, `aot emit` and `aot build` are documented in
+`README.md`. PPM is the only image output of the core CLI. The optional,
+separate `apps/desktop` package presents the static synthetic snapshot in a
+Winit/Pixels window, while `apps/web` presents the same synthetic image in a
+browser through WASM/WebGPU or WebGL2. Neither accepts a cartridge or is built
+by the default workspace; neither is a core CLI output format. See
+`docs/gpu-frontend.md` and `docs/web-frontend.md`.
 
 - Generated files are restricted to `<cwd>/output/...`. Relative paths resolve
   against the process working directory; absolute paths are accepted only when
@@ -612,6 +630,32 @@ workspace; neither is a core CLI output format. See `docs/gpu-frontend.md` and
   package (under the `gba_native` alias), never on the AOT crate or root facade.
   The harness exposes no recursive cleanup API; callers own and remove only the
   directory they created.
+- `aot build <rom.gba> --target <triple> [--out <new-directory>] [--budget N]`
+  is an experimental headless artifact command. It loads the supplied ROM
+  read-only through the bounded cartridge loader, discovers from `0x08000000`
+  in ARM state, emits the compatibility native module and builds a release
+  executable for the required target. The command validates the target before
+  reading the ROM or creating output, and it never executes the built artifact.
+- The default `aot build` workspace is a new unique
+  `<cwd>/output/native-aot-app-*` directory; an explicit `--out` must be a new
+  path below `output/` and is refused when it already exists. The owned
+  workspace contains `generated.rs`, the generated crate (with its own Cargo
+  target directory), `artifact.meta` and `build.meta`. The executable is
+  reported at its target-specific release path. No ROM copy is written anywhere
+  under the workspace.
+- `artifact.meta` and `build.meta` are ordered `key=value` files. They record
+  the ROM SHA-256 and length, target, entry/state, budget, discovery counts,
+  generated-source SHA-256, produced-executable SHA-256, and actual Cargo/rustc
+  versions plus the rustc host where obtainable. `artifact.meta` also records
+  `embedded_rom_bytes=0` and `requires_external_rom=true`. The metadata
+  deliberately contains no absolute paths, timestamps or ROM bytes. The
+  executable still requires `--rom PATH` at runtime and rejects a different
+  image through its SHA-256+length binding.
+- `aot build` is a headless prototype artifact, not a playable standalone game,
+  GUI frontend, save-aware application, final application or browser/WASM
+  build. Its verified behavior is limited to synthetic fixtures; building a
+  target with the installed toolchain is not evidence of cross-platform support
+  or retail-game compatibility.
 - These are ownership and consistency checks, not a claim of race-freedom
   against an actively hostile process mutating the filesystem concurrently.
 

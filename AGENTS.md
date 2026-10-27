@@ -182,11 +182,13 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   `arithmetic.rs`, `memory.rs`) plus typed guest SWI framing/dispatch (`swi.rs`).
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`),
-  report parsing (`report.rs`), harness build/run (`harness.rs`) and tests.
+  report parsing (`report.rs`), target-profile build/metadata
+  (`target_build.rs`), harness build/run (`harness.rs`) and tests.
   This package depends on `gba-native-core` under the `gba_native` alias.
 - Root `src/lib.rs`: compatibility facade re-exporting the core modules and
-  `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands and
-  safe `output/` writes.
+  `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands
+  (including the experimental target-profile `aot build`) and safe `output/`
+  writes.
 - `apps/desktop/`: optional, separately excluded synthetic Winit/Pixels/WGPU
   package with its own workspace/lockfile. It depends directly on
   `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
@@ -196,15 +198,15 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   not the AOT crate or root facade; it accepts no ROM, save, audio or game input.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
-- `tests/`: root CLI-output, quality-counter/script failure paths, optional
-  frontend gate contracts, web-tool bootstrap regression and workspace
-  compatibility contracts.
+- `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
+  failure paths, optional frontend gate contracts, web-tool bootstrap regression
+  and workspace compatibility contracts.
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.
 - `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
-  fixtures, the native RAM self-modification regression and the native AOT
-  proof.
+  fixtures, the native RAM self-modification regression, the target-profile
+  build regression and the native AOT proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and

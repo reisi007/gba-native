@@ -32,7 +32,9 @@ standalone emulator and not a game packager.
 2. Execute that IR in a reference interpreter.
 3. Discover reachable straight-line blocks in immutable ROM from an explicit
    `(PC, ARM/Thumb)` entry, with bounded limits.
-4. Emit native Rust statements for those blocks and compile a developer harness.
+4. Emit native Rust statements for those blocks and compile a developer harness,
+   including an experimental release build for an explicitly requested Cargo
+   target triple.
 5. Dispatch unknown or dynamic targets to the reference interpreter with a fresh
    fetch/decode. RAM code is never AOT-translated.
 6. Compare native and reference registers, flags, bus state, image and exact
@@ -92,7 +94,11 @@ retail cartridges**.
 - No successful REA analysis or native Evidence record.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and
   stops at unknown/indirect control flow.
-- The native proof is a developer test harness, not a shipped game build.
+- The native proof is a developer test harness, not a shipped game build. The
+  `aot build` target-profile output is likewise a headless developer artifact:
+  not a playable standalone game, final application, GUI frontend, save-aware
+  build or WASM target. Building one target triple with the installed toolchain
+  does not establish cross-platform support.
 - The optional `apps/desktop` Winit/Pixels window and `apps/web` WebGPU/WebGL2
   page present only the static synthetic bitmap. Neither is a playable/retail
   frontend, per-ROM application or vendor upscaler; neither establishes

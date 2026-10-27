@@ -199,7 +199,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 276, "full workspace test inventory changed");
+    assert_eq!(total, 282, "full workspace test inventory changed");
 
     // Exact inventory retains prior families and adds the browser_gpu_launch_args test.
     let core_manifest = root.join("crates/core/Cargo.toml");
@@ -245,48 +245,20 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("aot_swi", 2),
         ("aot_swi_errors", 5),
         ("aot_swi_services", 1),
+        ("aot_target_build", 4),
         ("aot_thumb_alu", 1),
     ];
     let root_targets = [
+        ("cli_aot_build", 2),
         ("cli_output", 5),
         ("frontend_gates", 4),
         ("quality_counter", 10),
         ("scripts", 5),
     ];
     let mut baseline = 0;
-    for (name, expected) in core_targets {
-        baseline += assert_target_count(
-            &root,
-            &target,
-            &home,
-            &core_manifest,
-            "--test",
-            name,
-            expected,
-        );
-    }
-    for (name, expected) in aot_targets {
-        baseline += assert_target_count(
-            &root,
-            &target,
-            &home,
-            &aot_manifest,
-            "--test",
-            name,
-            expected,
-        );
-    }
-    for (name, expected) in root_targets {
-        baseline += assert_target_count(
-            &root,
-            &target,
-            &home,
-            &root_manifest,
-            "--test",
-            name,
-            expected,
-        );
-    }
+    baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
+    baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
+    baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
     baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 32);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 13);
     baseline += assert_target_count(
@@ -298,7 +270,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 272, "selected package test inventory changed");
+    assert_eq!(baseline, 278, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.
@@ -423,6 +395,21 @@ fn listed_count(output: &Output) -> usize {
         .lines()
         .filter(|line| line.ends_with(": test"))
         .count()
+}
+
+fn count_targets(
+    root: &Path,
+    target: &Path,
+    home: &Path,
+    manifest: &Path,
+    targets: &[(&str, usize)],
+) -> usize {
+    targets
+        .iter()
+        .map(|(name, expected)| {
+            assert_target_count(root, target, home, manifest, "--test", name, *expected)
+        })
+        .sum()
 }
 
 fn assert_target_count(

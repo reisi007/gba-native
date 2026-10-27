@@ -45,6 +45,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
+| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI, save or WASM claim |
 | Runtime fallback | Reference interpreter; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
@@ -62,6 +63,7 @@ cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
 cargo run -- run <rom.gba> [--budget 1000000]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
+cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 ```
 
 - `info` parses the documented 192-byte header and prints diagnostics. It does
@@ -85,6 +87,26 @@ cargo run -- aot emit <rom.gba> <generated.rs>
   translated instruction constants and the digest, not a ROM copy; it requires
   `--rom PATH` at runtime. This command does not execute that ROM natively and
   makes no general static-recovery claim.
+- `aot build` discovers blocks from a supplied ROM at the ARM entry
+  `0x08000000`, emits the compatibility native module and compiles a headless
+  release executable for the required `--target` Cargo triple. It creates a
+  fresh owned workspace under `output/`, writes `generated.rs`, `artifact.meta`
+  and `build.meta`, and leaves the executable in the generated crate's
+  target-specific release directory. The command does not execute the artifact,
+  and no ROM copy is written: the original file stays external and read-only.
+  The executable still requires `--rom PATH` at runtime and checks SHA-256 plus
+  length before execution. Target support is whatever the installed
+  Cargo/rustc toolchain can actually build (`--offline --release --target`);
+  this is not a cross-compilation, cross-platform or platform-support claim,
+  and the path supports targets that produce a native executable rather than a
+  WASM or other non-executable artifact.
+  `artifact.meta` and `build.meta` are ordered `key=value` files with ROM
+  identity, target, entry/state, budget, discovery counts, source/executable
+  SHA-256, and actual Cargo/rustc versions and host where available. They
+  contain no absolute paths, timestamps or ROM bytes. The result is an
+  experimental headless artifact for synthetic-fixture verification, not a
+  playable standalone game, GUI frontend, save-aware app, final application or
+  browser/WASM build.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
   paths are resolved into that root, symlinks below it are refused, and the
   location is validated before any directory is created. An existing explicit
@@ -180,11 +202,14 @@ a fresh generated crate in an owned temporary directory, uses `--offline` and a
 separate `CARGO_TARGET_DIR`, and removes that directory afterwards. The harness
 builder accepts only a non-existing crate directory, creates its files with
 `create_new`, and generates a manifest that depends only on the sibling
-`gba-native-core` package (never the AOT crate or root facade). The workspace
-contract tests additionally list the complete baseline test inventory in a fresh
-target directory with an empty `CARGO_HOME`, and execute the bare CLI commands
-from an unrelated working directory. No network, third-party crate, commercial
-ROM or BIOS is needed.
+`gba-native-core` package (never the AOT crate or root facade). A separate
+target-profile test derives the installed host triple and builds the generated
+harness in release mode with `--target`, then runs it against the synthetic
+fixture and checks wrong-ROM rejection; it is host-toolchain evidence, not a
+cross-compilation claim. The workspace contract tests additionally list the
+complete baseline test inventory in a fresh target directory with an empty
+`CARGO_HOME`, and execute the bare CLI commands from an unrelated working
+directory. No network, third-party crate, commercial ROM or BIOS is needed.
 
 ## Open work
 

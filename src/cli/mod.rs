@@ -12,6 +12,7 @@ use gba_native::error::{Error, Result};
 use gba_native::interpret;
 use gba_native::render::{self, Backend};
 
+mod aot_build;
 mod output;
 
 use output::{create_fresh_directory, create_unique_workspace, write_safely};
@@ -23,11 +24,13 @@ usage:
   gba-native run <rom.gba> [--budget N]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
+  gba-native aot build <rom.gba> --target <triple> [--out output/native-aot-app] [--budget N]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.
 Generated files are restricted to <cwd>/output/; an explicit --out
-directory must not already exist.";
+directory must not already exist. aot build compiles a headless native
+artifact for an installed Cargo target; it is not a playable game.";
 
 pub fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -44,10 +47,11 @@ pub fn run() -> Result<()> {
         "aot" => {
             let subcommand = args
                 .next()
-                .ok_or_else(|| Error::Args("aot needs proof or emit".to_string()))?;
+                .ok_or_else(|| Error::Args("aot needs proof, emit or build".to_string()))?;
             match subcommand.as_str() {
                 "proof" => cmd_aot_proof(args),
                 "emit" => cmd_aot_emit(args),
+                "build" => aot_build::run(args),
                 _ => Err(Error::Args(USAGE.to_string())),
             }
         }

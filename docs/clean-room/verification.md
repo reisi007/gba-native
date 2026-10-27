@@ -61,11 +61,11 @@ lockfiles.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
   --locked`. It pins every target: 168 core integration tests across 26 files,
-  32 core library unit tests, 30 AOT integration tests across 12 files, 10 AOT
-  library unit tests, 23 root integration tests across four files and 5 root
-  binary unit tests, exactly 268 selected package tests. The three workspace
+  32 core library unit tests, 34 AOT integration tests across 13 files, 13 AOT
+  library unit tests, 26 root integration tests across five files and 5 root
+  binary unit tests, exactly 278 selected package tests. The three workspace
   compatibility contracts and frontend-tree failure contract add four tests to
-  the full `cargo test` count (272 total). The web clean-checkout bootstrap test
+  the full `cargo test` count (282 total). The web clean-checkout bootstrap test
   is included in the root integration targets; no prior core, AOT or root tests
   are removed. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
@@ -374,6 +374,39 @@ A generated crate is written to a fresh owned directory, uses a separate
 require network access or take the parent Cargo lock. The test or CLI caller
 removes only the directory it created.
 
+### Target-profile native build
+
+- `crates/aot/tests/aot_target_build.rs` derives the installed host triple from
+  `rustc -vV` (with a `cargo -vV` host fallback) and calls
+  `NativeHarness::build_for_target`. The generated harness is built in release
+  mode with `--offline --target <host>` and its own target directory, then
+  executed against the synthetic fixture with an explicit `--rom PATH`. The
+  test checks the same native/reference budget/state differential as the host
+  build, requires the external-ROM usage error without arguments, and rejects a
+  different valid synthetic image with `ROM mismatch`.
+- The same test refuses empty, whitespace-only, path-like and option-like
+  targets before creating the crate directory, and refuses a pre-existing crate
+  directory while preserving a caller-owned sentinel. `NativeHarness::build`
+  (host/debug) remains unchanged.
+- `tests/cli_aot_build.rs` runs the real `gba-native aot build` command for the
+  installed host triple. It checks the default workspace is a fresh unique
+  directory directly under `<cwd>/output/` and that a second default run
+  allocates a different workspace while rendering the same deterministic
+  metadata facts; it also checks the explicit `--out` rules, `generated.rs`, the
+  generated crate, the target-specific release executable, and the ordered
+  `artifact.meta`/`build.meta` keys and values. It independently recomputes the
+  generated-source and executable SHA-256 values, verifies the ROM is unchanged
+  and that no `.gba` copy exists in either workspace, and asserts metadata
+  contains no absolute path or timestamp fields.
+- Argument, target, missing-ROM, budget, unknown-option, outside/traversal and
+  existing-`--out` failures are checked to create no output and start no target
+  build. The success case uses the host triple, so Linux CI does not attempt an
+  Apple cross-build.
+- This is host-toolchain evidence only. The local macOS run exercises
+  `aarch64-apple-darwin`; a successful triple build is not a claim that another
+  host can cross-compile it, and the produced executable is not a playable game,
+  GUI, save-aware app, final application or WASM build.
+
 ### Output path safety
 
 `src/cli/output.rs` enforces the CLI contract; `tests/cli_output.rs` exercises
@@ -395,6 +428,9 @@ it through the real binary in an owned temporary working directory.
   run and never erases or reuses an earlier result.
 - `NativeHarness::build` requires a fresh crate directory and refuses any
   pre-existing directory or link instead of writing through it.
+  `NativeHarness::build_for_target` shares the same fresh-directory and
+  `create_new` rules, adds `--release --target <triple>`, and does not execute
+  the resulting executable.
 
 Unit tests additionally cover a symlinked `output/` root, missing-parent
 resolution, and the refusal of an existing fresh-directory target.
@@ -405,6 +441,7 @@ resolution, and the refusal of an existing fresh-directory target.
 cargo run -- demo
 cargo run -- demo --size 480x320 --backend nearest
 cargo run -- aot proof
+cargo run -- aot build "<user-supplied .gba>" --target <installed-triple>  # local, read-only
 cargo run -- info "<user-supplied .gba>"   # read-only, optional
 ```
 
@@ -413,6 +450,10 @@ unique workspace under `output/` (or a new explicit `--out` directory), writes
 a synthetic `fixture.gba` and its generated crate there, passes the fixture path
 explicitly to the harness, and prints `proof=ok` plus
 `native_vs_reference=match`. `aot emit` reports `embedded_rom_bytes=0`.
+`aot build` allocates a new unique workspace or a fresh explicit `--out`, writes
+`generated.rs`, `artifact.meta` and `build.meta`, and compiles the release
+executable for the requested target without executing it. Its metadata contains
+no absolute paths, timestamps or ROM bytes.
 
 ## Gate evidence
 
@@ -526,6 +567,34 @@ not initial HEAD sizes, and are not used as historical evidence.
 - The six HLE services and framed guest SWI path are covered only by synthetic
   tests. This is not evidence for a particular retail BIOS, BIOS boot, hardware
   conformance, cycle timing or playability.
+
+### Target-profile build round (2026-10-27, local)
+
+- Toolchain observed locally: `rustc 1.99.1`, host `aarch64-apple-darwin`.
+  The target-profile integration test therefore built and ran the selected
+  `aarch64-apple-darwin` release executable locally; it did not test
+  cross-compilation from another host.
+- `cargo test --offline -p gba-native-aot --test aot_target_build`: 4 passed.
+  This includes one release `--target` build, its execution against the
+  synthetic ROM, wrong-ROM `ROM mismatch`, invalid-target refusal and
+  pre-existing-directory refusal, plus acceptance of short valid triples. The
+  same suite passed with `--release`.
+- `cargo test --offline --test cli_aot_build`: 2 passed. This includes three real
+  `aot build` runs (two default, one fresh explicit `--out`), unique workspaces,
+  deterministic metadata facts, independent source/executable SHA-256 checks,
+  ordered metadata and no-ROM-copy assertions, plus failure paths that create no
+  output and launch no build. The same suite passed with `--release`.
+- `cargo test --offline -p gba-native-aot --test aot_native`: 5 passed;
+  `cargo test --offline --test cli_output`: 5 passed. The existing host/debug
+  harness and output-path contracts are unchanged.
+- `cargo test --offline --test workspace_contract`: 3 passed with the updated
+  inventory of 278 selected package tests and 282 full `cargo test` tests.
+- `cargo fmt --check` and `cargo clippy --offline --all-targets -- -D warnings`
+  passed. The hard limit reported 0 oversized files, and the maintained Rust
+  population was 118.
+- This round did not run `scripts/short.sh`, `scripts/full.sh` or CI. Independent
+  verification and the repository gates remain the orchestrator's step. No
+  retail ROM was used for these tests.
 
 ## Not established
 

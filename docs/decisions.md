@@ -194,3 +194,17 @@ terminal and are not rolled back. Wait, sound, reset-except-memory and
 decompression services remain explicit unsupported errors; this decision does
 not establish BIOS boot, retail playability or close the broader playability
 issues.
+
+## D14 — Target-profile AOT builds are local headless artifacts
+
+Decided 2026-10-27 as the bounded issue #10 slice. `gba-native aot build`
+requires an explicit Cargo target triple, compiles the ROM-bound native module
+in release mode with an own offline target directory, and writes only under the
+ignored `<cwd>/output/` root. The original ROM remains external and read-only;
+the artifact binds SHA-256+length and requires `--rom PATH` at runtime. Generated
+metadata is ordered, hash/toolchain-based and free of absolute paths and
+timestamps. Target support is whatever the installed toolchain can build; a
+successful local build is not a cross-platform claim. The result is an
+experimental headless artifact, not a playable game, GUI frontend, save-aware
+application, final app or WASM build, and it does not satisfy the broader
+per-ROM application targets in D11/D12.
