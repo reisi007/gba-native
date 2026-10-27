@@ -1,29 +1,38 @@
 //! Contract for the non-gating Linux GPU flag matrix.
 //!
 //! The matrix compares the real served app against the standalone canvas probe
-//! while removing exactly one Vulkan/ANGLE control token from the exact Variant
-//! A launch flags at a time. It is diagnostics-only: statuses are recorded but
-//! never gate.
+//! while removing exactly one Vulkan/ANGLE control token from the documented
+//! reference preset at a time. The reference preset is exactly Variant B, i.e.
+//! the earlier surface-on Variant A. It is diagnostics-only: statuses are
+//! recorded but never gate.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use super::{host_program, linux_ab_fixture};
 
+pub const SURFACE_FLAG: &str = "--disable-vulkan-surface";
+
+/// Promoted Variant A: the product preset without `--disable-vulkan-surface`.
 pub const BASE_ARGS: &str = concat!(
     "--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader ",
     "--enable-dawn-features=allow_unsafe_apis --disable-dawn-features=use_dxc ",
     "--enable-webgpu-developer-features --use-gpu-in-tests ",
     "--enable-accelerated-2d-canvas --enable-features=Vulkan ",
-    "--use-angle=swiftshader --use-vulkan=swiftshader --disable-vulkan-surface"
+    "--use-angle=swiftshader --use-vulkan=swiftshader"
 );
+
+/// Effective flags of a preset, including the diagnostics-only logging tokens.
+pub fn effective_args(base: &str) -> String {
+    format!("{base} --enable-logging=stderr --log-level=0")
+}
 
 /// Omission control and the directory label `scripts/web-e2e.sh` derives.
 const OMISSIONS: [(&str, &str); 4] = [
     ("--enable-features=Vulkan", "omit-enable-features-vulkan"),
     ("--use-angle=swiftshader", "omit-use-angle-swiftshader"),
     ("--use-vulkan=swiftshader", "omit-use-vulkan-swiftshader"),
-    ("--disable-vulkan-surface", "omit-disable-vulkan-surface"),
+    (SURFACE_FLAG, "omit-disable-vulkan-surface"),
 ];
 
 const MATRIX_ARTIFACTS: [&str; 7] = [
@@ -88,9 +97,12 @@ pub(super) fn reset_calls(calls: &Path) {
     }
 }
 
-/// Invalid A/B flags must fail before any browser probe is launched.
+/// Invalid Variant A flags must fail before any browser or standalone probe.
 pub(super) fn assert_no_calls(calls: &Path) {
-    assert!(read(calls).is_empty(), "invalid A/B flags launch no probes");
+    assert!(
+        std::fs::read_to_string(calls).map_or(true, |log| log.is_empty()),
+        "invalid A/B flags launch no probes"
+    );
     let smoke_log = calls.with_extension("smokes.log");
     assert!(std::fs::read_to_string(smoke_log).map_or(true, |log| log.is_empty()));
 }
@@ -149,7 +161,7 @@ pub(super) fn omit_first(tokens: &[String], omitted: &str) -> Vec<String> {
         }
         remaining.push(token.clone());
     }
-    assert!(removed, "the Variant A flags must contain {omitted}");
+    assert!(removed, "the reference flags must contain {omitted}");
     remaining
 }
 
@@ -206,6 +218,10 @@ fn assert_completed_matrix_probe(dir: &Path, args: &str, omitted: &str, mode: &s
     };
     let run_info = read(&dir.join("run-info.txt"));
     assert!(run_info.contains(entry), "{run_info}");
+    assert!(
+        run_info.contains("preset=reference-surface-on"),
+        "the matrix must name its reference preset: {run_info}"
+    );
     assert!(run_info.contains("non_gating=true"), "{run_info}");
     assert!(
         !run_info.contains("opengl"),
@@ -240,19 +256,32 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(ab_lines.len(), 2, "A and B must still run: {ab}");
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
-    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
-    let omitted = "--disable-vulkan-surface";
-    let surface_count = base_tokens.iter().filter(|t| *t == omitted).count();
-    assert_eq!(surface_count, 1, "A must contain one {omitted}");
-    assert!(
-        !b_args.split_whitespace().any(|t| t == omitted),
-        "B must not contain {omitted}"
+    let a_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
+    let reference_tokens: Vec<String> = b_args.split_whitespace().map(str::to_owned).collect();
+    assert_eq!(
+        a_args,
+        effective_args(BASE_ARGS),
+        "Variant A is the promoted preset plus diagnostics logging"
     );
     assert_eq!(
-        omit_first(&base_tokens, omitted).join(" "),
-        b_args,
-        "B removes only {omitted}"
+        a_tokens.iter().filter(|t| *t == SURFACE_FLAG).count(),
+        0,
+        "promoted Variant A must not contain {SURFACE_FLAG}"
     );
+    assert_eq!(
+        b_args,
+        format!("{a_args} {SURFACE_FLAG}"),
+        "Variant B appends exactly one {SURFACE_FLAG} to A"
+    );
+    assert_eq!(
+        reference_tokens
+            .iter()
+            .filter(|t| *t == SURFACE_FLAG)
+            .count(),
+        1,
+        "the reference preset contains exactly one {SURFACE_FLAG}"
+    );
+    assert_eq!(reference_tokens.len(), a_tokens.len() + 1);
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
 
@@ -261,32 +290,41 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(
         smokes.len(),
         13,
-        "two standalone probes, one app baseline, eight omission probes and two feature-combination probes: {smokes:?}"
+        "two standalone probes, one reference baseline, eight omission probes and two feature-combination probes: {smokes:?}"
     );
     for (probe, mode) in smokes[..2].iter().zip(["canvas", "offscreen"]) {
         assert_eq!(probe.0, mode);
         assert_eq!(probe.1, a_args, "the original smoke keeps exact A flags");
+        assert!(
+            !probe.1.contains(SURFACE_FLAG),
+            "the gated standalone probe must use the promoted Variant A"
+        );
         assert!(probe.2.ends_with(&format!("/smoke-{mode}")), "{}", probe.2);
     }
 
     let mut expected: Vec<(&str, &str, &str, Vec<String>)> =
-        vec![("baseline", "app", "-", base_tokens.clone())];
+        vec![("baseline-reference", "app", "-", reference_tokens.clone())];
     for (omitted, label) in OMISSIONS {
-        let variant = omit_first(&base_tokens, omitted);
+        let variant = omit_first(&reference_tokens, omitted);
         assert_eq!(
             variant.len() + 1,
-            base_tokens.len(),
+            reference_tokens.len(),
             "{label} must omit exactly one token"
         );
         expected.push((label, "canvas", omitted, variant.clone()));
         expected.push((label, "app", omitted, variant));
     }
+    let surface_row = omit_first(&reference_tokens, SURFACE_FLAG).join(" ");
+    assert_eq!(
+        surface_row, a_args,
+        "the surface omission row reproduces the promoted Variant A exactly"
+    );
     for (probe, (label, mode, omitted, tokens)) in smokes[2..].iter().zip(expected.iter()) {
         let args = tokens.join(" ");
         assert_eq!(probe.0, *mode, "{label}");
         assert_eq!(
             probe.1, args,
-            "matrix {label}/{mode} keeps every other A token"
+            "matrix {label}/{mode} keeps every other reference token"
         );
         assert!(
             !probe.1.contains("opengl"),
@@ -321,6 +359,12 @@ pub fn assert_contract(root: &Path) {
         "{matrix}"
     );
     assert!(
+        matrix.contains(
+            "omit-disable-vulkan-surface/canvas omitted=--disable-vulkan-surface exit=0 outcome=completed nonGating=true"
+        ),
+        "{matrix}"
+    );
+    assert!(
         matrix.lines().all(|line| line.contains("nonGating=true")),
         "{matrix}"
     );
@@ -340,65 +384,6 @@ pub fn assert_contract(root: &Path) {
         );
     }
 
-    // A base preset with exactly one --disable-vulkan-surface passes the B
-    // preflight; other missing omission controls are explicit invalid-input rows.
-    reset_calls(&calls);
-    let partial = "--use-webgpu-adapter=swiftshader --disable-vulkan-surface";
-    let output = run_fixture(&fixture_root, &bin, &calls, partial, None);
-    assert!(
-        output.status.success(),
-        "invalid omission controls stay non-gating:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let diagnostics = diagnostics_dir(&calls);
-    let smokes = smoke_lines(&calls);
-    assert_eq!(
-        smokes.len(),
-        5,
-        "two smoke probes, the app baseline and the one formable omission pair: {smokes:?}"
-    );
-    let partial_args = format!("{partial} --enable-logging=stderr --log-level=0");
-    for (label, omitted) in [
-        ("omit-enable-features-vulkan", "--enable-features=Vulkan"),
-        ("omit-use-angle-swiftshader", "--use-angle=swiftshader"),
-        ("omit-use-vulkan-swiftshader", "--use-vulkan=swiftshader"),
-    ] {
-        for mode in ["canvas", "app"] {
-            let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
-            let invalid = read(&dir.join("invalid-input.txt"));
-            assert!(invalid.contains(omitted), "{invalid}");
-            assert_eq!(read(&dir.join("exit-status.txt")).trim_end(), "126");
-            assert_eq!(read(&dir.join("launch-args.txt")).trim_end(), partial_args);
-            assert!(!dir.join("playwright.log").exists());
-            assert!(!dir.join("result.json").exists());
-            let status = read(&dir.join("process-status.json"));
-            assert!(status.contains("\"outcome\":\"invalid-input\""), "{status}");
-            assert!(status.contains("\"resultWritten\":false"), "{status}");
-            assert!(status.contains("\"nonGating\":true"), "{status}");
-            assert!(
-                status.contains(&format!("\"launchArgs\":\"{partial_args}\"")),
-                "{status}"
-            );
-        }
-    }
-    for label in ["omit-disable-vulkan-surface", "baseline"] {
-        for mode in ["canvas", "app"] {
-            let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
-            if dir.exists() {
-                assert!(dir.join("result.json").is_file(), "{}", dir.display());
-            }
-        }
-    }
-    let summary = read(&diagnostics.join("summary.txt"));
-    assert!(
-        summary.contains("matrix-omit-enable-features-vulkan-canvas=126\n"),
-        "{summary}"
-    );
-    assert!(
-        summary.contains("matrix-omit-disable-vulkan-surface-canvas=0\n"),
-        "{summary}"
-    );
-
     // A probe whose process fails without writing result.json is recorded as an
     // explicit harness failure and still does not change the gating result.
     reset_calls(&calls);
@@ -409,7 +394,7 @@ pub fn assert_contract(root: &Path) {
         String::from_utf8_lossy(&output.stderr)
     );
     let diagnostics = diagnostics_dir(&calls);
-    let baseline = diagnostics.join("matrix-baseline-app");
+    let baseline = diagnostics.join("matrix-baseline-reference-app");
     assert!(baseline.join("playwright.log").is_file());
     assert!(!baseline.join("result.json").exists());
     assert_eq!(read(&baseline.join("exit-status.txt")).trim_end(), "23");
@@ -419,82 +404,5 @@ pub fn assert_contract(root: &Path) {
         "{status}"
     );
     assert!(status.contains("\"resultWritten\":false"), "{status}");
-    assert!(read(&diagnostics.join("summary.txt")).contains("matrix-baseline-app=23\n"));
-
-    let without_surface = BASE_ARGS.replace(" --disable-vulkan-surface", "");
-    assert_invalid_surface_preflight(&fixture_root, &bin, &calls, &without_surface, 0);
-    let duplicate_surface = BASE_ARGS.replace(
-        "--disable-vulkan-surface",
-        "--disable-vulkan-surface --disable-vulkan-surface",
-    );
-    assert_invalid_surface_preflight(&fixture_root, &bin, &calls, &duplicate_surface, 2);
-}
-
-fn assert_invalid_surface_preflight(
-    root: &Path,
-    bin: &Path,
-    calls: &Path,
-    launch_args: &str,
-    count: usize,
-) {
-    reset_calls(calls);
-    let output = run_fixture(root, bin, calls, launch_args, None);
-    assert!(
-        !output.status.success(),
-        "the existing A/B preflight still fails"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(&format!(
-            "exactly one --disable-vulkan-surface token (found {count})"
-        )),
-        "{stderr}"
-    );
-    assert!(read(calls).is_empty(), "invalid A/B flags launch no probes");
-
-    let diagnostics = newest_diagnostics_dir(root);
-    let expected_args = format!("{launch_args} --enable-logging=stderr --log-level=0");
-    let summary = read(&diagnostics.join("summary.txt"));
-    assert!(
-        summary.contains("matrix-preflight=invalid-input\n"),
-        "{summary}"
-    );
-    assert!(summary.contains("matrix-non-gating=true\n"), "{summary}");
-    let matrix = read(&diagnostics.join("matrix.txt"));
-    assert_eq!(matrix.lines().count(), 2, "{matrix}");
-    for mode in ["canvas", "app"] {
-        let dir = diagnostics.join(format!("matrix-omit-disable-vulkan-surface-{mode}"));
-        for artifact in [
-            "launch-args.txt",
-            "omitted-flag.txt",
-            "invalid-input.txt",
-            "run-info.txt",
-            "exit-status.txt",
-            "process-status.json",
-        ] {
-            assert!(dir.join(artifact).is_file(), "missing {mode}/{artifact}");
-        }
-        assert_eq!(read(&dir.join("launch-args.txt")).trim_end(), expected_args);
-        assert_eq!(
-            read(&dir.join("omitted-flag.txt")).trim_end(),
-            "--disable-vulkan-surface"
-        );
-        assert!(read(&dir.join("invalid-input.txt")).contains(&format!("{count} times")));
-        assert_eq!(read(&dir.join("exit-status.txt")).trim_end(), "126");
-        let status = read(&dir.join("process-status.json"));
-        assert!(status.contains("\"outcome\":\"invalid-input\""), "{status}");
-        assert!(status.contains("\"nonGating\":true"), "{status}");
-        assert!(
-            status.contains("\"omittedFlag\":\"--disable-vulkan-surface\""),
-            "{status}"
-        );
-        let entry = if mode == "app" {
-            "app:/?autostart=1&backend=webgpu"
-        } else {
-            "standalone:/__linux_webgpu_smoke__"
-        };
-        assert!(status.contains(entry), "{status}");
-        assert!(!dir.join("playwright.log").exists());
-        assert!(!dir.join("result.json").exists());
-    }
+    assert!(read(&diagnostics.join("summary.txt")).contains("matrix-baseline-reference-app=23\n"));
 }

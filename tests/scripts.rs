@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod linux_gpu_features;
 #[path = "support/linux_gpu_matrix.rs"]
 mod linux_gpu_matrix;
+#[path = "support/linux_gpu_preflight.rs"]
+mod linux_gpu_preflight;
 #[path = "support/linux_webgpu_smoke.rs"]
 mod linux_webgpu_smoke;
 
@@ -231,15 +233,24 @@ fn assert_linux_ab_diagnostic_contract() {
     );
     let (a_args, a_output) = first_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = first_lines[1].split_once('\t').expect("B call fields");
-    let a_tokens: Vec<_> = a_args.split_whitespace().collect();
-    let b_tokens: Vec<_> = b_args.split_whitespace().collect();
-    let omitted = "--disable-vulkan-surface";
-    let a_surface_count = a_tokens.iter().filter(|t| **t == omitted).count();
-    assert_eq!(a_surface_count, 1, "A has one {omitted}");
-    assert!(!b_tokens.contains(&omitted), "B has no {omitted}");
-    let mut expected_b = a_tokens.clone();
-    expected_b.retain(|token| *token != omitted);
-    assert_eq!(expected_b, b_tokens, "B differs only by {omitted}");
+    let omitted = linux_gpu_matrix::SURFACE_FLAG;
+    assert!(
+        !a_args.split_whitespace().any(|arg| arg == omitted),
+        "promoted Variant A must not contain {omitted}"
+    );
+    assert_eq!(
+        b_args
+            .split_whitespace()
+            .filter(|token| *token == omitted)
+            .count(),
+        1,
+        "B appends exactly one {omitted}"
+    );
+    assert_eq!(
+        b_args,
+        format!("{a_args} {omitted}"),
+        "B appends {omitted} to the exact A flags"
+    );
     for required in [
         "--use-webgpu-adapter=swiftshader",
         "--enable-features=Vulkan",
@@ -251,10 +262,6 @@ fn assert_linux_ab_diagnostic_contract() {
         assert!(
             a_args.split_whitespace().any(|arg| arg == required),
             "A missing {required}"
-        );
-        assert!(
-            b_args.split_whitespace().any(|arg| arg == required),
-            "B missing {required}"
         );
     }
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
@@ -285,36 +292,27 @@ fn assert_linux_ab_diagnostic_contract() {
             .contains("smoke-canvas=0\nsmoke-offscreen=0\nA=0\nB=18\n")
     );
 
-    linux_gpu_matrix::reset_calls(&calls);
-    let missing_surface = run_linux_ab_fixture(
-        &root,
-        &bin,
-        &calls,
-        "--use-webgpu-adapter=swiftshader",
-        None,
-    );
-    assert!(!missing_surface.status.success());
-    let output_text = String::from_utf8_lossy(&missing_surface.stderr);
-    assert!(
-        output_text.contains("exactly one --disable-vulkan-surface token (found 0)"),
-        "{output_text}"
-    );
-    linux_gpu_matrix::assert_no_calls(&calls);
-
-    let duplicate_surface = run_linux_ab_fixture(
-        &root,
-        &bin,
-        &calls,
-        "--disable-vulkan-surface --disable-vulkan-surface",
-        None,
-    );
-    assert!(!duplicate_surface.status.success());
-    let output_text = String::from_utf8_lossy(&duplicate_surface.stderr);
-    assert!(
-        output_text.contains("exactly one --disable-vulkan-surface token (found 2)"),
-        "{output_text}"
-    );
-    linux_gpu_matrix::assert_no_calls(&calls);
+    for count in [1usize, 2] {
+        linux_gpu_matrix::reset_calls(&calls);
+        let mut override_args = format!("{launch_args} {omitted}");
+        for _ in 1..count {
+            override_args.push(' ');
+            override_args.push_str(omitted);
+        }
+        let invalid = run_linux_ab_fixture(&root, &bin, &calls, &override_args, None);
+        assert!(
+            !invalid.status.success(),
+            "an override with {count} surface tokens must fail closed"
+        );
+        let output_text = String::from_utf8_lossy(&invalid.stderr);
+        assert!(
+            output_text.contains(&format!(
+                "to contain no --disable-vulkan-surface token (found {count})"
+            )),
+            "{output_text}"
+        );
+        linux_gpu_matrix::assert_no_calls(&calls);
+    }
     drop(temp);
 }
 
@@ -433,10 +431,16 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
                 "--enable-features=Vulkan",
                 "--use-angle=swiftshader",
                 "--use-vulkan=swiftshader",
-                "--disable-vulkan-surface",
             ])
             .map(str::to_owned)
             .collect::<Vec<_>>()
+    );
+    assert!(
+        !linux_args
+            .iter()
+            .any(|arg| arg == linux_gpu_matrix::SURFACE_FLAG),
+        "the promoted Linux preset must not contain {}",
+        linux_gpu_matrix::SURFACE_FLAG
     );
 
     for platform in ["Darwin", "MINGW64_NT-10.0"] {
@@ -490,4 +494,5 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     linux_webgpu_smoke::assert_display_contract(&root);
     linux_gpu_matrix::assert_contract(&repo_root());
     linux_gpu_features::assert_contract(&repo_root());
+    linux_gpu_preflight::assert_contract();
 }

@@ -1,17 +1,24 @@
 //! Contract for the additive Linux feature-combination diagnostic.
 //!
 //! This is the non-gating `features-vulkan-from-angle` candidate next to the
-//! one-flag omission matrix. It substitutes exactly the single
-//! `--enable-features=Vulkan` argv token, keeps every other token in order and
-//! probes both the real served app and the standalone canvas document.
+//! one-flag omission matrix. Starting from the documented reference preset
+//! (exactly Variant B, the earlier surface-on Variant A), it substitutes
+//! exactly the single `--enable-features=Vulkan` argv token, keeps every other
+//! token in order and probes both the real served app and the standalone canvas
+//! document.
 
 use std::path::{Path, PathBuf};
 
 use super::linux_ab_fixture;
 use super::linux_gpu_matrix::{
-    BASE_ARGS, diagnostics_dir, omit_first, read, run_fixture, smoke_lines,
+    BASE_ARGS, SURFACE_FLAG, diagnostics_dir, effective_args, omit_first, read, run_fixture,
+    smoke_lines,
 };
 
+#[path = "linux_gpu_feature_invalid.rs"]
+mod linux_gpu_feature_invalid;
+
+use self::linux_gpu_feature_invalid::assert_invalid_feature_probe;
 #[path = "linux_gpu_json.rs"]
 mod linux_gpu_json;
 
@@ -31,7 +38,7 @@ fn substitute_feature(tokens: &[String]) -> Vec<String> {
             substituted.push(token.clone());
         }
     }
-    assert!(replaced, "the Variant A flags must contain {FROM}");
+    assert!(replaced, "the reference preset flags must contain {FROM}");
     substituted
 }
 
@@ -114,57 +121,6 @@ fn assert_feature_probe(dir: &Path, mode: &str, args: &str) {
     }
 }
 
-fn assert_invalid_feature_probe(
-    dir: &Path,
-    mode: &str,
-    launch_args: &str,
-    count: usize,
-    reason_fragment: &str,
-) {
-    for artifact in [
-        "launch-args.txt",
-        "changed-arg.txt",
-        "invalid-input.txt",
-        "run-info.txt",
-        "exit-status.txt",
-        "process-status.json",
-    ] {
-        assert!(
-            dir.join(artifact).is_file(),
-            "missing {}/{artifact}",
-            dir.display()
-        );
-    }
-    assert_eq!(read(&dir.join("launch-args.txt")).trim_end(), launch_args);
-    assert_eq!(read(&dir.join("changed-arg.txt")).trim_end(), CHANGE);
-    let invalid = read(&dir.join("invalid-input.txt"));
-    assert!(invalid.contains(reason_fragment), "{invalid}");
-    assert!(invalid.contains(&format!("{count} times")), "{invalid}");
-    assert_eq!(read(&dir.join("exit-status.txt")).trim_end(), "126");
-    assert!(!dir.join("playwright.log").exists());
-    assert!(!dir.join("result.json").exists());
-
-    let entry = if mode == "app" {
-        "app:/?autostart=1&backend=webgpu"
-    } else {
-        "standalone:/__linux_webgpu_smoke__"
-    };
-    let run_info = read(&dir.join("run-info.txt"));
-    assert!(run_info.contains(&format!("label={LABEL}")), "{run_info}");
-    assert!(run_info.contains(&format!("mode={mode}")), "{run_info}");
-    assert!(run_info.contains(entry), "{run_info}");
-    assert!(run_info.contains("non_gating=true"), "{run_info}");
-
-    let status = read(&dir.join("process-status.json"));
-    assert!(status.contains("\"outcome\":\"invalid-input\""), "{status}");
-    assert!(status.contains("\"nonGating\":true"), "{status}");
-    assert!(status.contains("\"resultWritten\":false"), "{status}");
-    assert!(
-        status.contains(&format!("\"launchArgs\":\"{launch_args}\"")),
-        "{status}"
-    );
-}
-
 fn assert_source_contract(root: &Path) {
     let source = read(&root.join("scripts/web-e2e.sh"));
     for contract in [
@@ -207,17 +163,21 @@ fn assert_source_contract(root: &Path) {
     );
 }
 
-fn assert_prior_matrix_preserved(diagnostics: &Path, base_tokens: &[String]) {
-    let baseline = diagnostics.join("matrix-baseline-app");
+fn assert_prior_matrix_preserved(diagnostics: &Path, reference_tokens: &[String]) {
+    let baseline = diagnostics.join("matrix-baseline-reference-app");
     assert!(baseline.join("result.json").is_file());
     assert_eq!(read(&baseline.join("exit-status.txt")).trim_end(), "0");
+    assert_eq!(
+        read(&baseline.join("launch-args.txt")).trim_end(),
+        reference_tokens.join(" ")
+    );
     for (omitted, label) in [
         (FROM, "omit-enable-features-vulkan"),
         ("--use-angle=swiftshader", "omit-use-angle-swiftshader"),
         ("--use-vulkan=swiftshader", "omit-use-vulkan-swiftshader"),
-        ("--disable-vulkan-surface", "omit-disable-vulkan-surface"),
+        (SURFACE_FLAG, "omit-disable-vulkan-surface"),
     ] {
-        let expected = omit_first(base_tokens, omitted).join(" ");
+        let expected = omit_first(reference_tokens, omitted).join(" ");
         for mode in ["canvas", "app"] {
             let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
             assert!(dir.join("result.json").is_file(), "{}", dir.display());
@@ -242,25 +202,33 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(ab_lines.len(), 2, "A and B must still run: {ab}");
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
-    let base_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
+    let a_tokens: Vec<String> = a_args.split_whitespace().map(str::to_owned).collect();
     assert_eq!(
-        base_tokens
+        a_tokens
             .iter()
-            .filter(|token| *token == "--disable-vulkan-surface")
+            .filter(|token| *token == SURFACE_FLAG)
+            .count(),
+        0,
+        "promoted Variant A must not contain {SURFACE_FLAG}"
+    );
+    assert_eq!(
+        b_args,
+        format!("{a_args} {SURFACE_FLAG}"),
+        "Variant B appends exactly one {SURFACE_FLAG} to A"
+    );
+    let reference_tokens: Vec<String> = b_args.split_whitespace().map(str::to_owned).collect();
+    assert_eq!(
+        reference_tokens
+            .iter()
+            .filter(|token| *token == SURFACE_FLAG)
             .count(),
         1,
-        "Variant A must contain exactly one --disable-vulkan-surface token"
-    );
-    assert!(
-        !b_args
-            .split_whitespace()
-            .any(|token| token == "--disable-vulkan-surface"),
-        "Variant B must not contain --disable-vulkan-surface"
+        "the reference preset contains exactly one {SURFACE_FLAG}"
     );
     assert_eq!(
-        omit_first(&base_tokens, "--disable-vulkan-surface").join(" "),
-        b_args,
-        "Variant B is Variant A with exactly the one --disable-vulkan-surface token removed"
+        reference_tokens.len(),
+        a_tokens.len() + 1,
+        "the reference preset is A plus the one surface token"
     );
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
@@ -269,12 +237,12 @@ pub fn assert_contract(root: &Path) {
     assert_eq!(
         smokes.len(),
         13,
-        "two standalone probes, one baseline, eight omission and two feature probes: {smokes:?}"
+        "two standalone probes, one reference baseline, eight omission and two feature probes: {smokes:?}"
     );
-    let substituted = substitute_feature(&base_tokens);
+    let substituted = substitute_feature(&reference_tokens);
     assert_eq!(
         substituted.len(),
-        base_tokens.len(),
+        reference_tokens.len(),
         "the feature control substitutes one token in place"
     );
     assert_eq!(
@@ -290,7 +258,8 @@ pub fn assert_contract(root: &Path) {
         1,
         "the original feature token is replaced, never duplicated"
     );
-    for (index, (original, changed)) in base_tokens.iter().zip(substituted.iter()).enumerate() {
+    for (index, (original, changed)) in reference_tokens.iter().zip(substituted.iter()).enumerate()
+    {
         if original == FROM {
             assert_eq!(changed, TO, "token {index} must become the additive list");
         } else {
@@ -301,6 +270,10 @@ pub fn assert_contract(root: &Path) {
         }
     }
     let feature_args = substituted.join(" ");
+    assert!(
+        feature_args.contains(SURFACE_FLAG),
+        "the feature candidate keeps the reference preset's surface token: {feature_args}"
+    );
     assert!(
         !feature_args.contains("--use-gl=angle"),
         "the control must not add --use-gl=angle: {feature_args}"
@@ -326,7 +299,7 @@ pub fn assert_contract(root: &Path) {
         assert_eq!(Path::new(probe_dir), expected_dir.as_path());
         assert_feature_probe(Path::new(probe_dir), mode, &feature_args);
     }
-    assert_prior_matrix_preserved(&diagnostics, &base_tokens);
+    assert_prior_matrix_preserved(&diagnostics, &reference_tokens);
 
     let summary = read(&diagnostics.join("summary.txt"));
     for mode in ["canvas", "app"] {
@@ -365,7 +338,7 @@ pub fn assert_contract(root: &Path) {
         .cloned()
         .collect();
     let missing_text = missing_tokens.join(" ");
-    let missing_effective = format!("{missing_text} --enable-logging=stderr --log-level=0");
+    let missing_effective = format!("{} {SURFACE_FLAG}", effective_args(&missing_text));
     let output = run_fixture(
         &missing_root,
         &missing_bin,
@@ -387,7 +360,7 @@ pub fn assert_contract(root: &Path) {
     );
     for mode in ["canvas", "app"] {
         let dir = missing_diagnostics.join(format!("matrix-{LABEL}-{mode}"));
-        assert_invalid_feature_probe(&dir, mode, &missing_effective, 0, FROM);
+        assert_invalid_feature_probe(&dir, mode, &missing_effective, 0, LABEL, CHANGE);
         assert!(dir.join("invalid-input.txt").is_file());
     }
     let missing_summary = read(&missing_diagnostics.join("summary.txt"));
@@ -401,10 +374,10 @@ pub fn assert_contract(root: &Path) {
     );
     assert!(
         missing_diagnostics
-            .join("matrix-baseline-app")
+            .join("matrix-baseline-reference-app")
             .join("result.json")
             .is_file(),
-        "the baseline still runs when the feature token is missing"
+        "the reference baseline still runs when the feature token is missing"
     );
     for label in [
         "omit-use-angle-swiftshader",
@@ -421,13 +394,12 @@ pub fn assert_contract(root: &Path) {
     }
 
     // A duplicated control token is recorded as invalid-input too, and it does
-    // not trip the existing A/B preflight (which only guards
-    // --disable-vulkan-surface).
+    // not trip the Variant A preflight (which only guards the surface token).
     let (_duplicate_temp, duplicate_root, duplicate_bin, duplicate_calls) = linux_ab_fixture();
     let duplicate_text = override_tokens
         .join(" ")
         .replace(FROM, &format!("{FROM} {FROM}"));
-    let duplicate_effective = format!("{duplicate_text} --enable-logging=stderr --log-level=0");
+    let duplicate_effective = format!("{} {SURFACE_FLAG}", effective_args(&duplicate_text));
     let output = run_fixture(
         &duplicate_root,
         &duplicate_bin,
@@ -448,7 +420,7 @@ pub fn assert_contract(root: &Path) {
     );
     for mode in ["canvas", "app"] {
         let dir = duplicate_diagnostics.join(format!("matrix-{LABEL}-{mode}"));
-        assert_invalid_feature_probe(&dir, mode, &duplicate_effective, 2, FROM);
+        assert_invalid_feature_probe(&dir, mode, &duplicate_effective, 2, LABEL, CHANGE);
     }
     assert!(
         duplicate_diagnostics

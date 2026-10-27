@@ -190,6 +190,12 @@ pub fn assert_display_contract(root: &Path) {
         preset.contains("ANGLE's SwiftShader backend"),
         "the preset must name ANGLE's SwiftShader backend"
     );
+    assert!(
+        !preset
+            .lines()
+            .any(|line| line.trim() == super::linux_gpu_matrix::SURFACE_FLAG),
+        "the promoted preset must not disable the Vulkan surface"
+    );
     for forbidden in ["--use-gl=", "--enable-gpu"] {
         assert!(
             !preset.contains(forbidden),
@@ -234,6 +240,7 @@ pub fn assert_display_contract(root: &Path) {
         "candidate configuration",
         "both variants gate the job",
         "xvfb-run-wrapper=1",
+        "reference preset",
         "The screenshot runner (`scripts/web-screenshots.sh`) is not wrapped",
     ] {
         assert!(docs.contains(wording), "documentation missing: {wording}");
