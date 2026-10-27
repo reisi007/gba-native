@@ -19,7 +19,10 @@
 #
 # Usage: ./scripts/web.sh [--build-only] [--ci]
 #   --build-only  skip the browser E2E run (partial gate, not CI evidence)
-#   --ci          headless Chromium with SwiftShader WebGPU/WebGL2 flags
+#   --ci          headless Chromium with SwiftShader WebGPU/WebGL2 flags; Linux
+#                 CI E2E (mode ci, CI=true) re-executes itself under xvfb-run
+#                 when DISPLAY is unset (candidate configuration under test
+#                 for #24); screenshot capture and --build-only are unaffected
 
 set -euo pipefail
 

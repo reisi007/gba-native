@@ -156,6 +156,7 @@ exit 0
 "##,
     );
     executable(&bin.join("uname"), "#!/bin/sh\nprintf 'Linux\\n'\n");
+    linux_webgpu_smoke::install_xvfb_stub(&bin);
 
     let calls = root.join("calls.log");
     (temp, root, bin, calls)
@@ -180,6 +181,7 @@ fn run_linux_ab_fixture(
         .current_dir(root)
         .env("PATH", path)
         .env("HOME", root.join("home"))
+        .env_remove("DISPLAY")
         .env_remove("XDG_CACHE_HOME")
         .env_remove("GITHUB_STEP_SUMMARY")
         .env("CI", "true")
@@ -232,12 +234,12 @@ fn assert_linux_ab_diagnostic_contract() {
     assert_eq!(
         a_args
             .split_whitespace()
-            .filter(|arg| *arg == "--use-angle=vulkan")
+            .filter(|arg| *arg == "--use-angle=swiftshader")
             .count(),
         1
     );
     assert_eq!(
-        a_args.replace("--use-angle=vulkan", "--use-angle=opengl"),
+        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
         b_args,
         "B changes only the exact ANGLE token"
     );
@@ -270,7 +272,10 @@ fn assert_linux_ab_diagnostic_contract() {
 
     linux_gpu_matrix::reset_calls(&calls);
     let b_failure = run_linux_ab_fixture(&root, &bin, &calls, launch_args, Some("B"));
-    assert!(!b_failure.status.success());
+    assert!(
+        !b_failure.status.success(),
+        "variant B must keep gating the browser result"
+    );
     let output_text = String::from_utf8_lossy(&b_failure.stderr);
     assert!(
         output_text.contains("canvas=0, offscreen=0, A=0, B=18"),
@@ -294,33 +299,25 @@ fn assert_linux_ab_diagnostic_contract() {
     assert!(!missing_angle.status.success());
     let output_text = String::from_utf8_lossy(&missing_angle.stderr);
     assert!(
-        output_text.contains("exactly one --use-angle=vulkan token (found 0)"),
+        output_text.contains("exactly one --use-angle=swiftshader token (found 0)"),
         "{output_text}"
     );
-    assert!(
-        std::fs::read_to_string(&calls)
-            .expect("read empty fixture calls")
-            .is_empty()
-    );
+    linux_gpu_matrix::assert_no_calls(&calls);
 
     let duplicate_angle = run_linux_ab_fixture(
         &root,
         &bin,
         &calls,
-        "--use-angle=vulkan --use-angle=vulkan",
+        "--use-angle=swiftshader --use-angle=swiftshader",
         None,
     );
     assert!(!duplicate_angle.status.success());
     let output_text = String::from_utf8_lossy(&duplicate_angle.stderr);
     assert!(
-        output_text.contains("exactly one --use-angle=vulkan token (found 2)"),
+        output_text.contains("exactly one --use-angle=swiftshader token (found 2)"),
         "{output_text}"
     );
-    assert!(
-        std::fs::read_to_string(&calls)
-            .expect("read empty fixture calls")
-            .is_empty()
-    );
+    linux_gpu_matrix::assert_no_calls(&calls);
     drop(temp);
 }
 
@@ -437,7 +434,7 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
             .into_iter()
             .chain([
                 "--enable-features=Vulkan",
-                "--use-angle=vulkan",
+                "--use-angle=swiftshader",
                 "--use-vulkan=swiftshader",
                 "--disable-vulkan-surface",
             ])
@@ -493,6 +490,7 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     assert!(workflow.contains("name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"));
     assert!(workflow.contains("path: output/web-linux-ab-*/"));
     assert_linux_ab_diagnostic_contract();
+    linux_webgpu_smoke::assert_display_contract(&root);
     linux_gpu_matrix::assert_contract(&repo_root());
     linux_gpu_features::assert_contract(&repo_root());
 }

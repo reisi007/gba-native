@@ -177,13 +177,71 @@ configuration: `--enable-unsafe-webgpu`, `--use-webgpu-adapter=swiftshader`,
 `--enable-dawn-features=allow_unsafe_apis`,
 `--disable-dawn-features=use_dxc`, `--enable-webgpu-developer-features`,
 `--use-gpu-in-tests` and `--enable-accelerated-2d-canvas`. On Linux only, the
-helper adds `--enable-features=Vulkan --use-angle=vulkan
---use-vulkan=swiftshader --disable-vulkan-surface` to explicitly select the
-headless software Vulkan route. macOS and Windows do not receive those
-Linux-specific switches. A non-empty `WEB_E2E_LAUNCH_ARGS` remains a complete
-user override (it replaces the preset); unset or empty values use the
-platform-aware default. Playwright still reports forced WebGPU failures and
-device loss; these switches do not introduce fallback or relaxed assertions.
+helper adds `--enable-features=Vulkan --use-angle=swiftshader
+--use-vulkan=swiftshader --disable-vulkan-surface` (candidate configuration
+under test, see below). macOS and Windows do not receive those Linux-specific
+switches. A non-empty `WEB_E2E_LAUNCH_ARGS` remains a complete user override (it
+replaces the preset); unset or empty values use the platform-aware default.
+Playwright still reports forced WebGPU failures and device loss; these switches
+do not introduce fallback or relaxed assertions.
+
+Linux candidate configuration under test (issue #24). Compared with the previous
+preset it substitutes only the ANGLE token: `--use-angle=swiftshader` (ANGLE's
+SwiftShader backend) instead of `--use-angle=vulkan`. This is a candidate, not an
+established root cause; it makes no physical-GPU, driver, vendor or
+retail-compatibility claim and does not claim that a switch enables GPU
+rendering.
+
+Recorded facts from run 40501875768 (software runner, Playwright Chromium
+156.0.8078.4):
+
+- the standalone offscreen probe obtained adapter `google`/`swiftshader`
+  (`SwiftShader Device (Subzero)`, `backend=vulkan`), created a device, submitted
+  a compute pass and read back the expected bytes, so an adapter and device were
+  available in that run;
+- the standalone canvas probes lost the device at 32–36 ms
+  (`deviceLoss.phase=work`) with `OperationError: A valid external Instance
+  reference no longer exists.`; the GPU process logged `Could not find
+  SharedImageBackingFactory ... usage: ...WebgpuSwapChainTexture ...
+  debug_label: WebGPUSwapBufferProvider` and `SharedImageStub: Unable to create
+  shared image`;
+- the real app path differed in timing and shape: it reached `ready` at ~112 ms
+  with `presented=1`, applied a `lost` status at ~745–749 ms with `presented=2`,
+  and the post-work snapshot at ~7.1 s still reported `lost` (`WebGPU device lost
+  (Destroyed): Device was destroyed.`) with the canvas hidden and Restart
+  offered;
+- with `--use-angle=vulkan` the GPU process also logged repeated initialization
+  failures (`Extension not supported: VK_KHR_surface`/`VK_KHR_xcb_surface`,
+  `Exiting GPU process due to errors during initialization`).
+
+Those observations do not establish cause: they do not show whether the display
+configuration, the ANGLE backend, a shared-image/backing condition or another
+GPU-process condition produces the loss. The candidate changes only the Linux
+launch preset and adds a display wrapper for one gate; every assertion, pixel
+golden and forced-WebGPU failure path is unchanged, so a wrong candidate keeps
+the gate red instead of masking it.
+
+Display wrapper scope: only Linux CI functional E2E. `scripts/web-e2e.sh`
+validates its mode first, then re-executes itself under the runner image's
+`xvfb-run` wrapper only when all of `ci` mode, `CI=true`, Linux and an unset
+`DISPLAY` hold, passing its mode and arguments through unchanged. The wrapper
+comes from the runner image's distribution `xvfb` package;
+`scripts/web-browsers-install.sh` separately provisions Chromium and its distro
+dependencies through Playwright `--with-deps`. Local Linux runs (`local` mode or
+no `CI=true`), macOS/Windows and runs with `DISPLAY` set keep their previous
+behaviour and are not wrapped. If the wrapper is missing in that Linux CI case
+the gate fails with a diagnostic before any browser probe is launched; the
+browser checks are never skipped, timed out as passed or replaced by a software
+frame. The screenshot runner (`scripts/web-screenshots.sh`) is not wrapped: it
+invokes Playwright directly and is not a CI gate, so its capture behaviour on a
+host without a display is unchanged. `scripts/web.sh --build-only` exits before
+`scripts/web-e2e.sh` and therefore never reaches the wrapper.
+
+`summary.txt` records `xvfb-run-wrapper=1` when that re-execution happened. The
+value records wrapper use only; it does not show that Chromium consumed a virtual
+display or that display-dependent behaviour changed. The Linux result of this
+candidate was not reproducible on the macOS development host and still requires
+CI confirmation.
 
 Linux CI's explicitly gated `WEB_LINUX_AB_DIAGNOSTICS=1` path also runs two
 standalone probes once with the exact current Variant A arguments and pinned
@@ -220,12 +278,15 @@ of suppressing it. Console, page-error and request-failure diagnostics stay in
 
 The matrix baseline is the app with the exact current Variant A flags. Four
 omission controls then remove exactly one token each — `--enable-features=Vulkan`,
-`--use-angle=vulkan`, `--use-vulkan=swiftshader` or `--disable-vulkan-surface` —
-while every other token, including `--enable-logging=stderr --log-level=0`, is
-retained, and each resulting flag set probes both the real app route and the
-standalone canvas document. These one-flag omissions are the only removal
-controls; the matrix adds no `--use-angle=opengl` variant because the recorded
-logs showed no available GL backend. Every combination owns a directory below
+`--use-angle=swiftshader`, `--use-vulkan=swiftshader` or
+`--disable-vulkan-surface` — while every other token, including
+`--enable-logging=stderr --log-level=0`, is retained, and each resulting flag set
+probes both the real app route and the standalone canvas document. These
+one-flag omissions are the only removal controls; the matrix adds no
+`--use-angle=opengl` variant because the recorded control produced
+`Requested GL implementation (gl=none,angle=none) not found in allowed
+implementations`, so it was not a usable backend comparison. Every combination
+owns a directory below
 `output/web-linux-ab-*/matrix-<control>-<mode>/` with `launch-args.txt`,
 `omitted-flag.txt`, `run-info.txt` (entry, origin, channel, revision),
 `exit-status.txt` and `process-status.json`; probed combinations add
@@ -263,9 +324,16 @@ Matrix statuses are listed in `summary.txt` after `matrix-non-gating=true`, in
 `matrix.txt`, and as a separately labelled non-gating table in the GitHub step
 summary; the additive `features-vulkan-from-angle` rows are included there.
 They never change the job status: only the two standalone probes and the full
-A/B functional suites gate, exactly as before. Match or mismatch of a control
-is a diagnostic signal, not root-cause proof, and this document makes no Linux
-matrix result claim.
+A/B functional suites gate, exactly as before. The A/B pair keeps its one-token
+contrast — variant A is the candidate preset and variant B substitutes only the
+ANGLE token with `--use-angle=vulkan` — and both variants gate the job. Variant B
+is the previous preset, and run 40501875768 recorded GPU-process initialization
+failures for that backend, so CI has to confirm that both variants pass; the known
+risk is recorded here and is not suppressed by the candidate. Their directories,
+`launch-args.txt`, Playwright output and exit statuses stay recorded, and
+`summary.txt` still reports `A=<status>` and `B=<status>`. Match or mismatch of a
+control is a diagnostic signal, not root-cause proof, and this document makes no
+Linux matrix result claim.
 
 Rendering uses Pixels `ScalingMode::PixelPerfect`: largest integer scale fitting
 the physical backing store, centred with black letterbox, `image-rendering:
@@ -329,15 +397,18 @@ Local runs on 2026-10-25 with this repository, Playwright Chromium
 | headless Chromium without WebGPU flags | `webgpu` | explicit “requested explicitly … no WebGPU adapter” error; no fallback |
 | Playwright page with `Navigator.prototype.gpu` removed | `auto` then `webgpu` | auto ready on WebGL2 with `Auto compatibility path: yes`; forced WebGPU typed error |
 | Linux CI run 40236292333, before the Vulkan launch switches (only the two original SwiftShader flags) | `auto`/`webgpu` | WebGPU initialized with `Rgba8Unorm` render/surface and acknowledged two presents, then reported `WebGPU device lost (Destroyed): Device was destroyed.`; four tests failed and 15 passed. The WebGL2 path passed. |
+| Linux CI run 40501875768, native-Vulkan ANGLE preset, software adapter, standalone canvas probe | `webgpu` | SwiftShader adapter `google`/`swiftshader`/`Vulkan` obtained, device created, and the matched offscreen compute probe succeeded; the canvas probe alone lost the device at 32–36 ms with `OperationError: A valid external Instance reference no longer exists.` after `Could not find SharedImageBackingFactory ... WebgpuSwapChainTexture` and repeated `VK_KHR_surface`/`VK_KHR_xcb_surface` init errors. |
+| Linux CI run 40501875768, same preset, real app route | `webgpu` | Reached `ready` at ~112 ms with `presented=1`, applied `lost` at ~745–749 ms with `presented=2` and `WebGPU device lost (Destroyed): Device was destroyed.`; the post-work snapshot at ~7.1 s still reported `lost` with the canvas hidden. |
 
 Adapter names/device types are browser-redacted in some WebGPU runs; they are
-reported as “(not exposed by this browser)”. Chromium is now configured to select
-the SwiftShader Vulkan software path on Linux, but the post-change Linux result
-has not yet been observed. The earlier Linux run established WebGPU API
-initialization and the RGBA format, not a stable device or successful test run.
-This is software-backend configuration/evidence, not a physical-GPU claim. A
-browser without the required backend fails the forced-backend test; the suite
-does not skip it.
+reported as “(not exposed by this browser)”. The Linux gate now exercises a
+candidate configuration (ANGLE's SwiftShader backend for the Linux preset, with
+the Linux CI functional E2E re-executed under `xvfb-run` when no display is set)
+whose result has not yet been observed in CI. The recorded Linux runs established
+WebGPU API initialization, the RGBA format and a working offscreen device, not a
+stable canvas presentation or a successful Linux suite. This is software-backend
+configuration/evidence, not a physical-GPU claim. A browser without the required
+backend fails the forced-backend test; the suite does not skip it.
 
 Playwright's `deviceScaleFactor` emulation has been observed reporting
 `devicePixelContentBoxSize` in CSS pixels. The application independently checks
@@ -356,6 +427,12 @@ commit, Rust 1.98.0 with `wasm32-unknown-unknown`, and the same
 Playwright Chromium revision plus its Linux dependencies. There are no secrets,
 paid resources, artifact/ROM uploads or changes to the existing CI/frontend
 workflows. Screenshots are not a CI gate.
+
+The Linux CI functional E2E additionally re-executes itself under the runner
+image's `xvfb-run` wrapper when `DISPLAY` is unset, but only in `ci` mode with
+`CI=true` (candidate configuration under test, see above). Local `local`-mode runs,
+runs without `CI=true`, screenshot capture and `scripts/web.sh --build-only` are
+not wrapped.
 
 ## UI-review capture set
 

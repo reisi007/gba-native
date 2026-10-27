@@ -213,7 +213,7 @@ fn assert_prior_matrix_preserved(diagnostics: &Path, base_tokens: &[String]) {
     assert_eq!(read(&baseline.join("exit-status.txt")).trim_end(), "0");
     for (omitted, label) in [
         (FROM, "omit-enable-features-vulkan"),
-        ("--use-angle=vulkan", "omit-use-angle-vulkan"),
+        ("--use-angle=swiftshader", "omit-use-angle-swiftshader"),
         ("--use-vulkan=swiftshader", "omit-use-vulkan-swiftshader"),
         ("--disable-vulkan-surface", "omit-disable-vulkan-surface"),
     ] {
@@ -243,7 +243,7 @@ pub fn assert_contract(root: &Path) {
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
     assert_eq!(
-        a_args.replace("--use-angle=vulkan", "--use-angle=opengl"),
+        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
         b_args,
         "the existing A/B keeps changing only the ANGLE token"
     );
@@ -393,7 +393,7 @@ pub fn assert_contract(root: &Path) {
         "the baseline still runs when the feature token is missing"
     );
     for label in [
-        "omit-use-angle-vulkan",
+        "omit-use-angle-swiftshader",
         "omit-use-vulkan-swiftshader",
         "omit-disable-vulkan-surface",
     ] {
@@ -437,7 +437,7 @@ pub fn assert_contract(root: &Path) {
     }
     assert!(
         duplicate_diagnostics
-            .join("matrix-omit-use-angle-vulkan-canvas")
+            .join("matrix-omit-use-angle-swiftshader-canvas")
             .join("result.json")
             .is_file(),
         "the omission controls still run with a duplicated feature token"

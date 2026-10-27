@@ -7,11 +7,18 @@
 #
 # Usage: ./scripts/web-e2e.sh [local|ci]
 #   local  headless Chromium; WebGL2 may use the host GPU, WebGPU uses SwiftShader
-#   ci     same entry point, headless; Linux selects SwiftShader's Vulkan path
+#   ci     same entry point, headless; Linux selects ANGLE's SwiftShader backend
 #   WEB_LINUX_AB_DIAGNOSTICS=1 opts Linux CI into isolated WebGPU smoke probes
-#     plus the existing matched Vulkan/OpenGL full-suite diagnostics, a
-#     non-gating one-flag omission matrix (real app vs standalone canvas) and one
-#     additive feature-combination candidate (not an omission)
+#     plus a matched A/B full-suite comparison, a non-gating one-flag omission
+#     matrix (real app vs standalone canvas) and one additive
+#     feature-combination candidate (not an omission)
+#
+# Candidate configuration under test (issue #24): Linux CI functional E2E runs
+# without DISPLAY are re-executed under the runner's xvfb-run wrapper. Recorded
+# runs show SharedImageBackingFactory failures and post-init device loss on the
+# WebGPU canvas path but do not establish that a display or these launch
+# switches fix them. The wrapper is limited to `ci` mode with CI=true on Linux;
+# local Linux runs keep their previous behaviour. The gate stays fail-closed.
 #
 # The screenshot capture set is a separate script and never runs here.
 
@@ -21,11 +28,25 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 # shellcheck source=scripts/lib.sh
 . "$ROOT/scripts/lib.sh"
 
+cd "$ROOT"
+
 MODE="${1:-local}"
 case "$MODE" in
   local | ci) ;;
   *) fail "scripts/web-e2e.sh: mode must be local or ci (got: $MODE)" ;;
 esac
+
+if [ "$MODE" = ci ] && [ "$(uname -s)" = Linux ] && [ "${CI:-}" = true ] &&
+  [ -z "${DISPLAY:-}" ]; then
+  # Candidate display provisioning under test, limited to the Linux CI E2E.
+  # The wrapper needs the distribution xauth helper as well. A missing wrapper
+  # fails the gate instead of skipping the browser checks.
+  command -v xvfb-run >/dev/null 2>&1 ||
+    fail "Linux CI without DISPLAY requires xvfb-run (distribution xvfb and xauth packages) for the candidate display configuration; provide DISPLAY or install it. This check is never skipped"
+  info "Linux CI without DISPLAY: re-executing the browser E2E under xvfb-run (candidate configuration under test)"
+  export WEB_E2E_XVFB=1
+  exec xvfb-run -a -s "-screen 0 1280x1024x24" bash "$ROOT/scripts/web-e2e.sh" "$@"
+fi
 
 LINUX_AB_DIAGNOSTICS=0
 case "${WEB_LINUX_AB_DIAGNOSTICS:-}" in
@@ -135,20 +156,22 @@ fi
 
 if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
   read -r -a A_LAUNCH_ARGS <<<"$LAUNCH_ARGS"
-  ANGLE_VULKAN_COUNT=0
+  ANGLE_TOKEN="--use-angle=swiftshader"
+  ANGLE_CONTROL="--use-angle=vulkan"
+  ANGLE_TOKEN_COUNT=0
   for arg in "${A_LAUNCH_ARGS[@]}"; do
-    if [ "$arg" = "--use-angle=vulkan" ]; then
-      ANGLE_VULKAN_COUNT=$((ANGLE_VULKAN_COUNT + 1))
+    if [ "$arg" = "$ANGLE_TOKEN" ]; then
+      ANGLE_TOKEN_COUNT=$((ANGLE_TOKEN_COUNT + 1))
     fi
   done
   MATRIX_INVALID_INPUT_STATUS=126
   record_invalid_angle_omission() {
-    invalid_angle_reason="--use-angle=vulkan appears $ANGLE_VULKAN_COUNT times in Variant A flags; exactly one token is required for this omission control"
+    invalid_angle_reason="--use-angle=swiftshader appears $ANGLE_TOKEN_COUNT times in Variant A flags; exactly one token is required for this omission control"
     : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
     printf 'matrix-preflight=invalid-input\nmatrix-non-gating=true\n' \
       >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
     for invalid_mode in canvas app; do
-      invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-omit-use-angle-vulkan-$invalid_mode"
+      invalid_dir="$LINUX_DIAGNOSTICS_DIR/matrix-omit-use-angle-swiftshader-$invalid_mode"
       if ! mkdir "$invalid_dir"; then
         info "could not allocate fresh $invalid_dir; retaining the existing A/B validation failure"
         continue
@@ -159,37 +182,37 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
         invalid_entry='standalone:/__linux_webgpu_smoke__'
       fi
       printf '%s\n' "$LAUNCH_ARGS" >"$invalid_dir/launch-args.txt"
-      printf '%s\n' '--use-angle=vulkan' >"$invalid_dir/omitted-flag.txt"
+      printf '%s\n' '--use-angle=swiftshader' >"$invalid_dir/omitted-flag.txt"
       printf '%s\n' "$invalid_angle_reason" >"$invalid_dir/invalid-input.txt"
-      printf 'label=omit-use-angle-vulkan\nmode=%s\nomitted_flag=--use-angle=vulkan\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
+      printf 'label=omit-use-angle-swiftshader\nmode=%s\nomitted_flag=--use-angle=swiftshader\nentry=%s\norigin=%s\nchannel=%s\nheadless=%s\nchromium_revision=%s\nnon_gating=true\n' \
         "$invalid_mode" "$invalid_entry" "$URL" "$CHANNEL" "$HEADLESS" \
         "$PLAYWRIGHT_REVISION" >"$invalid_dir/run-info.txt"
       printf '%s\n' "$MATRIX_INVALID_INPUT_STATUS" >"$invalid_dir/exit-status.txt"
-      printf '{"label":"omit-use-angle-vulkan","mode":"%s","entry":"%s","omittedFlag":"--use-angle=vulkan","processExitStatus":%s,"resultWritten":false,"outcome":"invalid-input","nonGating":true}\n' \
+      printf '{"label":"omit-use-angle-swiftshader","mode":"%s","entry":"%s","omittedFlag":"--use-angle=swiftshader","processExitStatus":%s,"resultWritten":false,"outcome":"invalid-input","nonGating":true}\n' \
         "$invalid_mode" "$invalid_entry" "$MATRIX_INVALID_INPUT_STATUS" \
         >"$invalid_dir/process-status.json"
-      printf 'omit-use-angle-vulkan/%s omitted=--use-angle=vulkan exit=%s outcome=invalid-input nonGating=true\n' \
+      printf 'omit-use-angle-swiftshader/%s omitted=--use-angle=swiftshader exit=%s outcome=invalid-input nonGating=true\n' \
         "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
-      printf 'matrix-omit-use-angle-vulkan-%s=%s\n' \
+      printf 'matrix-omit-use-angle-swiftshader-%s=%s\n' \
         "$invalid_mode" "$MATRIX_INVALID_INPUT_STATUS" >>"$LINUX_DIAGNOSTICS_DIR/summary.txt"
     done
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       {
         printf '\n### Non-gating GPU flag matrix preflight\n\n'
-        printf 'The `omit-use-angle-vulkan` control is recorded as `invalid-input` for both entries because Variant A contains the flag %s times. The existing A/B validation still fails closed before launching probes.\n' \
-          "$ANGLE_VULKAN_COUNT"
+        printf 'The `omit-use-angle-swiftshader` control is recorded as `invalid-input` for both entries because Variant A contains the flag %s times. The existing A/B validation still fails closed before launching probes.\n' \
+          "$ANGLE_TOKEN_COUNT"
       } >>"$GITHUB_STEP_SUMMARY"
     fi
   }
-  if [ "$ANGLE_VULKAN_COUNT" -ne 1 ]; then
+  if [ "$ANGLE_TOKEN_COUNT" -ne 1 ]; then
     record_invalid_angle_omission
-    fail "Linux A/B diagnostics require exactly one --use-angle=vulkan token (found $ANGLE_VULKAN_COUNT); refusing to form variant B"
+    fail "Linux A/B diagnostics require exactly one --use-angle=swiftshader token (found $ANGLE_TOKEN_COUNT); refusing to form variant B"
   fi
 
   B_LAUNCH_ARGS=()
   for arg in "${A_LAUNCH_ARGS[@]}"; do
-    if [ "$arg" = "--use-angle=vulkan" ]; then
-      B_LAUNCH_ARGS+=(--use-angle=opengl)
+    if [ "$arg" = "$ANGLE_TOKEN" ]; then
+      B_LAUNCH_ARGS+=("$ANGLE_CONTROL")
     else
       B_LAUNCH_ARGS+=("$arg")
     fi
@@ -239,6 +262,8 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
 
   A_STATUS=""
   B_STATUS=""
+  # Variant A is the product preset; variant B is the matched one-token ANGLE
+  # contrast. Both full suites gate the CI result exactly as before.
   for variant in A B; do
     if [ "$variant" = A ]; then
       variant_dir="$LINUX_DIAGNOSTICS_DIR/variant-a"
@@ -276,17 +301,17 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
   done
 
   # Non-gating diagnostics matrix: the real served app versus the standalone
-  # canvas probe, with exactly one Vulkan/ANGLE control token removed from the
-  # Variant A flags at a time. One additional candidate substitutes only the
+  # canvas probe, with exactly one GL/ANGLE or Vulkan control token removed from
+  # the Variant A flags at a time. One additional candidate substitutes only the
   # --enable-features=Vulkan token (see FEATURE_CONTROL_* below); it is not an
   # omission. A missing token is an explicit invalid-input result, never a
-  # silently skipped combination. These probes run after the gated smoke/A/B
+  # silently skipped combination. These probes run after the gated smoke/A
   # suites and never influence their statuses or CI gating.
   APP_ENTRY="/?autostart=1&backend=webgpu"
   CANVAS_ENTRY="/__linux_webgpu_smoke__"
   MATRIX_OMISSION_FLAGS=(
     "--enable-features=Vulkan:omit-enable-features-vulkan"
-    "--use-angle=vulkan:omit-use-angle-vulkan"
+    "--use-angle=swiftshader:omit-use-angle-swiftshader"
     "--use-vulkan=swiftshader:omit-use-vulkan-swiftshader"
     "--disable-vulkan-surface:omit-disable-vulkan-surface"
   )
@@ -580,9 +605,9 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
     fi
   fi
 
-  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nSharedImageBackingFactoryFailures=%s\nmatrix-non-gating=true\n' \
+  printf 'smoke-canvas=%s\nsmoke-offscreen=%s\nA=%s\nB=%s\nxvfb-run-wrapper=%s\nSharedImageBackingFactoryFailures=%s\nmatrix-non-gating=true\n' \
     "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS" \
-    "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
+    "${WEB_E2E_XVFB:-0}" "$SHARED_IMAGE_FAILURES" >"$LINUX_DIAGNOSTICS_DIR/summary.txt"
   : >"$LINUX_DIAGNOSTICS_DIR/matrix.txt"
   for matrix_record in "${MATRIX_RECORDS[@]}"; do
     IFS='|' read -r matrix_label matrix_mode matrix_control matrix_status matrix_outcome <<<"$matrix_record"
@@ -598,6 +623,7 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
       printf '| Check | Exit/status |\n| --- | ---: |\n'
       printf '| Canvas smoke | %s |\n| Offscreen smoke | %s |\n| Functional E2E A | %s |\n| Functional E2E B | %s |\n' \
         "$SMOKE_CANVAS_STATUS" "$SMOKE_OFFSCREEN_STATUS" "$A_STATUS" "$B_STATUS"
+      printf '\nE2E re-executed under `xvfb-run`: **%s** (records wrapper use only; it does not show that Chromium consumed a virtual display).\n' "${WEB_E2E_XVFB:-0}"
       printf '\nSharedImageBackingFactory failures: **%s**.\n\n' "$SHARED_IMAGE_FAILURES"
       printf 'Artifacts: `%s`. These are software-runner diagnostics, not GPU hardware evidence or root-cause proof.\n' \
         "$LINUX_DIAGNOSTICS_DIR"
@@ -608,12 +634,12 @@ if [ "$LINUX_AB_DIAGNOSTICS" = 1 ]; then
         printf '| `%s` | %s | `%s` | %s | %s |\n' \
           "$matrix_label" "$matrix_mode" "$matrix_control" "$matrix_status" "$matrix_outcome"
       done
-      printf '\nThese matrix rows are **non-gating**: they never change the job status. The same two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token and is not an omission.\n'
+      printf '\nThese matrix rows are **non-gating**: they never change the job status. The two standalone probes and the full A/B suites above remain the only gated results. Differing or matching matrix outcomes are not root-cause proof. The `features-vulkan-from-angle` row substitutes one argv token and is not an omission.\n'
       printf 'Matrix details: `%s/matrix.txt`.\n' "$LINUX_DIAGNOSTICS_DIR"
     } >>"$GITHUB_STEP_SUMMARY"
   fi
   info "Linux WebGPU smoke statuses: canvas=$SMOKE_CANVAS_STATUS offscreen=$SMOKE_OFFSCREEN_STATUS"
-  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
+  info "Linux A/B E2E statuses: A=$A_STATUS B=$B_STATUS; xvfb-run wrapper=${WEB_E2E_XVFB:-0}; SharedImageBackingFactory failures=$SHARED_IMAGE_FAILURES; logs and artifacts: $LINUX_DIAGNOSTICS_DIR"
   info "non-gating GPU flag matrix results: $LINUX_DIAGNOSTICS_DIR/matrix.txt (these statuses never gate CI)"
   if [ "$SMOKE_CANVAS_STATUS" -ne 0 ] || [ "$SMOKE_OFFSCREEN_STATUS" -ne 0 ] ||
     [ "$A_STATUS" -ne 0 ] || [ "$B_STATUS" -ne 0 ]; then

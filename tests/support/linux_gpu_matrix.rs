@@ -15,13 +15,13 @@ pub const BASE_ARGS: &str = concat!(
     "--enable-dawn-features=allow_unsafe_apis --disable-dawn-features=use_dxc ",
     "--enable-webgpu-developer-features --use-gpu-in-tests ",
     "--enable-accelerated-2d-canvas --enable-features=Vulkan ",
-    "--use-angle=vulkan --use-vulkan=swiftshader --disable-vulkan-surface"
+    "--use-angle=swiftshader --use-vulkan=swiftshader --disable-vulkan-surface"
 );
 
 /// Omission control and the directory label `scripts/web-e2e.sh` derives.
 const OMISSIONS: [(&str, &str); 4] = [
     ("--enable-features=Vulkan", "omit-enable-features-vulkan"),
-    ("--use-angle=vulkan", "omit-use-angle-vulkan"),
+    ("--use-angle=swiftshader", "omit-use-angle-swiftshader"),
     ("--use-vulkan=swiftshader", "omit-use-vulkan-swiftshader"),
     ("--disable-vulkan-surface", "omit-disable-vulkan-surface"),
 ];
@@ -59,6 +59,7 @@ pub(super) fn run_fixture(
         .current_dir(root)
         .env("PATH", path)
         .env("HOME", root.join("home"))
+        .env_remove("DISPLAY")
         .env_remove("XDG_CACHE_HOME")
         .env("GITHUB_STEP_SUMMARY", root.join("step-summary.md"))
         .env("CI", "true")
@@ -85,6 +86,11 @@ pub(super) fn reset_calls(calls: &Path) {
             std::fs::remove_file(&stale).expect("reset fixture call log");
         }
     }
+}
+
+/// Invalid A/B flags must fail before any browser probe is launched.
+pub(super) fn assert_no_calls(calls: &Path) {
+    assert!(read(calls).is_empty(), "invalid A/B flags launch no probes");
 }
 
 /// The diagnostics directory of a run, taken from the exact A/B output path the
@@ -233,12 +239,12 @@ pub fn assert_contract(root: &Path) {
     let (a_args, a_output) = ab_lines[0].split_once('\t').expect("A call fields");
     let (b_args, b_output) = ab_lines[1].split_once('\t').expect("B call fields");
     assert_eq!(
-        a_args.replace("--use-angle=vulkan", "--use-angle=opengl"),
+        a_args.replace("--use-angle=swiftshader", "--use-angle=vulkan"),
         b_args,
         "the existing A/B keeps changing only the ANGLE token"
     );
-    assert!(b_args.contains("--use-angle=opengl"));
-    assert!(!a_args.contains("opengl"));
+    assert!(b_args.contains("--use-angle=vulkan"));
+    assert!(!a_args.contains("--use-angle=vulkan"));
     assert!(a_output.ends_with("variant-a/test-results"), "{a_output}");
     assert!(b_output.ends_with("variant-b/test-results"), "{b_output}");
 
@@ -303,7 +309,7 @@ pub fn assert_contract(root: &Path) {
     let matrix = read(&diagnostics.join("matrix.txt"));
     assert!(
         matrix.contains(
-            "omit-use-angle-vulkan/canvas omitted=--use-angle=vulkan exit=0 outcome=completed nonGating=true"
+            "omit-use-angle-swiftshader/canvas omitted=--use-angle=swiftshader exit=0 outcome=completed nonGating=true"
         ),
         "{matrix}"
     );
@@ -331,7 +337,7 @@ pub fn assert_contract(root: &Path) {
     // result for that combination; every other combination is still attempted
     // and the run stays non-gating.
     reset_calls(&calls);
-    let partial = "--use-angle=vulkan --use-webgpu-adapter=swiftshader";
+    let partial = "--use-angle=swiftshader --use-webgpu-adapter=swiftshader";
     let output = run_fixture(&fixture_root, &bin, &calls, partial, None);
     assert!(
         output.status.success(),
@@ -369,7 +375,7 @@ pub fn assert_contract(root: &Path) {
             );
         }
     }
-    for label in ["omit-use-angle-vulkan", "baseline"] {
+    for label in ["omit-use-angle-swiftshader", "baseline"] {
         for mode in ["canvas", "app"] {
             let dir = diagnostics.join(format!("matrix-{label}-{mode}"));
             if dir.exists() {
@@ -383,7 +389,7 @@ pub fn assert_contract(root: &Path) {
         "{summary}"
     );
     assert!(
-        summary.contains("matrix-omit-use-angle-vulkan-canvas=0\n"),
+        summary.contains("matrix-omit-use-angle-swiftshader-canvas=0\n"),
         "{summary}"
     );
 
@@ -409,11 +415,11 @@ pub fn assert_contract(root: &Path) {
     assert!(status.contains("\"resultWritten\":false"), "{status}");
     assert!(read(&diagnostics.join("summary.txt")).contains("matrix-baseline-app=23\n"));
 
-    let without_angle = BASE_ARGS.replace("--use-angle=vulkan ", "");
+    let without_angle = BASE_ARGS.replace("--use-angle=swiftshader ", "");
     assert_invalid_angle_preflight(&fixture_root, &bin, &calls, &without_angle, 0);
     let duplicate_angle = BASE_ARGS.replace(
-        "--use-angle=vulkan",
-        "--use-angle=vulkan --use-angle=vulkan",
+        "--use-angle=swiftshader",
+        "--use-angle=swiftshader --use-angle=swiftshader",
     );
     assert_invalid_angle_preflight(&fixture_root, &bin, &calls, &duplicate_angle, 2);
 }
@@ -434,7 +440,7 @@ fn assert_invalid_angle_preflight(
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(&format!(
-            "exactly one --use-angle=vulkan token (found {count})"
+            "exactly one --use-angle=swiftshader token (found {count})"
         )),
         "{stderr}"
     );
@@ -451,7 +457,7 @@ fn assert_invalid_angle_preflight(
     let matrix = read(&diagnostics.join("matrix.txt"));
     assert_eq!(matrix.lines().count(), 2, "{matrix}");
     for mode in ["canvas", "app"] {
-        let dir = diagnostics.join(format!("matrix-omit-use-angle-vulkan-{mode}"));
+        let dir = diagnostics.join(format!("matrix-omit-use-angle-swiftshader-{mode}"));
         for artifact in [
             "launch-args.txt",
             "omitted-flag.txt",

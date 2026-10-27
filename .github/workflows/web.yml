@@ -38,6 +38,12 @@ jobs:
 
       # The same gate a developer runs locally. WebGPU is exercised with the
       # public SwiftShader flags; the UI reports the observed adapter honestly.
+      # Candidate configuration under test (#24): only the functional Linux CI
+      # E2E (mode ci, CI=true) is re-executed under the xvfb-run wrapper when
+      # DISPLAY is unset. The wrapper comes from the runner image's xvfb package;
+      # scripts/web-browsers-install.sh provisions Chromium and its distro
+      # dependencies via Playwright --with-deps. A missing wrapper fails the
+      # gate; it is never skipped.
       - name: Browser foundation gate
         env:
           WEB_LINUX_AB_DIAGNOSTICS: "1"
