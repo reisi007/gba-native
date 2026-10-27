@@ -206,5 +206,40 @@ metadata is ordered, hash/toolchain-based and free of absolute paths and
 timestamps. Target support is whatever the installed toolchain can build; a
 successful local build is not a cross-platform claim. The result is an
 experimental headless artifact, not a playable game, GUI frontend, save-aware
-application, final app or WASM build, and it does not satisfy the broader
-per-ROM application targets in D11/D12.
+application, final app or complete browser app, and it does not satisfy the
+broader per-ROM application targets in D11/D12. The separate ROM-bound WASM
+module branch is recorded in D15.
+
+## D15 — ROM-bound WASM execution module as a bounded `aot build` branch
+
+Decided 2026-10-27 as a further bounded issue #10 slice, after the owner asked
+for additional target artifacts and explicitly included WASM.
+`gba-native aot build <rom.gba> --target wasm32-unknown-unknown` emits the
+target-neutral program section plus a wasm-bindgen `run_rom(Uint8Array)` driver,
+builds a fresh generated cdylib offline in release mode against the direct
+`gba-native-core` path dependency and the exact `wasm-bindgen` 0.2.129 pin, and
+post-processes the module with the repository-owned wasm-bindgen CLI
+(`target/tools/bin/wasm-bindgen --target web --no-typescript`). The module
+embeds only the expected SHA-256 and ROM length; the caller-supplied
+`Uint8Array` is checked before any cartridge, CPU or bus is constructed. Core
+errors propagate as JavaScript errors and the call returns a compact state
+budget/fallback report. No filesystem, process or stdout boundary exists in the
+module.
+
+The generated workspace contains `generated.rs`, the fresh crate with its own
+target directory, `pkg/` JS glue plus `_bg.wasm`, ordered `artifact.meta` and
+`build.meta`, and a generated `README.md`. The WASM metadata records
+`artifact_kind=wasm-module`, `module_sha256` and `js_glue_sha256` (no executable
+claim), the target, ROM identity, entry/state, budget and discovery facts, the
+program-source hash, actual Cargo/rustc facts and the wasm-bindgen CLI version,
+with no absolute paths, timestamps or ROM bytes.
+
+The root workspace, its lockfile, `apps/web` and the frontend packages are
+unchanged; the generated crate owns its offline dependency resolution. Other
+`wasm32*`/`wasm64*` triples are rejected explicitly, and a missing or mismatched
+pinned tool fails with the `scripts/bootstrap-web-tools.sh` instruction instead
+of a global fallback or auto-install. This is a browser-callable execution
+module, not a browser application or GPU renderer: there is no HTML/JS UI, game
+input, save profile, persistence, full frontend or playability claim, and the
+broader per-ROM application targets in D11/D12 remain open. This slice does not
+close issue #10.

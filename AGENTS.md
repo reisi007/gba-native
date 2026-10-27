@@ -181,14 +181,16 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
   `arithmetic.rs`, `memory.rs`) plus typed guest SWI framing/dispatch (`swi.rs`).
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
-  (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`),
-  report parsing (`report.rs`), target-profile build/metadata
-  (`target_build.rs`), harness build/run (`harness.rs`) and tests.
+  (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
+  `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),
+  target-profile build/metadata (`target_build.rs`), harness build/run
+  (`harness.rs`), the bounded wasm32 module build/metadata/pinned-CLI path
+  (`wasm_build.rs`, `wasm_meta.rs`, `wasm_tool.rs`) and tests.
   This package depends on `gba-native-core` under the `gba_native` alias.
 - Root `src/lib.rs`: compatibility facade re-exporting the core modules and
   `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands
-  (including the experimental target-profile `aot build`) and safe `output/`
-  writes.
+  (including the experimental `aot build` native and wasm32 branches) and safe
+  `output/` writes.
 - `apps/desktop/`: optional, separately excluded synthetic Winit/Pixels/WGPU
   package with its own workspace/lockfile. It depends directly on
   `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT

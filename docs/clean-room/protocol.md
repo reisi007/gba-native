@@ -95,10 +95,13 @@ retail cartridges**.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and
   stops at unknown/indirect control flow.
 - The native proof is a developer test harness, not a shipped game build. The
-  `aot build` target-profile output is likewise a headless developer artifact:
-  not a playable standalone game, final application, GUI frontend, save-aware
-  build or WASM target. Building one target triple with the installed toolchain
-  does not establish cross-platform support.
+  `aot build` output is likewise a headless developer artifact: a native
+  executable, or for `wasm32-unknown-unknown` a ROM-bound WASM execution module
+  plus JS glue. Neither is a playable standalone game, final application, GUI
+  frontend, browser application, save-aware build or playable WASM frontend; the
+  WASM module has no HTML/JS UI, renderer, input or persistence. Building one
+  target triple with the installed toolchain does not establish cross-platform
+  support.
 - The optional `apps/desktop` Winit/Pixels window and `apps/web` WebGPU/WebGL2
   page present only the static synthetic bitmap. Neither is a playable/retail
   frontend, per-ROM application or vendor upscaler; neither establishes

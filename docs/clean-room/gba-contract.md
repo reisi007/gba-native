@@ -435,7 +435,10 @@ std-only core or this PPM backend and is not a vendor upscaler. Its exact
 boundary is in `docs/gpu-frontend.md`. The optional, separate `apps/web` package
 executes the synthetic demo through WASM and presents its static snapshot through
 browser WebGPU or WebGL2; it is not per-ROM execution, not part of the root
-dependency graph, and not a vendor upscaler (`docs/web-frontend.md`).
+dependency graph, and not a vendor upscaler (`docs/web-frontend.md`). A separate
+`aot build --target wasm32-unknown-unknown` branch produces a ROM-bound WASM
+execution module callable from a browser, but it ships no HTML/JS application,
+renderer, input or persistence and is not part of `apps/web`.
 
 ## Typed IR and interpreter
 
@@ -525,9 +528,13 @@ does not write PC and does not itself end the block.
   cartridge and initializes the CPU, bus and entry state. `emit_native_module`
   remains the compatibility API that composes the program with the native
   harness driver, which owns the external `--rom PATH` load, SHA-256+length
-  binding, the state report and its exit codes. This is a structural split of
-  the existing synthetic-fixture harness, not a claim of general ROM
-  compilation or playability, and it includes no browser/WASM driver.
+  binding, the state report and its exit codes. `emit_wasm_module` composes the
+  same program section with a wasm-bindgen driver that accepts a caller-supplied
+  `Uint8Array`, checks the embedded SHA-256+length before building the
+  cartridge, CPU or bus, and returns a compact state/budget/fallback report with
+  core errors propagated as JS errors; it has no filesystem, process or stdout
+  boundary. This is a structural split of the existing synthetic-fixture
+  harness, not a claim of general ROM compilation or playability.
 - `NativeHarness::build_for_target(source, dir, target)` compiles the composed
   native module in Cargo release mode (`--offline`, `--release`,
   `--target <triple>`) with an own `CARGO_TARGET_DIR` inside the fresh crate
@@ -542,6 +549,19 @@ does not write PC and does not itself end the block.
   method is not a cross-compilation or platform-support claim.
   `NativeHarness::build` remains the host/debug API used by the existing
   differential tests.
+- `WasmModule::build_with_bindgen(source, dir, bindgen)` creates a fresh
+  generated cdylib crate with the same `create_dir`/`create_new` ownership rules,
+  a direct path dependency on `gba-native-core` (renamed to the `gba_native`
+  namespace) and the exact `wasm-bindgen` 0.2.129 pin, compiles it offline in
+  release mode for `wasm32-unknown-unknown` with an own `CARGO_TARGET_DIR`, then
+  runs the repository-owned pinned wasm-bindgen CLI
+  (`--target web --no-typescript`) into `pkg/` and verifies the non-empty JS glue
+  and `_bg.wasm`. A missing or mismatched CLI is an explicit error with the
+  `scripts/bootstrap-web-tools.sh` instruction; there is no global fallback or
+  auto-install. Only `wasm32-unknown-unknown` is accepted by this branch; other
+  `wasm32*`/`wasm64*` triples are rejected before any output is created. The
+  generated artifact is a browser-callable execution module, not an HTML/JS
+  application or GPU frontend.
 - A CPSR control-field MSR can change the active register bank, so bounded
   discovery invalidates cached r8-r14 constants across it. It never carries a
   stale banked value into a later `BX`. Flags-only and reserved-field MSR forms
@@ -633,29 +653,42 @@ by the default workspace; neither is a core CLI output format. See
 - `aot build <rom.gba> --target <triple> [--out <new-directory>] [--budget N]`
   is an experimental headless artifact command. It loads the supplied ROM
   read-only through the bounded cartridge loader, discovers from `0x08000000`
-  in ARM state, emits the compatibility native module and builds a release
-  executable for the required target. The command validates the target before
-  reading the ROM or creating output, and it never executes the built artifact.
+  in ARM state and validates the target before reading the ROM or creating
+  output. A non-WASM target emits the compatibility native module and builds a
+  release executable for it. `wasm32-unknown-unknown` emits the target-neutral
+  program section plus the wasm-bindgen `run_rom(Uint8Array)` driver, builds a
+  fresh cdylib offline with the exact wasm-bindgen 0.2.129 pin and runs the
+  repository-owned pinned wasm-bindgen CLI into `pkg/` (JS glue plus `_bg.wasm`).
+  Other `wasm32*`/`wasm64*` triples are rejected explicitly. The command never
+  executes the built artifact.
 - The default `aot build` workspace is a new unique
-  `<cwd>/output/native-aot-app-*` directory; an explicit `--out` must be a new
-  path below `output/` and is refused when it already exists. The owned
-  workspace contains `generated.rs`, the generated crate (with its own Cargo
-  target directory), `artifact.meta` and `build.meta`. The executable is
-  reported at its target-specific release path. No ROM copy is written anywhere
-  under the workspace.
+  `<cwd>/output/native-aot-app-*` directory; the WASM branch uses
+  `<cwd>/output/wasm-aot-module-*`. An explicit `--out` must be a new path below
+  `output/` and is refused when it already exists. The owned workspace contains
+  `generated.rs`, the generated crate (with its own Cargo target directory),
+  `artifact.meta` and `build.meta`; the WASM branch also contains `pkg/` and a
+  generated `README.md`. The native executable is reported at its
+  target-specific release path, the WASM module and JS glue at their `pkg/`
+  paths. No ROM copy is written anywhere under the workspace.
 - `artifact.meta` and `build.meta` are ordered `key=value` files. They record
   the ROM SHA-256 and length, target, entry/state, budget, discovery counts,
-  generated-source SHA-256, produced-executable SHA-256, and actual Cargo/rustc
-  versions plus the rustc host where obtainable. `artifact.meta` also records
-  `embedded_rom_bytes=0` and `requires_external_rom=true`. The metadata
-  deliberately contains no absolute paths, timestamps or ROM bytes. The
-  executable still requires `--rom PATH` at runtime and rejects a different
-  image through its SHA-256+length binding.
+  generated-source SHA-256, and actual Cargo/rustc versions plus the rustc host
+  where obtainable. The native branch records the produced-executable SHA-256;
+  the WASM branch records `artifact_kind=wasm-module`, `module_sha256` and
+  `js_glue_sha256` instead and adds `wasm_bindgen_version=0.2.129` to both
+  files. `artifact.meta` also records `embedded_rom_bytes=0` and
+  `requires_external_rom=true`. The metadata deliberately contains no absolute
+  paths, timestamps or ROM bytes. The native executable still requires
+  `--rom PATH` at runtime; the WASM module takes a caller-supplied `Uint8Array`
+  and rejects a different image through its SHA-256+length binding before any
+  cartridge, CPU or bus exists.
 - `aot build` is a headless prototype artifact, not a playable standalone game,
-  GUI frontend, save-aware application, final application or browser/WASM
-  build. Its verified behavior is limited to synthetic fixtures; building a
-  target with the installed toolchain is not evidence of cross-platform support
-  or retail-game compatibility.
+  GUI frontend, save-aware application, final application or complete browser
+  app. The WASM branch produces a browser-callable execution module only: no
+  HTML/JS UI, GPU renderer, input, persistence or full frontend. Its verified
+  behavior is limited to synthetic fixtures; building a target with the
+  installed toolchain is not evidence of cross-platform support or retail-game
+  compatibility.
 - These are ownership and consistency checks, not a claim of race-freedom
   against an actively hostile process mutating the filesystem concurrently.
 

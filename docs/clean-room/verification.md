@@ -407,6 +407,52 @@ removes only the directory it created.
   host can cross-compile it, and the produced executable is not a playable game,
   GUI, save-aware app, final application or WASM build.
 
+### ROM-bound WASM module build (2026-10-27, local)
+
+The `--target wasm32-unknown-unknown` branch is covered by tool-free library
+tests plus one locally exercised synthetic build; the default root tests stay
+offline and do not require wasm-bindgen, Node, a browser or the wasm32 target.
+
+- `crates/aot/src/aot/wasm_tests.rs` asserts that the emitted module embeds the
+  exact SHA-256, length and build-time budget, contains no ROM byte array marker,
+  has no `main`, filesystem, process, environment or stdout boundary, and that
+  both binding checks precede cartridge, CPU and bus construction. It also checks
+  the ordered WASM metadata keys and hashes, the `artifact_kind=wasm-module`
+  label, the exact wasm-bindgen pin in build metadata, rejection of every other
+  `wasm32*`/`wasm64*` triple, the exact version-banner rule, and the bootstrap
+  instruction for a missing pinned CLI.
+- `tests/cli_aot_build.rs` also checks that `--target wasm32-wasip1` fails with
+  an explicit message and creates no `output/` directory, and the existing native
+  CLI contract still passes unchanged.
+- Local synthetic run: the demo fixture written by `aot proof` into an owned
+  `output/` workspace was built with the real pinned wasm-bindgen 0.2.129
+  (`--target web --no-typescript`) and imported in repository-pinned Node
+  24.22.1. `run_rom(Uint8Array)` returned a `status=ok` state/budget/fallback
+  report; a single-byte modification and a truncated image both threw the
+  SHA-256/length `ROM mismatch` error before guest execution. The produced
+  `_bg.wasm` has no WASI import and no demo-fixture byte marker. The module hash,
+  JS glue hash and generated README are recorded in the owned workspace.
+- Not established: a browser page or GPU presentation, input, saves/persistence,
+  a complete frontend, per-ROM workload behavior beyond the synthetic fixture,
+  or any retail-game/playability claim.
+
+### Local supplied-ROM execution attempt (2026-10-28)
+
+The owner-supplied ROM was kept external and read-only. Native macOS ARM64 and
+WASM module builds completed, but executing either artifact stopped with the
+same explicit core error: `BIOS HLE: RegisterRamReset flags 0x000000FF request
+unsupported reset bits 5..31`. This is not a boot or gameplay result; the
+prototype's documented HLE boundary rejects the requested reset flags. A
+modified in-memory copy was rejected as `ROM mismatch` by the WASM binding
+before guest execution. No filename, digest or ROM bytes are recorded here.
+
+The macOS x86_64 artifact also built. Windows MSVC did not link because
+`link.exe` was unavailable, and Linux x86_64 did not link because a Linux linker
+was unavailable; no cross-linker was installed. These attempts establish only
+the observed local toolchain outcomes, not general platform support. Automated
+regression tests remain based on synthetic fixtures, and no playability claim
+is made.
+
 ### Output path safety
 
 `src/cli/output.rs` enforces the CLI contract; `tests/cli_output.rs` exercises
@@ -606,7 +652,10 @@ frontend is verified. The optional synthetic `apps/desktop` frontend presents
 one static bitmap and has build/unit-test evidence plus one local macOS Metal
 smoke observation. The separate `apps/web` foundation presents that synthetic
 fixture through browser WebGPU/WebGL2 and has local build/functional-E2E evidence;
-visual approval remains pending. Neither frontend is a per-ROM playable/input
+visual approval remains pending. The separate ROM-bound WASM module from
+`aot build --target wasm32-unknown-unknown` has synthetic-module and pinned-Node
+evidence only; no browser hosting, GPU presentation, input, saves or per-ROM
+application around it is verified. Neither frontend is a per-ROM playable/input
 loop. No Windows/Linux physical-GPU run, cross-platform presentation claim or
 visible-frame counter is verified. PSR-transfer and banking evidence is
 limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE

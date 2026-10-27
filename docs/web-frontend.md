@@ -612,9 +612,12 @@ Linux run 40236292333 is fixed. The new logs are in
 
 ## Remaining gaps (explicitly not implemented)
 
-- no per-ROM compiled/translated application, no browser ROM input/upload, no
-  browser AOT emission (the current AOT CLI writes native `fn main` harnesses and
-  is not WASM-compatible);
+- no per-ROM compiled/translated application, no browser ROM input/upload inside
+  this package, and no browser AOT emission here: `apps/web` is not the output of
+  the AOT CLI. A separate `gba-native aot build --target wasm32-unknown-unknown`
+  branch now produces a ROM-bound WASM *execution module* plus JS glue, but it
+  ships no HTML/JS UI, renderer, input or persistence and is not wired into this
+  page or the browser gate;
 - no gameplay loop, audio, frame/cycle timing, save data, save profiles or
   portable persistence;
 - no GBA input mapping, touch controls, remapping or Android/iOS packages (#25);

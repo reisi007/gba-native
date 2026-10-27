@@ -464,6 +464,15 @@ fn aot_build_failures_create_no_output_and_launch_no_build() {
     assert!(!cwd.join("escaped-build").exists());
     assert!(!output_root.exists());
 
+    let output = cli(
+        &cwd,
+        &["aot", "build", "synthetic.gba", "--target", "wasm32-wasip1"],
+    );
+    let message = expect_failure(&output, "unsupported wasm target");
+    assert!(message.contains("wasm32-wasip1"), "{message}");
+    assert!(message.contains("wasm32-unknown-unknown"), "{message}");
+    assert!(!output_root.exists());
+
     let existing = output_root.join("existing");
     std::fs::create_dir_all(&existing).expect("existing --out");
     let output = cli(

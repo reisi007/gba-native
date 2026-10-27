@@ -45,7 +45,8 @@ the root workspace lockfile contains only these three internal path packages.
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
-| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI, save or WASM claim |
+| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI or save claim |
+| ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
 | Runtime fallback | Reference interpreter; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
@@ -64,6 +65,7 @@ cargo run -- run <rom.gba> [--budget 1000000]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
+cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
 
 - `info` parses the documented 192-byte header and prints diagnostics. It does
@@ -88,25 +90,46 @@ cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>
   `--rom PATH` at runtime. This command does not execute that ROM natively and
   makes no general static-recovery claim.
 - `aot build` discovers blocks from a supplied ROM at the ARM entry
-  `0x08000000`, emits the compatibility native module and compiles a headless
-  release executable for the required `--target` Cargo triple. It creates a
-  fresh owned workspace under `output/`, writes `generated.rs`, `artifact.meta`
-  and `build.meta`, and leaves the executable in the generated crate's
-  target-specific release directory. The command does not execute the artifact,
-  and no ROM copy is written: the original file stays external and read-only.
-  The executable still requires `--rom PATH` at runtime and checks SHA-256 plus
-  length before execution. Target support is whatever the installed
-  Cargo/rustc toolchain can actually build (`--offline --release --target`);
-  this is not a cross-compilation, cross-platform or platform-support claim,
-  and the path supports targets that produce a native executable rather than a
-  WASM or other non-executable artifact.
+  `0x08000000` and creates a fresh owned workspace under `output/` with
+  `generated.rs`, `artifact.meta` and `build.meta`. The command does not execute
+  the artifact, and no ROM copy is written: the original file stays external and
+  read-only. The required `--target` selects one of two bounded branches:
+  - any non-WASM triple emits the compatibility native module and compiles a
+    headless release executable for that Cargo triple. The executable stays in
+    the generated crate's target-specific release directory, still requires
+    `--rom PATH` at runtime, and checks SHA-256 plus length before execution.
+    Target support is whatever the installed Cargo/rustc toolchain can actually
+    build offline; this is not a cross-compilation, cross-platform or
+    platform-support claim, and only targets that produce a native executable
+    are supported here.
+  - `wasm32-unknown-unknown` emits the target-neutral program section plus a
+    wasm-bindgen `run_rom(bytes: Vec<u8>)` driver (JS `Uint8Array`), builds a
+    fresh cdylib offline in release mode with the exact `wasm-bindgen` 0.2.129
+    pin, and runs the repository-owned `target/tools/bin/wasm-bindgen` CLI
+    (`--target web --no-typescript`) to produce an importable JS glue module plus
+    `_bg.wasm`. `run_rom` checks the ROM length and SHA-256 before constructing
+    the cartridge, CPU or bus, initializes the direct-entry CPU and BIOS stacks,
+    executes the build-time instruction budget and returns a compact state
+    report. Core errors become JavaScript errors; there is no filesystem,
+    process or stdout boundary. Other `wasm32*`/`wasm64*` triples are rejected
+    explicitly. The tool is verified at exactly 0.2.129 and never replaced by a
+    global or auto-installed binary; a missing or mismatched CLI fails with an
+    instruction to run `scripts/bootstrap-web-tools.sh`.
   `artifact.meta` and `build.meta` are ordered `key=value` files with ROM
-  identity, target, entry/state, budget, discovery counts, source/executable
-  SHA-256, and actual Cargo/rustc versions and host where available. They
-  contain no absolute paths, timestamps or ROM bytes. The result is an
-  experimental headless artifact for synthetic-fixture verification, not a
-  playable standalone game, GUI frontend, save-aware app, final application or
-  browser/WASM build.
+  identity, target, entry/state, budget, discovery counts, generated-source
+  SHA-256 and actual Cargo/rustc versions and host where available. The native
+  branch records the produced executable hash; the WASM branch records
+  `artifact_kind=wasm-module`, `module_sha256` and `js_glue_sha256` instead, and
+  both branches' `build.meta` records the exact `wasm_bindgen_version` (also in
+  `artifact.meta` for the WASM branch). Metadata contains no absolute paths,
+  timestamps or ROM bytes. A generated `README.md` in the WASM workspace
+  documents the `run_rom(Uint8Array)` call and the external-ROM binding.
+  Neither branch is a playable standalone game, GUI frontend, save-aware app,
+  final application or complete browser app: the WASM artifact is a
+  browser-callable execution module with no HTML/JS UI, GPU renderer, input or
+  persistence. Automated tests use synthetic fixtures; a separate local
+  supplied-ROM execution attempt and its explicit unsupported-service result
+  are recorded in the verification log, not as a compatibility claim.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
   paths are resolved into that root, symlinks below it are refused, and the
   location is validated before any directory is created. An existing explicit
@@ -140,6 +163,13 @@ It runs the synthetic demo through the std-only core and presents one static
 image using WebGPU or WebGL2. It is not a per-ROM browser application. Build
 details, observed browser results, explicit gaps and the pending visual review
 are in [`docs/web-frontend.md`](docs/web-frontend.md).
+
+The separate `aot build --target wasm32-unknown-unknown` path produces a
+ROM-bound WASM *execution module* and JS glue for a caller that already has a
+browser app; it does not add HTML/JS, a renderer, input or persistence, and it
+is not part of `apps/web` or the browser gate. Its build requires the pinned
+wasm-bindgen CLI from `./scripts/bootstrap-web-tools.sh` and the installed
+`wasm32-unknown-unknown` Rust target.
 
 ## Build and test
 

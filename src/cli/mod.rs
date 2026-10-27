@@ -24,13 +24,14 @@ usage:
   gba-native run <rom.gba> [--budget N]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
-  gba-native aot build <rom.gba> --target <triple> [--out output/native-aot-app] [--budget N]
+  gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.
 Generated files are restricted to <cwd>/output/; an explicit --out
 directory must not already exist. aot build compiles a headless native
-artifact for an installed Cargo target; it is not a playable game.";
+artifact, or a ROM-bound WASM execution module for wasm32-unknown-unknown;
+neither is a playable game or browser app.";
 
 pub fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);
