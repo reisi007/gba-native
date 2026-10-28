@@ -199,12 +199,12 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 330, "full workspace test inventory changed");
+    assert_eq!(total, 336, "full workspace test inventory changed");
 
     // Exact inventory retains prior families and includes the Mode 0 BG0 slice,
     // WASM-module tests, synthetic CLI run-snapshot regressions, host-input,
-    // mirrored-RAM, ignored-I/O, host-triggered Sound FIFO DMA and VCOUNT
-    // byte-lane regressions.
+    // mirrored-RAM, ignored-I/O, host-triggered Sound FIFO DMA, VCOUNT
+    // byte-lane and synthetic BIOS data-policy regressions.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -220,7 +220,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("bios_dispatch", 2),
         ("bios_memory_copy", 14),
         ("bios_reset", 7),
-        ("bus", 11),
+        ("bus", 15),
         ("cartridge", 6),
         ("cpu", 13),
         ("demo", 3),
@@ -256,7 +256,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     let root_targets = [
         ("cli_aot_build", 2),
         ("cli_output", 5),
-        ("cli_run", 5),
+        ("cli_run", 7),
         ("frontend_gates", 4),
         ("quality_counter", 10),
         ("scripts", 5),
@@ -276,7 +276,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 326, "selected package test inventory changed");
+    assert_eq!(baseline, 332, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.

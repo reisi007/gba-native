@@ -24,6 +24,8 @@ use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
 use crate::sha256;
 
+pub const BIOS_BASE: u32 = 0x0000_0000;
+pub const BIOS_LEN: usize = 16 * 1024;
 pub const EWRAM_BASE: u32 = 0x0200_0000;
 pub const EWRAM_LEN: usize = 256 * 1024;
 pub const IWRAM_BASE: u32 = 0x0300_0000;
@@ -43,6 +45,32 @@ pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
 
+/// Host-selected policy for **data** reads from the 16 KiB BIOS region.
+///
+/// This is not guest state and is deliberately excluded from
+/// [`Bus::state_digest`]. It never makes the BIOS executable and never permits
+/// writes. See [`Bus::with_synthetic_bios_zero_fill`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BiosDataPolicy {
+    /// Fail closed: every BIOS data read returns [`Error::BiosAccess`].
+    Strict,
+    /// **Experimental, non-hardware-faithful assumption:** BIOS data reads
+    /// return `0` for every width. This is a deterministic synthetic fallback
+    /// for bounded progress experiments, not authentic BIOS data, instruction
+    /// bytes or hardware behavior.
+    SyntheticZeroFill,
+}
+
+impl BiosDataPolicy {
+    /// Stable label for CLI output and snapshot reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::SyntheticZeroFill => "synthetic-zero-fill",
+        }
+    }
+}
+
 pub struct Bus {
     cart: Cartridge,
     ewram: Vec<u8>,
@@ -52,6 +80,7 @@ pub struct Bus {
     oam: Vec<u8>,
     io: io::IoState,
     pressed_keys: u16,
+    bios_data_policy: BiosDataPolicy,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -59,7 +88,23 @@ pub struct Bus {
 }
 
 impl Bus {
+    /// Fail-closed construction: BIOS data reads are explicit errors.
     pub fn new(cart: Cartridge) -> Self {
+        Self::with_bios_data_policy(cart, BiosDataPolicy::Strict)
+    }
+
+    /// Explicit opt-in construction for the synthetic BIOS zero-fill policy.
+    ///
+    /// Under this policy, `read8`/`read16`/`read32` at
+    /// `0x00000000..=0x00003FFF` return `0` after the usual alignment checks.
+    /// BIOS fetches still return [`Error::NonExecutable`] and BIOS writes still
+    /// return [`Error::BiosAccess`]. This is an experimental assumption, not a
+    /// BIOS image, opcode source or hardware-faithful behavior.
+    pub fn with_synthetic_bios_zero_fill(cart: Cartridge) -> Self {
+        Self::with_bios_data_policy(cart, BiosDataPolicy::SyntheticZeroFill)
+    }
+
+    pub fn with_bios_data_policy(cart: Cartridge, policy: BiosDataPolicy) -> Self {
         Self {
             cart,
             ewram: vec![0; EWRAM_LEN],
@@ -69,11 +114,16 @@ impl Bus {
             oam: vec![0; OAM_LEN],
             io: io::IoState::default(),
             pressed_keys: 0,
+            bios_data_policy: policy,
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
             ignored_io_writes_truncated: false,
         }
+    }
+
+    pub fn bios_data_policy(&self) -> BiosDataPolicy {
+        self.bios_data_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.
@@ -102,6 +152,8 @@ impl Bus {
     }
 
     /// Instruction fetch. Only ROM and work RAM are executable by design.
+    /// [`BiosDataPolicy`] affects data reads only; BIOS fetches stay
+    /// non-executable under every policy.
     pub fn fetch16(&self, addr: u32) -> Result<u16> {
         if !addr.is_multiple_of(2) {
             return Err(Error::UnalignedFetch { addr, thumb: true });
@@ -181,6 +233,10 @@ impl Bus {
 
 fn is_rom(addr: u32) -> bool {
     (ROM_BASE..=0x0DFF_FFFF).contains(&addr)
+}
+
+fn is_bios(addr: u32) -> bool {
+    (BIOS_BASE..BIOS_BASE + BIOS_LEN as u32).contains(&addr)
 }
 
 fn offset_in(addr: u32, base: u32, len: usize) -> Option<usize> {

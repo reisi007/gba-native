@@ -255,3 +255,32 @@ constraints remain unchanged: unsupported or unknown effects must fail
 explicitly, and no fake success is permitted. This remains an informal process,
 not a legal clean-room certification. This records permission only; it does not
 claim the analysis has been performed or the service implemented.
+
+## D17 — Explicit synthetic zero-fill policy for BIOS data reads
+
+Decided by the owner on 2026-10-28 as the bounded issue #6 follow-up. A supplied
+ROM attempt had stopped on a BIOS data read under the direct-entry policy. The
+owner authorized a deterministic synthetic fallback so bounded progress
+experiments can continue without pretending that BIOS bytes exist.
+
+`Bus::new(cart)` remains fail-closed exactly as before: BIOS data reads return
+`BiosAccess`. The new, clearly named opt-in
+`Bus::with_synthetic_bios_zero_fill(cart)` (or
+`Bus::with_bios_data_policy(cart, BiosDataPolicy::SyntheticZeroFill)`) makes
+`read8`, `read16` and `read32` at `0x00000000..=0x00003FFF` return zero after
+the existing halfword/word alignment checks. Nothing else changes: BIOS
+`fetch16`/`fetch32` still return `NonExecutable`, BIOS writes still return
+`BiosAccess`, and every other address keeps its previous policy. The policy is
+host configuration and is excluded from `Bus::state_digest`.
+
+The CLI exposes this only through `gba-native run
+--synthetic-bios-zero-fill`; the default remains strict. Successful output and
+the optional snapshot report print the selected `bios_data_policy`, and the
+opt-in carries an explicit note that the zero fill is an experimental,
+non-hardware-faithful assumption rather than authentic BIOS data. Tests cover
+the strict default, all three read widths, rejected fetches/writes and the CLI
+opt-in with synthetic fixtures only.
+
+This is not an authentic BIOS opcode source, not hardware behavior and not a
+boot, timing or compatibility claim. It does not relax the prohibition on BIOS
+image handling, disassembly outside D16's narrow process, or ROM modification.

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gba_native::bus::{Bus, PALETTE_BASE};
+use gba_native::bus::{BiosDataPolicy, Bus, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::display::Image;
@@ -32,10 +32,18 @@ pub(super) fn write_snapshot(
     } else {
         "execution_returned_before_requested_budget"
     };
+    let bios_data_note = match bus.bios_data_policy() {
+        BiosDataPolicy::Strict => "fail-closed; BIOS data reads are explicit errors",
+        BiosDataPolicy::SyntheticZeroFill => {
+            "experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"
+        }
+    };
     let report = format!(
         "capture_kind=post_budget_bitmap_snapshot\n\
          rom_bytes={}\n\
          rom_sha256={}\n\
+         bios_data_policy={}\n\
+         bios_data_note={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -56,6 +64,8 @@ pub(super) fn write_snapshot(
          note=static post-budget bitmap snapshot only; not a frame, boot, hardware-timed render, gameplay, or compatibility claim\n",
         cart.len(),
         cart.sha256_hex(),
+        bus.bios_data_policy().name(),
+        bios_data_note,
         requested_budget,
         used_budget,
         stop_reason,

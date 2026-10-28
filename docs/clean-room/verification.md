@@ -533,6 +533,19 @@ written; the ROM remained external and unmodified, and no filename, digest or
 ROM bytes are recorded. This does not establish BIOS boot, gameplay, rendering,
 frame/scanline timing or compatibility.
 
+After the owner-authorized explicit `--synthetic-bios-zero-fill` zero-data
+assumption was implemented, a read-only 30,000,000-instruction-budget
+`gba-native run` retry with that flag passed the prior BIOS data-read stop but
+exited 1 at `unaligned ARM instruction fetch at 0x082F6386`. An external
+runtime-state diagnostic reported the failing PC as `0x082F6386`, ARM state
+(`thumb=0`) and CPSR `0x00000092` (IRQ mode). No instruction bytes, BIOS bytes,
+ROM filename, digest or other bytes are recorded; no `--out` was used and no
+snapshot was written. This is progress only under an experimental,
+non-hardware-faithful zero-fill assumption, and establishes no boot, rendering,
+timing or compatibility. `./scripts/full.sh` passed with 336 workspace tests and
+332 selected inventory tests, including the short and long Ratchet tiers, fmt,
+clippy, debug/release tests, the demo and the synthetic proof.
+
 For the bounded DMA/FIFO change, `./scripts/full.sh` passed: fmt, clippy, debug
 and release tests, demo, native AOT proof (`native_vs_reference=match`) and the
 Ratchet slow tier (`COHERENT — 1 of 1 gates passed`). The pinned workspace

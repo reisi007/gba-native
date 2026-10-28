@@ -55,8 +55,11 @@ impl Bus {
     }
 
     pub fn read8(&self, addr: u32) -> Result<u8> {
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
-            return Err(Error::BiosAccess { addr });
+        if is_bios(addr) {
+            return match self.bios_data_policy {
+                BiosDataPolicy::Strict => Err(Error::BiosAccess { addr }),
+                BiosDataPolicy::SyntheticZeroFill => Ok(0),
+            };
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             return Ok(self.ewram[offset]);
@@ -96,8 +99,11 @@ impl Bus {
 
     pub fn read16(&self, addr: u32) -> Result<u16> {
         require_halfword(addr)?;
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
-            return Err(Error::BiosAccess { addr });
+        if is_bios(addr) {
+            return match self.bios_data_policy {
+                BiosDataPolicy::Strict => Err(Error::BiosAccess { addr }),
+                BiosDataPolicy::SyntheticZeroFill => Ok(0),
+            };
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             return Ok(u16::from_le_bytes([
@@ -158,8 +164,11 @@ impl Bus {
 
     pub fn read32(&self, addr: u32) -> Result<u32> {
         require_word(addr)?;
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
-            return Err(Error::BiosAccess { addr });
+        if is_bios(addr) {
+            return match self.bios_data_policy {
+                BiosDataPolicy::Strict => Err(Error::BiosAccess { addr }),
+                BiosDataPolicy::SyntheticZeroFill => Ok(0),
+            };
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             return Ok(u32::from_le_bytes([
@@ -207,7 +216,8 @@ impl Bus {
     }
 
     pub fn write8(&mut self, addr: u32, value: u8) -> Result<()> {
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
+        if is_bios(addr) {
+            // The data policy never permits BIOS writes.
             return Err(Error::BiosAccess { addr });
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
@@ -264,7 +274,7 @@ impl Bus {
             self.record_ignored_io_write(addr);
             return Ok(());
         }
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
+        if is_bios(addr) {
             return Err(Error::BiosAccess { addr });
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
@@ -322,7 +332,7 @@ impl Bus {
             self.record_ignored_io_write(addr);
             return Ok(());
         }
-        if (0x0000_0000..=0x0000_3FFF).contains(&addr) {
+        if is_bios(addr) {
             return Err(Error::BiosAccess { addr });
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {

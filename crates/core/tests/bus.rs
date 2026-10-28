@@ -1,6 +1,7 @@
 //! Bus region boundaries, ROM windows, explicit unsupported accesses and the
 //! documented byte-store rules and host-injected KEYINPUT state implemented here.
 
+use gba_native_core::bus::BiosDataPolicy;
 use gba_native_core::bus::{
     BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
     IWRAM_LEN, KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT,
@@ -332,4 +333,90 @@ fn ram_code_is_fetchable_but_video_memory_is_not() {
         bus.fetch16(VRAM_BASE),
         Err(Error::NonExecutable { .. })
     ));
+}
+
+#[test]
+fn strict_bios_data_policy_is_the_default_for_all_widths() {
+    let bus = Bus::new(cart(0x200));
+    assert_eq!(bus.bios_data_policy(), BiosDataPolicy::Strict);
+    for addr in [0x0000_0000, 0x0000_000A, 0x0000_3FFF] {
+        assert!(matches!(bus.read8(addr), Err(Error::BiosAccess { .. })));
+    }
+    for addr in [0x0000_0000, 0x0000_000A, 0x0000_3FFE] {
+        assert!(matches!(bus.read16(addr), Err(Error::BiosAccess { .. })));
+    }
+    for addr in [0x0000_0000, 0x0000_0008, 0x0000_3FFC] {
+        assert!(matches!(bus.read32(addr), Err(Error::BiosAccess { .. })));
+    }
+}
+
+#[test]
+fn synthetic_bios_zero_fill_returns_zero_for_every_read_width() {
+    let bus = Bus::with_synthetic_bios_zero_fill(cart(0x200));
+    assert_eq!(bus.bios_data_policy(), BiosDataPolicy::SyntheticZeroFill);
+    for addr in [0x0000_0000, 0x0000_000A, 0x0000_3FFF] {
+        assert_eq!(bus.read8(addr), Ok(0), "byte at {addr:#010X}");
+    }
+    for addr in [0x0000_0000, 0x0000_000A, 0x0000_3FFE] {
+        assert_eq!(bus.read16(addr), Ok(0), "halfword at {addr:#010X}");
+    }
+    for addr in [0x0000_0000, 0x0000_0008, 0x0000_3FFC] {
+        assert_eq!(bus.read32(addr), Ok(0), "word at {addr:#010X}");
+    }
+    // Alignment validation still runs before the zero-fill policy.
+    assert!(matches!(
+        bus.read16(0x0000_0001),
+        Err(Error::UnalignedHalfword { .. })
+    ));
+    assert!(matches!(
+        bus.read32(0x0000_0002),
+        Err(Error::UnalignedWord { .. })
+    ));
+    // The policy ends at the 16 KiB BIOS window; the next byte is unmapped.
+    assert!(matches!(
+        bus.read8(0x0000_4000),
+        Err(Error::Unmapped { .. })
+    ));
+}
+
+#[test]
+fn synthetic_bios_zero_fill_never_makes_bios_executable_or_writable() {
+    let bus = Bus::with_synthetic_bios_zero_fill(cart(0x200));
+    for addr in [0x0000_0000, 0x0000_000A] {
+        assert!(matches!(
+            bus.fetch16(addr),
+            Err(Error::NonExecutable { .. })
+        ));
+    }
+    for addr in [0x0000_0000, 0x0000_0008] {
+        assert!(matches!(
+            bus.fetch32(addr),
+            Err(Error::NonExecutable { .. })
+        ));
+    }
+
+    let mut bus = Bus::with_synthetic_bios_zero_fill(cart(0x200));
+    assert!(matches!(
+        bus.write8(0x0000_000A, 0x11),
+        Err(Error::BiosAccess { .. })
+    ));
+    assert!(matches!(
+        bus.write16(0x0000_000A, 0x1111),
+        Err(Error::BiosAccess { .. })
+    ));
+    assert!(matches!(
+        bus.write32(0x0000_0008, 0x1111_1111),
+        Err(Error::BiosAccess { .. })
+    ));
+}
+
+#[test]
+fn bios_data_policy_is_host_configuration_outside_the_state_digest() {
+    let mut strict = Bus::new(cart(0x200));
+    let mut zero_fill = Bus::with_synthetic_bios_zero_fill(cart(0x200));
+    assert_eq!(strict.state_digest(), zero_fill.state_digest());
+    strict.write32(EWRAM_BASE, 0x1234_5678).expect("ewram");
+    zero_fill.write32(EWRAM_BASE, 0x1234_5678).expect("ewram");
+    assert_eq!(strict.state_digest(), zero_fill.state_digest());
+    assert_ne!(strict.bios_data_policy(), zero_fill.bios_data_policy());
 }

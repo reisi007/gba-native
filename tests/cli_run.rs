@@ -73,6 +73,7 @@ fn bounded_run_without_out_keeps_existing_contract_and_writes_nothing() {
         "instructions=1",
         "pc=0x08000100",
         "thumb=0",
+        "bios_data_policy=strict",
         "note=stopped only by the instruction budget; no boot or compatibility claim",
     ] {
         assert!(
@@ -124,6 +125,8 @@ fn bounded_run_writes_bitmap_and_truthful_metadata_when_requested() {
         "capture_kind=post_budget_bitmap_snapshot".to_string(),
         format!("rom_bytes={}", rom.len()),
         format!("rom_sha256={}", rom.sha256_hex()),
+        "bios_data_policy=strict".to_string(),
+        "bios_data_note=fail-closed; BIOS data reads are explicit errors".to_string(),
         "requested_instruction_budget=1".to_string(),
         "used_instruction_budget=1".to_string(),
         "stop_reason=instruction_budget".to_string(),
@@ -287,5 +290,98 @@ fn run_validates_output_arguments_and_redirects() {
         assert!(!redirected.status.success());
         assert!(stderr(&redirected).contains("symbolic link"));
         assert!(!outside.join("run").exists());
+    }
+}
+
+/// Synthetic ARM guest: `MOV r1, #0x0A` then `LDRB r0, [r1]`.
+///
+/// The byte load targets BIOS address `0x0000000A`; no supplied ROM or BIOS
+/// bytes are involved.
+fn bios_byte_read_rom(path: &Path) {
+    synthetic_rom(
+        path,
+        &[
+            (0, 0xE3A0_100A), // MOV r1, #0x0A
+            (4, 0xE5D1_0000), // LDRB r0, [r1]
+        ],
+    );
+}
+
+#[test]
+fn run_bios_data_read_stays_fail_closed_without_opt_in() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    bios_byte_read_rom(&cwd.join("bios-read.gba"));
+
+    let output = cli(
+        &cwd,
+        &[
+            "run",
+            "bios-read.gba",
+            "--budget",
+            "2",
+            "--out",
+            "output/bios-strict",
+        ],
+    );
+    assert!(
+        !output.status.success(),
+        "BIOS data reads must fail without the explicit opt-in"
+    );
+    assert!(
+        stderr(&output).contains("BIOS access at 0x0000000A"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        !cwd.join("output").exists(),
+        "execution failure must create no output directory"
+    );
+}
+
+#[test]
+fn run_synthetic_bios_zero_fill_is_explicit_in_output_and_report() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    bios_byte_read_rom(&cwd.join("bios-read.gba"));
+
+    let output = cli(
+        &cwd,
+        &[
+            "run",
+            "bios-read.gba",
+            "--budget",
+            "2",
+            "--synthetic-bios-zero-fill",
+            "--out",
+            "output/bios-zero",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "opt-in run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "status=bounded",
+        "instructions=2",
+        "pc=0x08000008",
+        "bios_data_policy=synthetic-zero-fill",
+        "bios_assumption=experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior",
+    ] {
+        assert!(stdout.contains(expected), "stdout is missing {expected}");
+    }
+
+    let report =
+        std::fs::read_to_string(cwd.join("output/bios-zero/report.txt")).expect("run report");
+    for expected in [
+        "bios_data_policy=synthetic-zero-fill",
+        "bios_data_note=experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior",
+    ] {
+        assert!(report.contains(expected), "report is missing {expected}");
     }
 }

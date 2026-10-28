@@ -22,13 +22,15 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.
+--synthetic-bios-zero-fill is an explicit experimental opt-in that returns
+zero for BIOS data reads; it is not authentic BIOS data or hardware behavior.
 Generated files are restricted to <cwd>/output/; an explicit --out
 directory must not already exist. aot build compiles a headless native
 artifact, or a ROM-bound WASM execution module for wasm32-unknown-unknown;
@@ -143,8 +145,10 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
         .ok_or_else(|| Error::Args("run needs a ROM path".to_string()))?;
     let mut budget = 1_000_000u64;
     let mut snapshot_output = None;
+    let mut synthetic_bios_zero_fill = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
             "--budget" => {
                 let value = args
                     .next()
@@ -165,7 +169,11 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let cart = Cartridge::from_path(Path::new(&path))?;
     let mut cpu = Cpu::direct_entry();
     cpu.initialize_bios_stacks();
-    let mut bus = Bus::new(cart);
+    let mut bus = if synthetic_bios_zero_fill {
+        Bus::with_synthetic_bios_zero_fill(cart)
+    } else {
+        Bus::new(cart)
+    };
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     let output = if let Some(path) = snapshot_output {
         let image = display::snapshot(&bus)?;
@@ -186,6 +194,12 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("pc=0x{:08X}", cpu.pc());
     println!("cpsr=0x{:08X}", cpu.cpsr());
     println!("thumb={}", if cpu.thumb() { 1 } else { 0 });
+    println!("bios_data_policy={}", bus.bios_data_policy().name());
+    if synthetic_bios_zero_fill {
+        println!(
+            "bios_assumption=experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"
+        );
+    }
     println!("note=stopped only by the instruction budget; no boot or compatibility claim");
     if let Some(output) = output {
         println!("snapshot_dir={}", output.display());

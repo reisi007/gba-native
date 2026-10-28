@@ -42,6 +42,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
 | ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
 | BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot, other exceptions or timing |
+| BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
@@ -61,7 +62,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -77,11 +78,17 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
 - `run` initializes the documented guest BIOS stacks and executes a bounded
   number of instructions, including typed SWIs to the six HLE services. Other
   services return explicit errors. Reaching the budget is not a boot or frame
-  claim. Without `--out`, it creates no files. With `--out`, after both execution
-  and the static bitmap snapshot succeed, it creates a fresh directory containing
-  `screen.ppm` and `report.txt`. The report records the ROM and image hashes,
-  requested/used instruction budget, final CPU/display state and an explicit
-  non-claim; this post-budget snapshot is not a frame or hardware-timed render.
+  claim. BIOS data reads fail closed by default. `--synthetic-bios-zero-fill`
+  is an explicit experimental opt-in that returns zero for every BIOS data read
+  width (`0x00000000..=0x00003FFF`); it is reported as
+  `bios_data_policy=synthetic-zero-fill` and is neither authentic BIOS data or
+  opcodes nor hardware behavior. BIOS fetches and writes stay rejected under
+  both policies. Without `--out`, it creates no files. With `--out`, after both
+  execution and the static bitmap snapshot succeed, it creates a fresh directory
+  containing `screen.ppm` and `report.txt`. The report records the ROM and image
+  hashes, requested/used instruction budget, selected BIOS data policy, final
+  CPU/display state and an explicit non-claim; this post-budget snapshot is not
+  a frame or hardware-timed render.
 - `aot proof` discovers blocks in the synthetic ROM, allocates a new unique
   workspace under `output/` (an explicit `--out` must not already exist), writes
   that synthetic fixture there, emits a native Rust crate in a fresh child
@@ -134,8 +141,12 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   persistence. Automated tests use synthetic fixtures; local supplied-ROM
   attempts and their outcomes are recorded in the verification log. The latest
   bounded native run stops at an unsupported BIOS-region access at
-  `0x0000000A` (`direct-entry mode has no BIOS`); BIOS access remains outside the
-  implemented subset. This is not a compatibility, boot or playability claim.
+  `0x0000000A` (`direct-entry mode has no BIOS`); the strict default is
+  unchanged and BIOS instruction fetch remains outside the implemented subset.
+  The explicit `run --synthetic-bios-zero-fill` opt-in returns zero for BIOS
+  data reads only (experimental and non-hardware-faithful, not authentic BIOS
+  data or opcodes) while fetches and writes stay rejected. No new supplied-ROM
+  result is claimed. This is not a compatibility, boot or playability claim.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
   paths are resolved into that root, symlinks below it are refused, and the
   location is validated before any directory is created. An existing explicit

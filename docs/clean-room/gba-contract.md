@@ -10,7 +10,10 @@ not a roadmap promise and not a retail-game compatibility statement.
 ## Status and evidence language
 
 - Experimental prototype; no retail game is supported or known playable.
-- No BIOS is supplied or executed; direct entry is a test policy. The core can
+- No BIOS is supplied or executed; direct entry is a test policy. BIOS data
+  reads fail closed by default; `--synthetic-bios-zero-fill` is an explicit
+  experimental opt-in for zero data reads only (see below), never authentic BIOS
+  data, opcodes or executable BIOS. The core can
   receive a host-injected pressed-key mask through `Bus::set_pressed_keys`, but
   this is not interactive game support and has no frame-sampling guarantee.
 - The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
@@ -69,7 +72,8 @@ explicitly. The CLI guest runner and generated AOT harness do so. The
 interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
 it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
 runs the service in SYSTEM mode and returns through full CPSR restoration.
-Other exception classes, IRQ delivery and BIOS access remain unsupported.
+Other exception classes, IRQ delivery and BIOS instruction fetch remain
+unsupported. BIOS data reads are governed by the policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -77,6 +81,24 @@ Other exception classes, IRQ delivery and BIOS access remain unsupported.
   is decoded freshly by the interpreter on every execution.
 - The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
   timing or frame completion concept.
+
+## Synthetic BIOS data policy (Design)
+
+`Bus::new` stays fail-closed: data reads at `0x00000000..=0x00003FFF` return
+`BiosAccess`. The owner-authorized explicit opt-in
+`Bus::with_synthetic_bios_zero_fill` (equivalently
+`Bus::with_bios_data_policy(cart, BiosDataPolicy::SyntheticZeroFill)`) returns
+zero for `read8`, `read16` and `read32` across exactly that 16 KiB region, after
+the usual halfword/word alignment checks. This deterministic zero fill is an
+experimental fallback for bounded execution experiments; it is not authentic
+BIOS data, supplies no instruction bytes and is not a claim about any Nintendo
+BIOS or hardware behavior. Under **both** policies, `fetch16`/`fetch32` from
+BIOS return `NonExecutable`, BIOS writes return `BiosAccess`, and no other
+address or width is affected. The policy is host configuration, not guest state,
+and is excluded from `Bus::state_digest`. The only CLI surface is
+`run --synthetic-bios-zero-fill` (default remains strict); successful output and
+the optional snapshot report print the selected `bios_data_policy` and, under
+the opt-in, an explicit non-authentic note. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
@@ -236,7 +258,9 @@ is generated from the documented 16-byte refill threshold, a timer, a frame or
 audio output. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
-  and unmapped addresses are errors.
+  and unmapped addresses are errors; the only exception is the explicit
+  synthetic zero-fill opt-in, which changes BIOS **data reads** to zero and
+  leaves BIOS fetch/write errors and every other address unchanged.
 - CPU data-transfer rules actually implemented and tested:
   - A byte load/store uses `read8`/`write8` and the byte's exact address. It is
     never emulated as a wider access plus extraction. Byte stores to
