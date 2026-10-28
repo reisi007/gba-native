@@ -331,6 +331,9 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(result) = self.sound_write_fifo_word_at(addr, value) {
+                return result;
+            }
             // 32-bit I/O is two halfword accesses on hardware.
             self.write16(addr, value as u16)?;
             self.write16(addr + 2, (value >> 16) as u16)?;

@@ -1,9 +1,8 @@
 //! DMA channels 0..3: register file, addressing modes and the bounded transfer.
 //!
-//! There is no cycle, scanline or frame model here, so a transfer executes
-//! exactly once at the moment the channel is enabled. Real silicon starts a
-//! VBlank/HBlank channel later, and re-triggers a repeating channel every event;
-//! this prototype records that as a stated limitation instead of pretending.
+//! Immediate transfers execute on the enable edge. Non-immediate modes remain
+//! armed until an explicit modeled event occurs; only Sound FIFO requests for
+//! DMA1/2 have such an event API. No cycle or sound clock is synthesized.
 //!
 //! Documented from GBATEK `#40000bah---dma0cnt_h---dma-0-control-rw` and
 //! `#40000b8h---dma0cnt_l---dma-0-word-count-w-14-bit-14000h`: SAD, DAD and
@@ -11,6 +10,7 @@
 //! and the enable bit clears itself after a non-repeating transfer.
 
 use super::Bus;
+use super::sound::SoundFifo;
 use crate::error::{Error, Result};
 
 pub(super) const DMA_BASE: u32 = 0x0400_00B0;
@@ -24,6 +24,11 @@ const REPEAT: u16 = 1 << 9;
 const WORD: u16 = 1 << 10;
 const DEST_CONTROL: u16 = 3 << 5;
 const SOURCE_CONTROL: u16 = 3 << 7;
+const REPEAT_BIT: u16 = REPEAT;
+const SPECIAL_TIMING: u16 = 3;
+const TIMING_SHIFT: u16 = 12;
+const FIFO_BURST_WORDS: u32 = 4;
+const FIFO_BURST_BYTES: usize = FIFO_BURST_WORDS as usize * 4;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Channel {
@@ -31,6 +36,9 @@ pub(super) struct Channel {
     dad: u32,
     count: u16,
     control: u16,
+    source_cursor: u32,
+    destination_cursor: u32,
+    armed: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -102,6 +110,9 @@ impl DmaState {
             bytes.extend_from_slice(&channel.dad.to_le_bytes());
             bytes.extend_from_slice(&channel.count.to_le_bytes());
             bytes.extend_from_slice(&channel.control.to_le_bytes());
+            bytes.extend_from_slice(&channel.source_cursor.to_le_bytes());
+            bytes.extend_from_slice(&channel.destination_cursor.to_le_bytes());
+            bytes.push(u8::from(channel.armed));
         }
     }
 }
@@ -122,6 +133,7 @@ impl Bus {
         }
         let control = self.io.dma().control(channel);
         if control & ENABLE == 0 {
+            self.io.dma_mut().channels[channel].armed = false;
             return Some(Ok(()));
         }
         if was_enabled {
@@ -129,7 +141,21 @@ impl Bus {
             // it on silicon; the repeating channel is re-armed by its event.
             return Some(Ok(()));
         }
-        Some(self.transfer(channel))
+        let timing = (control >> TIMING_SHIFT) & 0x3;
+        if timing == 0 {
+            self.io.dma_mut().channels[channel].armed = false;
+            return Some(self.transfer(channel));
+        }
+        if timing == SPECIAL_TIMING && !matches!(channel, 1 | 2) {
+            return Some(Err(Error::UnsupportedDma {
+                detail: "special timing is modeled only for DMA1/2 sound FIFO requests",
+            }));
+        }
+        let state = &mut self.io.dma_mut().channels[channel];
+        state.source_cursor = state.sad;
+        state.destination_cursor = state.dad;
+        state.armed = true;
+        Some(Ok(()))
     }
 
     fn transfer(&mut self, channel: usize) -> Result<()> {
@@ -161,6 +187,89 @@ impl Bus {
         if control & REPEAT == 0 {
             self.io.dma_mut().clear_enable(channel);
         }
+        Ok(())
+    }
+
+    /// Deliver one explicit host-side request for Sound FIFO A or B. No timer,
+    /// sample or frame event invokes this automatically.
+    pub fn request_sound_fifo_dma(&mut self, fifo: SoundFifo) -> Result<()> {
+        let target = fifo.address();
+        let candidates: Vec<usize> = (1..=2)
+            .filter(|&channel| {
+                let state = &self.io.dma().channels[channel];
+                state.armed
+                    && state.control & ENABLE != 0
+                    && (state.control >> TIMING_SHIFT) & 0x3 == SPECIAL_TIMING
+            })
+            .collect();
+        let matching: Vec<usize> = candidates
+            .iter()
+            .copied()
+            .filter(|&channel| self.io.dma().channels[channel].destination_cursor == target)
+            .collect();
+        if matching.len() > 1 {
+            return Err(Error::UnsupportedDma {
+                detail: "multiple sound-timed DMA channels target the same FIFO",
+            });
+        }
+        let selected = matching.first().copied();
+        let Some(channel) = selected else {
+            // A channel aimed at the other valid FIFO is unrelated to this
+            // event. A malformed destination is rejected rather than causing
+            // a read from an arbitrary address such as zero.
+            if candidates.iter().any(|&channel| {
+                let destination = self.io.dma().channels[channel].destination_cursor;
+                destination != SoundFifo::A.address() && destination != SoundFifo::B.address()
+            }) {
+                return Err(Error::UnsupportedDma {
+                    detail: "sound-timed DMA destination is not a sound FIFO",
+                });
+            }
+            return Ok(());
+        };
+
+        let state = self.io.dma().channels[channel];
+        if state.control & REPEAT_BIT == 0 {
+            return Err(Error::UnsupportedDma {
+                detail: "sound FIFO DMA requires repeat mode",
+            });
+        }
+        if state.control & SOURCE_CONTROL != 0 {
+            return Err(Error::UnsupportedDma {
+                detail: "sound FIFO DMA requires an incrementing source",
+            });
+        }
+        if state.control & DEST_CONTROL != 2 << 5 {
+            return Err(Error::UnsupportedDma {
+                detail: "sound FIFO DMA requires a fixed destination",
+            });
+        }
+        let available = self.sound_fifo_available(fifo);
+        if available < FIFO_BURST_BYTES {
+            return Err(Error::SoundFifoFull {
+                addr: target,
+                needed: FIFO_BURST_BYTES,
+                available,
+            });
+        }
+        let source = state.source_cursor;
+        if !Self::is_work_ram_range(source, FIFO_BURST_BYTES) {
+            return Err(Error::UnsupportedDma {
+                detail: "sound FIFO source must be a 16-byte EWRAM/IWRAM range",
+            });
+        }
+
+        // Read the complete burst before mutating the FIFO so a source error
+        // cannot leave a partial burst queued. Count and width are ignored in
+        // this special mode; the documented burst is always four words.
+        let mut words = [0_u32; FIFO_BURST_WORDS as usize];
+        for (index, word) in words.iter_mut().enumerate() {
+            *word = self.read32(source + index as u32 * 4)?;
+        }
+        for word in words {
+            self.sound_write_fifo_word(fifo, word)?;
+        }
+        self.io.dma_mut().channels[channel].source_cursor = source + FIFO_BURST_BYTES as u32;
         Ok(())
     }
 }

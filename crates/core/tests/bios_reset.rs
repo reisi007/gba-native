@@ -5,8 +5,9 @@
 
 use gba_native_core::bios;
 use gba_native_core::bus::{
-    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
-    IWRAM_LEN, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
+    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, FIFO_A_ADDR,
+    FIFO_B_ADDR, IWRAM_BASE, IWRAM_LEN, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, SoundFifo,
+    VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
@@ -171,6 +172,7 @@ fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
     bus.write16(BG0HOFS_ADDR, 0x0102).expect("bg0hofs");
     bus.write16(BG0VOFS_ADDR, 0x0203).expect("bg0vofs");
     bus.write16(0x0400_0084, 0x1234).expect("sound register");
+    bus.write32(FIFO_A_ADDR, 0x0403_0201).expect("Sound A FIFO");
     cpu.set_reg(0, 0xA0); // groups 5 and 7; sound group 6 is not selected.
 
     bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 5 and 7");
@@ -182,6 +184,9 @@ fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
     expected
         .write16(0x0400_0084, 0x1234)
         .expect("expected sound register");
+    expected
+        .write32(FIFO_A_ADDR, 0x0403_0201)
+        .expect("expected Sound A FIFO");
     expected
         .write16(DISPCNT_ADDR, 0x0080)
         .expect("expected dispcnt");
@@ -203,7 +208,9 @@ fn register_ram_reset_group_six_applies_known_sound_effects_only() {
     bus.write16(0x0400_0088, 0xABCD).expect("sound bias");
     bus.write16(0x0400_0090, 0x3456).expect("wave RAM");
     bus.write32(0x0400_00A0, 0xDEAD_BEEF)
-        .expect("unresolved FIFO state");
+        .expect("Sound A FIFO state");
+    bus.write32(FIFO_B_ADDR, 0xCAFE_BABE)
+        .expect("Sound B FIFO state");
     bus.write16(0x0400_0102, 0x5678).expect("timer register");
     cpu.set_reg(0, 0x40);
 
@@ -223,15 +230,14 @@ fn register_ram_reset_group_six_applies_known_sound_effects_only() {
         .write16(0x0400_0088, 0x03CD)
         .expect("expected retained sound bias");
     expected
-        .write32(0x0400_00A0, 0xDEAD_BEEF)
-        .expect("expected unresolved FIFO state");
-    expected
         .write16(0x0400_0102, 0x5678)
         .expect("expected timer register");
     expected
         .write16(DISPCNT_ADDR, 0x0080)
         .expect("expected forced blank");
     assert_eq!(bus.state_digest(), expected.state_digest());
+    assert_eq!(bus.sound_fifo_len(SoundFifo::A), 0);
+    assert_eq!(bus.sound_fifo_len(SoundFifo::B), 0);
 }
 
 #[test]

@@ -184,8 +184,9 @@ Implemented regions and widths:
   `KEYINPUT` is read-only: a write is accepted with no effect. This keeps the
   set of silently-dropped addresses small, inspectable and out of the digest.
   Mutable display-register and dynamic KEYINPUT state are included in
-  `Bus::state_digest`. Sound and timer blocks are storage-only; there is no
-  serial or save-register state, and no BG affine parameter state.
+  `Bus::state_digest`. Sound registers remain storage-only apart from bounded
+  Sound A/B FIFO queues; timer registers are storage-only. There is no serial or
+  save-register state, and no BG affine parameter state.
 
 ### DMA channels
 
@@ -195,14 +196,31 @@ keep their written values, matching the documented hardware note that the
 transfer uses internal pointers; a count of zero means the channel maximum
 (`0x4000`, or `0x10000` for DMA3). Destination and source control support
 increment, decrement and fixed addressing; source control 3 is rejected because
-the documented encoding prohibits it. The channel transfers on the 0->1 edge of
-the enable bit and clears that bit after a non-repeating transfer.
+the documented encoding prohibits it. Immediate-timing transfers run on the
+0->1 enable edge and clear enable after a non-repeating transfer. VBlank/HBlank
+channels remain armed; this model provides no corresponding event.
 
-**Stated limitations.** This model has no cycle, scanline, HBlank or VBlank
-event, so a transfer runs once at the enable edge regardless of the start-timing
-field, and a repeating channel stays enabled without being re-armed. Those are
-recorded as limitations, not as emulated behaviour. There is no Game Pak DRQ,
-video-capture or sound-FIFO timing mode, and no DMA-driven IRQ.
+For DMA1/2, Special timing is modeled only as an explicit Sound FIFO request:
+`Bus::request_sound_fifo_dma(SoundFifo::A|B)` selects an enabled channel by its
+latched DAD address, without assuming a fixed DMA1/A or DMA2/B pairing. The
+supported shape requires repeat, incrementing source and fixed FIFO destination;
+the source must be a 16-byte range in EWRAM or IWRAM. The destination is captured
+on the enable edge, so later writes to the visible DAD latch do not redirect an
+armed transfer. A request reads four 32-bit words into the selected 32-byte
+FIFO, advances only the internal source cursor by 16 bytes while keeping the
+FIFO destination fixed, and does not itself rewrite visible SAD, DAD or CNT_L.
+Special-mode count and width are ignored. Unsupported configurations fail
+before source access;
+DMA0 Special timing and DMA3 video capture are unsupported rather than treated
+as immediate transfers.
+
+**Stated limitations.** The two 32-byte FIFO queues accept 32-bit writes and
+support explicit host consumption of one signed sample. `SOUNDCNT_H` FIFO reset
+bits clear their corresponding queues; RegisterRamReset group 6 clears both and
+group 7 preserves them. No sample is consumed automatically and no DMA request
+is generated from the documented 16-byte refill threshold, a timer, a frame or
+audio output. There is no DMA arbitration, scanline/cycle timing, automatic
+VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
   and unmapped addresses are errors.
 - CPU data-transfer rules actually implemented and tested:

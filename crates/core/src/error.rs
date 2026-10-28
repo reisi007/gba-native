@@ -51,6 +51,11 @@ pub enum Error {
     UnsupportedDma {
         detail: &'static str,
     },
+    SoundFifoFull {
+        addr: u32,
+        needed: usize,
+        available: usize,
+    },
     /// Bounded policy for block/stack transfers: the low bits of the base would
     /// be ignored by hardware, but the documented writeback source is not
     /// established, so no access or writeback is performed.
@@ -157,6 +162,14 @@ impl fmt::Display for Error {
             Error::UnsupportedDma { detail } => {
                 write!(f, "unsupported DMA transfer: {detail}")
             }
+            Error::SoundFifoFull {
+                addr,
+                needed,
+                available,
+            } => write!(
+                f,
+                "sound FIFO at 0x{addr:08X} needs {needed} bytes but has {available} available"
+            ),
             Error::UnalignedBlockBase { addr, thumb } => write!(
                 f,
                 "unaligned {} block-transfer base 0x{addr:08X}; this prototype rejects it before any access",

@@ -1,7 +1,8 @@
 //! Deliberately small memory bus.
 //!
 //! Implements mirrored EWRAM/IWRAM, palette, VRAM, OAM, three ROM windows,
-//! selected I/O register blocks, DMA, and a host-driven frame/IRQ model.
+//! selected I/O register blocks, bounded DMA/Sound FIFO behavior, and a
+//! host-driven frame/IRQ model.
 //! Unmodelled I/O reads and open-bus behavior remain explicit errors; unused
 //! I/O writes are ignored and recorded. This is not a cycle-accurate bus.
 
@@ -17,6 +18,7 @@ pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
 };
+pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};

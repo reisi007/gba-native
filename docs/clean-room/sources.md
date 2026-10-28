@@ -42,7 +42,13 @@ Relevant anchors actually consulted for this milestone:
   `#40000bah---dma0cnt_h---dma-0-control-rw`: DMA channel registers, the
   zero-means-maximum count, the addressing-control fields, the documented
   prohibition on source control 3, and the note that SAD/DAD/CNT_L keep their
-  written values while the transfer uses internal pointers.
+  written values while the transfer uses internal pointers; channel-specific
+  start timings and the DMA1/2 sound versus DMA3 video-capture distinction.
+- `#gba-sound-channel-a-and-b-dma-sound`: FIFO A/B addresses, 32-byte capacity,
+  the documented 16-byte refill threshold and four-word sound-DMA burst. The
+  reference does not establish a fixed DMA1/A and DMA2/B pairing.
+- `#4000082h---soundcnt-h---dma-sound-control-mixing`: Direct Sound control and
+  the FIFO A/B reset bits.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC

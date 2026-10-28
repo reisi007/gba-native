@@ -179,7 +179,8 @@ Only r0 changes.
   other registers except SIO and sound. All three are accepted. Group 5 has no
   modeled serial state. Group 6 applies only the sufficiently specified sound
   effects: `SOUNDCNT_L := 0`, `SOUNDCNT_H := 0x880E`, `SOUNDCNT_X := 0`, clears
-  the upper SOUNDBIAS bits while preserving the low 10, and clears wave RAM.
+  the upper SOUNDBIAS bits while preserving the low 10, clears wave RAM, and
+  empties both modeled Sound FIFOs.
   Other sound bytes remain unchanged because their end values are ambiguous.
   Group 7 clears exactly the modeled "other I/O" set: BG0 registers, WAITCNT,
   DMA, DISPSTAT/IE/IF/IME and timer registers. `DISPCNT` is deliberately outside

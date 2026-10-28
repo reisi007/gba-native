@@ -60,12 +60,12 @@ lockfiles.
   including Pixels/Winit/WGPU and wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-  --locked`. It pins every target: 178 core integration tests across 27 files,
-  32 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
-  library unit tests, 26 root integration tests across five files and 5 root
-  binary unit tests, exactly 297 selected package tests. The three workspace
-  compatibility contracts and frontend-tree failure contract add four tests to
-  the full `cargo test -- --list` inventory (301 total). The web clean-checkout
+   --locked`. It pins every target: 193 core integration tests across 28 files,
+   40 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
+   library unit tests, 31 root integration tests across six files and 5 root
+   binary unit tests, exactly 325 selected package tests. The workspace
+   compatibility contracts and frontend-tree failure contract add four tests to
+   the full `cargo test -- --list` inventory (329 total). The web clean-checkout
   bootstrap test is included in the root integration targets; no prior core,
   AOT or root tests are removed. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
@@ -146,10 +146,15 @@ lockfiles.
   `crates/core/tests/psr_banking.rs`.
 - `crates/core/src/bus/dma.rs`: word and halfword copies advance by one data
   unit, a fixed source fills the destination, CNT_L keeps its written value,
-  and a repeating channel stays enabled.
+  and a repeating channel stays enabled. `crates/core/tests/sound_dma.rs` checks
+  special-mode arming without an immediate read, explicit four-word FIFO bursts,
+  internal source-cursor advancement with visible latches preserved, invalid
+  configurations before source access, bounded FIFO wrap/capacity, reset bits,
+  and group-7 DMA disarming.
 - `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the frame boundary
-  raises VBlank/IF, IRQ gating requires IME/IE/pending, and sound/timer
-  registers retain their storage-only behavior.
+  raises VBlank/IF, IRQ gating requires IME/IE/pending, and timer registers retain
+  storage-only behavior. Sound FIFO state is bounded and host-driven; no audio,
+  timer-triggered sample consumption or automatic FIFO DMA is generated.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
@@ -468,12 +473,26 @@ macOS ARM64 and WASM module attempts stopped at
 `RegisterRamReset flags 0x000000FF request unsupported reset bits 5..31`; that
 historical failure was superseded when groups 5..7 were modelled.
 
-A later bounded native run advances past the reset and initialization accesses,
-but still stops with `BIOS access at 0x00000000: direct-entry mode has no BIOS`.
-This is not a boot or gameplay result, and the error alone does not distinguish
-an HLE source preflight from a guest data read. A modified in-memory copy was
-rejected as `ROM mismatch` by the WASM binding before guest execution. No
-filename, digest or ROM bytes are recorded here.
+A pre-Sound-DMA bounded native run advanced past reset and initialization but
+stopped with `BIOS access at 0x00000000: direct-entry mode has no BIOS`. That
+observation was superseded by the later DMA2 change below. A modified in-memory
+copy was rejected as `ROM mismatch` by the WASM binding before guest execution.
+No filename, digest or ROM bytes are recorded here.
+
+After bounded DMA1/2 Sound FIFO support was added, the same read-only native
+30,000,000-instruction-budget CLI attempt advanced past the former DMA2
+zero-address failure and stopped at `unsupported 8-bit I/O read at 0x04000006`.
+This records only progress past the earlier failure; no recognizable screen,
+boot, gameplay, automatic audio request or compatibility result was established.
+
+For the bounded DMA/FIFO change, `./scripts/full.sh` passed: fmt, clippy, debug
+and release tests, demo, native AOT proof (`native_vs_reference=match`) and the
+Ratchet slow tier (`COHERENT — 1 of 1 gates passed`). The pinned workspace
+inventory is 325 selected package tests and 329 total tests. A fresh OpenAI
+GPT-6 Luna 6 review approved the final code after confirming enable-time DAD
+latching; its one initial medium finding was fixed and rechecked. These results
+establish only the listed implementation subset and synthetic proof, not retail
+compatibility or hardware timing.
 
 The macOS x86_64 artifact also built. Windows MSVC did not link because
 `link.exe` was unavailable, and Linux x86_64 did not link because a Linux linker
@@ -676,8 +695,9 @@ not initial HEAD sizes, and are not used as historical evidence.
 No hardware conformance ROM suite has been run. No retail game is supported or
 known playable. No BIOS boots; only the bounded synthetic SWI entry/return path
 is tested. Other exception entry/return, interrupt delivery, save persistence,
-audio, input interaction, DMA, cycle timing, other BG modes/layers, OBJ/sprite
-rendering or a playable frontend is verified. The static Mode 0 BG0 snapshot is
+audio output, input interaction, DMA arbitration and automatic event timing,
+cycle timing, other BG modes/layers, OBJ/sprite rendering or a playable frontend
+is verified. The static Mode 0 BG0 snapshot is
 only a synthetic, documentation-driven capability slice; it is not evidence
 that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
 optional synthetic `apps/desktop` frontend presents
