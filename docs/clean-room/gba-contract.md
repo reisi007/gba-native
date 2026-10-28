@@ -660,6 +660,17 @@ by the default workspace; neither is a core CLI output format. See
   against the process working directory; absolute paths are accepted only when
   they resolve below that same `output/` root. The location is validated before
   any root or parent directory is created.
+- `run <rom.gba> [--budget N] [--out output/<new-directory>]` retains its current
+  bounded execution and creates no files when `--out` is omitted. When requested,
+  it creates the fresh directory only after execution and `display::snapshot`
+  both succeed, then writes `screen.ppm` and `report.txt` through the safe output
+  helpers. The report identifies the static snapshot, ROM/image hashes, requested
+  and used instruction budgets, final CPU state, DISPCNT/mode and backdrop, and
+  the `instruction_budget` stop reason. A run or snapshot error creates no run
+  output directory. This is a post-budget bitmap snapshot, not a frame, boot,
+  hardware-timed render, gameplay or compatibility claim; default/backdrop and
+  forced-blank snapshots are not rejected merely because the display did not
+  change.
 - Existing components below `output/` must be real directories. A symlinked
   directory, a symlinked or dangling final component, and a symlinked `output/`
   root are refused without following the link. New directories are created one

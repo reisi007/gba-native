@@ -14,6 +14,7 @@ use gba_native::render::{self, Backend};
 
 mod aot_build;
 mod output;
+mod run_output;
 
 use output::{create_fresh_directory, create_unique_workspace, write_safely};
 
@@ -21,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -141,6 +142,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
         .next()
         .ok_or_else(|| Error::Args("run needs a ROM path".to_string()))?;
     let mut budget = 1_000_000u64;
+    let mut snapshot_output = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--budget" => {
@@ -151,6 +153,12 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
                     .parse()
                     .map_err(|_| Error::Args(format!("invalid budget {value}")))?;
             }
+            "--out" => {
+                snapshot_output =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        Error::Args("--out needs a directory".to_string())
+                    })?));
+            }
             _ => return Err(Error::Args(format!("unknown run option {argument}"))),
         }
     }
@@ -159,12 +167,29 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     cpu.initialize_bios_stacks();
     let mut bus = Bus::new(cart);
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
+    let output = if let Some(path) = snapshot_output {
+        let image = display::snapshot(&bus)?;
+        Some(run_output::write_snapshot(
+            &path,
+            bus.cart(),
+            &cpu,
+            &bus,
+            budget,
+            used,
+            &image,
+        )?)
+    } else {
+        None
+    };
     println!("status=bounded");
     println!("instructions={used}");
     println!("pc=0x{:08X}", cpu.pc());
     println!("cpsr=0x{:08X}", cpu.cpsr());
     println!("thumb={}", if cpu.thumb() { 1 } else { 0 });
     println!("note=stopped only by the instruction budget; no boot or compatibility claim");
+    if let Some(output) = output {
+        println!("snapshot_dir={}", output.display());
+    }
     Ok(())
 }
 
