@@ -513,12 +513,25 @@ Afterwards `./scripts/full.sh` passed for this task and ended with
 debug and release test suites, the demo, the synthetic native AOT proof
 (`native_vs_reference=match`) and the Ratchet slow tier
 (`COHERENT — 1 of 1 gates passed`). The pinned workspace inventory is 326
-selected package tests and 330 total tests. Independent Luna review round 1
-raised two medium documentation findings about this log and about the byte-read
-wording; this follow-up corrects both, and a second review round is not recorded
-here. These results establish only the listed implementation subset and
-synthetic proof; they are not a retail compatibility, hardware timing, boot,
-rendering or playable-gameplay result. No push or CI run occurred.
+selected package tests and 330 total tests. Independent GPT-6 Luna review rounds
+1 and 2 found two medium documentation findings and one low test-comment finding;
+all were corrected, and round 3 approved. These results establish only the listed
+implementation subset and synthetic proof; they are not a retail compatibility,
+hardware timing, boot, rendering or playable-gameplay result. The pushed commit
+`a0db5fc` passed main CI, the optional Frontend matrix and the Web foundation
+workflow.
+
+After that push, the same 30,000,000-instruction-budget native run was retried
+read-only without `--out` and stopped with
+`BIOS access at 0x0000000A: direct-entry mode has no BIOS` (exit 1), before
+reaching its budget. This records only a BIOS-region access at that address; the
+CLI does not distinguish an instruction fetch from a data read. BIOS reads and
+code fetch remain unsupported by the direct-entry contract, and no BIOS bytes
+or address-specific substitute were introduced. The earlier VCOUNT byte-read
+error was not the terminal stop on this attempt. No snapshot was requested or
+written; the ROM remained external and unmodified, and no filename, digest or
+ROM bytes are recorded. This does not establish BIOS boot, gameplay, rendering,
+frame/scanline timing or compatibility.
 
 For the bounded DMA/FIFO change, `./scripts/full.sh` passed: fmt, clippy, debug
 and release tests, demo, native AOT proof (`native_vs_reference=match`) and the

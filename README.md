@@ -133,9 +133,9 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or
   persistence. Automated tests use synthetic fixtures; local supplied-ROM
   attempts and their outcomes are recorded in the verification log. The latest
-  bounded run advances past the earlier DMA2 zero-address failure, then stops on
-  an unsupported 8-bit I/O read; this is not a compatibility, boot or playability
-  claim.
+  bounded native run stops at an unsupported BIOS-region access at
+  `0x0000000A` (`direct-entry mode has no BIOS`); BIOS access remains outside the
+  implemented subset. This is not a compatibility, boot or playability claim.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
   paths are resolved into that root, symlinks below it are refused, and the
   location is validated before any directory is created. An existing explicit
