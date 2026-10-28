@@ -22,8 +22,8 @@ not a roadmap promise and not a retail-game compatibility statement.
   PSR transfers and MSR-driven register banking are implemented for this
   subset. Typed ARM/Thumb SWI reaches the six documented BIOS HLE services via
   explicit SVC entry, a saved handler frame, SYSTEM-mode service execution and
-  architectural SWI return. Other exception classes, multiply/swap and BIOS
-  boot remain absent; Thumb `MUL` remains explicit.
+  architectural SWI return. Other exception classes, the long and halfword
+  multiply group, swap and BIOS boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
   `apps/desktop` and `apps/web` packages present the same static synthetic
   snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
@@ -214,8 +214,9 @@ Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
 unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
 sixteenth condition. A false condition is a no-op that still consumes one
 instruction and advances PC, including for a PSR transfer whose executed form
-would be restricted. Multiply, swap, coprocessor, ARMv5 `BLX`/`BXJ` and other
-newer encodings are rejected with address/state/raw word and are never NOPs.
+would be restricted. Multiply-long, halfword multiply, swap, coprocessor, ARMv5
+`BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
+and are never NOPs.
 Typed SWI is handled only by the bounded six-service path above; unsupported
 service numbers and SVC-origin nesting are explicit errors.
 
@@ -228,7 +229,13 @@ service numbers and SVC-origin nesting are explicit errors.
 | Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base, unaligned base (bounded runtime policy) |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
 | Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six-service HLE dispatch and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
-| Everything else | none | multiply/swap, coprocessor, unconditional/newer space |
+| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product, documented `Rd`/`Rm` and R15 restrictions | `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, the halfword multiplies, `SWP` |
+| Everything else | none | multiply-long/halfword multiply, swap, coprocessor, unconditional/newer space |
+
+`MUL`/`MLA` set N/Z from the result and leave V unaffected. GBATEK documents C
+as "destroyed" on ARMv4, which has no defined value; this prototype preserves
+the previous C bit as a stated **Design** choice, so no test may depend on C
+after a multiply.
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -373,7 +380,7 @@ GBATEK notes that this case is not officially defined as predictable.
 | Move shifted | `LSL`/`LSR`/`ASR` immediate, flags set | — |
 | Add/subtract | `ADD`/`SUB` register and 3-bit immediate, flags set | — |
 | Immediate | `MOV`, `CMP`, `ADD`, `SUB` with 8-bit immediate | — |
-| ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`; shift amount from register low byte | `MUL` remains explicit |
+| ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`, `MUL`; shift amount from register low byte | — |
 | High register | documented high-register `ADD`, `CMP`, `MOV` (at least one of `Rd`/`Rs` high) and `BX` including PC; low/low `MOV`/`CMP` as an explicit **Design** extension | low/low `ADD` (documented reserved encoding), ARMv5 `BLX` register |
 | Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm`; SP-relative word `LDR`/`STR` | — |
 | PC-relative | `LDR` literal | — |

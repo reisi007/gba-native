@@ -35,6 +35,9 @@ Relevant anchors actually consulted for this milestone:
 - `#arm-opcodes-branch-and-branch-with-link-b-bl-bx-blx-swi-bkpt`.
 - `#arm-opcodes-data-processing-alu` and `#second-operand-op2`: all sixteen
   opcodes, shift kinds, zero-shift specials and CPSR flag rules.
+- `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`: MUL/MLA encoding,
+  the `Rd`/`Rm` and R15 restrictions, low-32-bit result and the documented
+  N/Z/C/V rule that C is "destroyed" on ARMv4.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC

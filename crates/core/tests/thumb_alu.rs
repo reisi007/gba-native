@@ -122,13 +122,8 @@ fn nz(result: u32) -> (bool, bool) {
 }
 
 #[test]
-fn all_fifteen_register_alu_forms_match_documented_semantics() {
+fn all_sixteen_register_alu_forms_match_documented_semantics() {
     for kind in 0..=15u16 {
-        if kind == 13 {
-            let raw = alu(kind, 1, 0);
-            assert!(decode_thumb(0, raw as u32).is_err(), "MUL stays explicit");
-            continue;
-        }
         for carry_in in [false, true] {
             let rd_value = 0x8000_0005;
             let rs_value = 0x8000_0003;
@@ -183,6 +178,7 @@ fn all_fifteen_register_alu_forms_match_documented_semantics() {
                     (r, (n, z, c, v))
                 }
                 12 => logical(rd_value | rs_value),
+                13 => logical(rd_value.wrapping_mul(rs_value)),
                 14 => logical(rd_value & !rs_value),
                 15 => logical(!rs_value),
                 _ => unreachable!(),

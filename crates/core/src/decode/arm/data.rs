@@ -9,12 +9,7 @@ pub(super) fn decode_arm_data_or_extra(addr: u32, raw: u32, cond: Cond) -> Decod
     let immediate = (raw >> 25) & 1;
     let low_nibble = (raw >> 4) & 0xF;
     if immediate == 0 && low_nibble == 0b1001 {
-        return Err(unsupported(
-            addr,
-            false,
-            raw,
-            "ARM multiply/swap encodings are not implemented",
-        ));
+        return decode_arm_multiply(addr, raw, cond);
     }
     // Halfword/signed transfers keep bit 7 set in the 1SH1 pattern, while valid
     // MRS/MSR register encodings have bits 11-4 zero. Classifying these before
@@ -28,6 +23,66 @@ pub(super) fn decode_arm_data_or_extra(addr: u32, raw: u32, cond: Cond) -> Decod
         return decode_arm_psr(addr, raw, cond);
     }
     decode_arm_data_processing(addr, raw, cond)
+}
+
+/// ARM `MUL{cond}{S}` (bits 24-21 = 0000) and `MLA{cond}{S}` (0001). Every
+/// other opcode in this encoding space (UMAAL, the long multiplies and the
+/// halfword multiplies) stays an explicit unsupported encoding. Documented
+/// restrictions from GBATEK `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`:
+/// R15 may not appear, `Rd` may not equal `Rm`, and MUL's unused `Rn` field
+/// must be zero.
+fn decode_arm_multiply(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
+    let opcode = (raw >> 21) & 0xF;
+    let set_flags = (raw >> 20) & 1 == 1;
+    let rd = ((raw >> 16) & 0xF) as u8;
+    let rn = ((raw >> 12) & 0xF) as u8;
+    let rs = ((raw >> 8) & 0xF) as u8;
+    let rm = (raw & 0xF) as u8;
+    if !matches!(opcode, 0b0000 | 0b0001) {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM multiply/swap, multiply-long or halfword-multiply encodings are not implemented",
+        ));
+    }
+    if rd == 15 || rn == 15 || rs == 15 || rm == 15 {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM multiply with R15 as an operand is not a valid encoding",
+        ));
+    }
+    if opcode == 0b0000 && rn != 0 {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM MUL has a nonzero unused Rn field",
+        ));
+    }
+    if rd == rm {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM multiply with Rd=Rm is unpredictable",
+        ));
+    }
+    Ok(IrInstr {
+        addr,
+        thumb: false,
+        raw,
+        cond,
+        op: Op::Mul {
+            rd,
+            rm,
+            rs,
+            accumulate: if opcode == 0b0001 { Some(rn) } else { None },
+            set_flags,
+        },
+    })
 }
 
 fn shift_kind(bits: u32) -> ShiftKind {

@@ -86,6 +86,23 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             rhs,
             set_flags,
         } => emit_alu(&mut out, site, opcode, rd, rn, rhs, set_flags),
+        Op::Mul {
+            rd,
+            rm,
+            rs,
+            accumulate,
+            set_flags,
+        } => {
+            let mut expression = format!("cpu.reg({rm}).wrapping_mul(cpu.reg({rs}))");
+            if let Some(rn) = accumulate {
+                expression = format!("({expression}).wrapping_add(cpu.reg({rn}))");
+            }
+            writeln!(out, "    let value = {expression};").unwrap();
+            write_result(&mut out, Some(rd), "value", site.thumb);
+            if set_flags {
+                writeln!(out, "    cpu.set_logic_flags(value, None);").unwrap();
+            }
+        }
         Op::BlHigh { lr } => {
             writeln!(out, "    cpu.set_reg(14, 0x{lr:08X}u32);").unwrap();
         }

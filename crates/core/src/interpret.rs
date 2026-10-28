@@ -132,6 +132,24 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
                 }
             }
         }
+        Op::Mul {
+            rd,
+            rm,
+            rs,
+            accumulate,
+            set_flags,
+        } => {
+            let mut value = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
+            if let Some(rn) = accumulate {
+                value = value.wrapping_add(cpu.reg(rn));
+            }
+            write_rd(cpu, instr, rd, value);
+            if set_flags {
+                // N/Z only: C is "destroyed" on ARMv4 (preserved here as a
+                // documented Design choice) and V is unaffected.
+                cpu.set_logic_flags(value, None);
+            }
+        }
         Op::B { target } => cpu.set_pc(target),
         Op::Bl { target } => {
             // ARM BL writes PC+4, which is the next instruction address.

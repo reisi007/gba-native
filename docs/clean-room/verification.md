@@ -122,10 +122,10 @@ lockfiles.
   register (low-byte amounts, 0/32/>32/256 cases), ADC/SBC/RSC carry ordering,
   logical V/C preservation, and explicit `S=1` PC rejection. See
   `crates/core/tests/arm_alu.rs`, `crates/core/tests/arm_shift.rs` and `crates/core/tests/arm_control.rs`.
-- Thumb move-shifted, the other fifteen register ALU opcodes, high-register
+- Thumb move-shifted, the other fifteen register ALU opcodes plus `MUL`, high-register
   ADD/CMP/MOV (low/low MOV/CMP only as the contract's **Design** extension),
   ADR/PC/SP adjustment, and both `BL` halves with an exact mid-pair budget
-  stop. MUL, low/low ADD and ARMv5 BLX stay explicit errors. See
+  stop. Low/low ADD and ARMv5 BLX stay explicit errors. See
   `crates/core/tests/thumb_alu.rs` and `crates/core/tests/thumb_control.rs`.
 - ARM7 odd-address LDRH rotation, STRH forced alignment, unaligned literal LDR
   rotation.
@@ -145,8 +145,8 @@ lockfiles.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
-- Rejected encodings (multiply/swap, block transfers, `S=1` Rd=PC,
-  malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb MUL/PUSH/BLX) report the raw
+- Rejected encodings (multiply-long/halfword multiply/swap, block transfers, `S=1` Rd=PC,
+  malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb PUSH/BLX) report the raw
   word/state and leave PC unchanged.
 - Unaligned/nonexecutable fetches fail explicitly.
 - Unknown backend names are preserved in `UnsupportedBackend` (`--backend foo`
@@ -234,7 +234,8 @@ expectations, not from the decoder/interpreter:
 - `crates/core/tests/arm_control.rs`: ARM PC+8/+12 operands, aligned S=0 PC writes,
   S=1 PC errors, B/BL targets and link register, conditional false LR
   preservation, BX state exchange and BX PC behavior.
-- `crates/core/tests/thumb_alu.rs`: all fifteen non-MUL register ALU forms, both shift
+- `crates/core/tests/thumb_alu.rs`: all sixteen register ALU forms including
+  `MUL`, both shift
   groups, low-byte register amounts, high-register flags/PC rules, ADR/SP
   bases, low/low MOV/CMP, and reserved/BLX errors.
 - `crates/core/tests/thumb_control.rs`: the two BL halves, negative high offset,
@@ -683,7 +684,7 @@ conformance remain unverified. No real GBA hardware
 measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 
-Thumb `MUL`, low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, `S=1` PC restore, and all
+Low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, `S=1` PC restore, and all
 load/store expansion beyond the listed literal/halfword forms remain explicitly
 unsupported. Low/low Thumb `MOV`/`CMP` are accepted only as the explicit
 **Design** extension described in the contract, not as documented-valid aliases.

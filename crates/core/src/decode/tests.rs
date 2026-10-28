@@ -89,7 +89,8 @@ fn arm_immediate_payload_is_never_reinterpreted_as_extra_transfer() {
 
 #[test]
 fn rejects_arm_multiply_and_block_space() {
-    assert!(decode_arm(0, 0xE000_0091).is_err());
+    // UMULL shares the low-nibble 1001b shape and stays unsupported.
+    assert!(decode_arm(0, 0xE080_0091).is_err());
     // A plain STMDB sp!,{lr} is now implemented; the still-unsupported S=1
     // user-bank form and an empty list stay explicit errors.
     assert!(matches!(

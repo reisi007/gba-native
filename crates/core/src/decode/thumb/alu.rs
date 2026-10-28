@@ -50,8 +50,8 @@ fn alu(opcode: AluOpcode, rd: Option<u8>, rn: u8, rhs: Src) -> Op {
     }
 }
 
-/// THUMB.4 register ALU operations. Every form sets flags as documented; MUL is
-/// deliberately still an explicit unsupported encoding.
+/// THUMB.4 register ALU operations. Every form sets flags as documented; MUL
+/// updates N/Z and preserves C/V.
 pub(super) fn decode_register_alu(addr: u32, raw: u32) -> DecodeResult {
     let kind = (raw >> 6) & 0xF;
     let rs = ((raw >> 3) & 0x7) as u8;
@@ -93,14 +93,13 @@ pub(super) fn decode_register_alu(addr: u32, raw: u32) -> DecodeResult {
         },
         0xB => alu(AluOpcode::Cmn, None, rd, Src::Reg(rs)),
         0xC => alu(AluOpcode::Orr, Some(rd), rd, Src::Reg(rs)),
-        0xD => {
-            return Err(unsupported(
-                addr,
-                true,
-                raw,
-                "Thumb MUL is not implemented; the other fifteen ALU opcodes are",
-            ));
-        }
+        0xD => Op::Mul {
+            rd,
+            rm: rd,
+            rs,
+            accumulate: None,
+            set_flags: true,
+        },
         0xE => alu(AluOpcode::Bic, Some(rd), rd, Src::Reg(rs)),
         0xF => alu(AluOpcode::Mvn, Some(rd), rd, Src::Reg(rs)),
         _ => unreachable!(),

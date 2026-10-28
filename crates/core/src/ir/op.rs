@@ -34,6 +34,19 @@ pub enum Op {
         rhs: Src,
         set_flags: bool,
     },
+    /// ARM `MUL`/`MLA` and Thumb `MUL`: `rd = rm * rs` plus the optional
+    /// `accumulate` register. Only the low 32 bits of the product are kept, so
+    /// signed and unsigned multiplication coincide. With `set_flags` the
+    /// documented N/Z flags follow the result; C is architecturally
+    /// unpredictable ("destroyed") on ARMv4 and V is unaffected, so this
+    /// prototype preserves the previous C bit as a stated Design choice.
+    Mul {
+        rd: u8,
+        rm: u8,
+        rs: u8,
+        accumulate: Option<u8>,
+        set_flags: bool,
+    },
     /// Conditional or unconditional direct branch. The target is already
     /// aligned and relative to the documented pipeline offset.
     B {
@@ -156,6 +169,7 @@ impl Op {
             Op::Pop { pc: true, .. } => true,
             Op::BlHigh { .. }
             | Op::Cmp { .. }
+            | Op::Mul { .. }
             | Op::LdrLiteral { .. }
             | Op::LdrHalf { .. }
             | Op::StrHalf { .. }
@@ -173,6 +187,7 @@ impl Op {
         match self {
             Op::Mov { rd, .. } | Op::Add { rd, .. } | Op::Sub { rd, .. } => rd == register,
             Op::Alu { rd, .. } => rd == Some(register),
+            Op::Mul { rd, .. } => rd == register,
             Op::BlHigh { .. } | Op::Bl { .. } => register == 14,
             Op::LdrLiteral { rd, .. } | Op::LdrHalf { rd, .. } | Op::Mrs { rd, .. } => {
                 rd == register

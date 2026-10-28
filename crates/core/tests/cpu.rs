@@ -207,13 +207,36 @@ fn thumb_immediate_arithmetic_and_conditional_branch() {
 }
 
 #[test]
+fn arm_and_thumb_multiply_keep_the_low_32_bits() {
+    // THUMB MUL r2,r3 after r2=7, r3=6.
+    let (mut cpu, mut bus) = thumb(&[0x2207, 0x2306, 0x435A]);
+    steps(&mut cpu, &mut bus, 3);
+    assert_eq!(cpu.reg(2), 42);
+
+    // 0x10001 * 0x10001 = 0x1_0002_0001, truncated to the low word.
+    let (mut cpu, mut bus) = arm(&[0xE000_0291]); // MUL r0,r1,r2
+    cpu.set_reg(1, 0x1_0001);
+    cpu.set_reg(2, 0x1_0001);
+    steps(&mut cpu, &mut bus, 1);
+    assert_eq!(cpu.reg(0), 0x0002_0001);
+
+    // MLA r0,r1,r2,r3 = r1*r2 + r3.
+    let (mut cpu, mut bus) = arm(&[0xE020_3291]);
+    cpu.set_reg(1, 10);
+    cpu.set_reg(2, 20);
+    cpu.set_reg(3, 5);
+    steps(&mut cpu, &mut bus, 1);
+    assert_eq!(cpu.reg(0), 205);
+}
+
+#[test]
 fn unsupported_encodings_are_rejected_without_state_progress() {
-    let (mut cpu, mut bus) = arm(&[0xE000_0091]); // MUL
+    let (mut cpu, mut bus) = arm(&[0xE080_0091]); // UMULL
     let error = interpret::step(&mut cpu, &mut bus).expect_err("multiply rejected");
     assert!(matches!(
         error,
         Error::UnsupportedInstruction {
-            raw: 0xE000_0091,
+            raw: 0xE080_0091,
             thumb: false,
             ..
         }
@@ -268,7 +291,7 @@ fn unsupported_encodings_are_rejected_without_state_progress() {
         })
     ));
 
-    let (mut cpu, mut bus) = thumb(&[0x4340]); // MUL remains explicitly unsupported
+    let (mut cpu, mut bus) = thumb(&[0x4780]); // Thumb BLX register (ARMv5)
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::UnsupportedInstruction { .. })

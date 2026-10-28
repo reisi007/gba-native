@@ -199,7 +199,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 308, "full workspace test inventory changed");
+    assert_eq!(total, 309, "full workspace test inventory changed");
 
     // Exact inventory retains prior families and includes the Mode 0 BG0 slice,
     // WASM-module tests, synthetic CLI run-snapshot regressions, and host-input
@@ -221,7 +221,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("bios_reset", 5),
         ("bus", 9),
         ("cartridge", 6),
-        ("cpu", 12),
+        ("cpu", 13),
         ("demo", 3),
         ("display", 5),
         ("display_mode0", 8),
@@ -274,7 +274,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 304, "selected package test inventory changed");
+    assert_eq!(baseline, 305, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.
