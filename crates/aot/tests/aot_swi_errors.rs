@@ -217,17 +217,6 @@ fn known_service_preconditions_fail_before_native_svc_framing() {
         "destination range at 0x04000000 is not writable memory",
         &expected,
     );
-
-    let reset = cart(&[0xE3A0_0020, 0xEF01_0000, 0xEAFF_FFFE], &[]);
-    expected = prepared_cpu();
-    expected.set_reg(0, 0x20);
-    expected.set_pc(ENTRY + 4);
-    assert_unchanged_native_error(
-        &reset,
-        2,
-        "request documented reset groups 5..7 that are not modeled",
-        &expected,
-    );
 }
 
 #[test]

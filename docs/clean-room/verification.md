@@ -174,9 +174,9 @@ are in `hle-services.md`.
   mutation. The table is not computed from the production rounding formula.
 - `crates/core/tests/bios_reset.rs` and `crates/core/tests/bios_dispatch.rs`: flags
   0..4 memory-reset regressions, IWRAM-tail preservation and unconditional
-  forced blank; documented-but-unmodeled flags 5..7 return
-  `UnsupportedResetFlags`, while each reserved bit 8..31 returns
-  `ReservedResetFlags`, all before mutation. Dispatch also checks explicit
+  forced blank; flags 5..7 are accepted and bit 7 restores the whole modelled
+  I/O set (compared by full bus digest against a fresh bus), while bits 8..31
+  select nothing and still force blank. Dispatch also checks explicit
   `UnsupportedService` results that mutate nothing.
 
 These tests use synthetic RAM/ROM fixtures only and require no user-supplied

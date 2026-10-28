@@ -160,29 +160,6 @@ fn run_and_snapshot_errors_create_no_output_directory() {
     let cwd = temp.path().join("cwd");
     std::fs::create_dir(&cwd).expect("create cwd");
 
-    // The documented HLE rejects unmodeled reset groups; run must not bypass it.
-    synthetic_rom(
-        &cwd.join("reset-error.gba"),
-        &[(0, 0xE3A0_00FF), (4, 0xEF01_0000)],
-    );
-    let reset = cli(
-        &cwd,
-        &[
-            "run",
-            "reset-error.gba",
-            "--budget",
-            "2",
-            "--out",
-            "output/reset-error",
-        ],
-    );
-    assert!(
-        !reset.status.success(),
-        "unsupported reset must remain an error"
-    );
-    assert!(stderr(&reset).contains("not modeled"), "{}", stderr(&reset));
-    assert!(!cwd.join("output/reset-error").exists());
-
     // This fixture completes its budget but sets unsupported display mode 1.
     synthetic_rom(
         &cwd.join("display-error.gba"),

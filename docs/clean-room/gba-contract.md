@@ -87,7 +87,7 @@ S1. Guest ARM/Thumb SWIs dispatch to those same services through
 
 | SWI | Service | Boundary |
 | --- | --- | --- |
-| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4 and always forces blank; documented groups 5..7 are unsupported without SIO/sound/other-I/O state, and reserved bits 8..31 are rejected |
+| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, resets the modelled group-7 I/O set, always forces blank, and ignores bits 8..31; groups 5 (SIO) and 6 (sound) model no state |
 | `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
 | `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
 | `08h` | `Sqrt` | Floor unsigned integer square root of r0 |

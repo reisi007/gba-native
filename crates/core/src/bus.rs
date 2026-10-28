@@ -356,6 +356,12 @@ impl Bus {
         Err(Error::NonExecutable { addr })
     }
 
+    /// SWI 01h group 7 over the *modelled* "other I/O" set. Groups 5 (SIO) and
+    /// 6 (sound) model no state at all, so their selected set is empty.
+    pub fn reset_group7_io(&mut self) {
+        self.io.reset_group7();
+    }
+
     pub fn state_digest(&self) -> [u8; 32] {
         let mut bytes = Vec::with_capacity(
             self.ewram.len()

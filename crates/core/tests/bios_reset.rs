@@ -3,15 +3,14 @@
 //! Fixtures are entirely synthetic RAM patterns. No ROM, BIOS image, save or
 //! external file is involved.
 
-use gba_native_core::bios::{self, BiosError};
+use gba_native_core::bios;
 use gba_native_core::bus::{
-    Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE, IWRAM_LEN, OAM_BASE, OAM_LEN,
-    PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
+    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
+    IWRAM_LEN, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
 use gba_native_core::display;
-use gba_native_core::error::Error;
 
 const IWRAM_TAIL: u32 = 0x0300_7E00;
 
@@ -71,18 +70,6 @@ fn assert_value16(bus: &Bus, base: u32, len: usize, value: u16) {
             base + offset as u32
         );
     }
-}
-
-fn assert_reset_error(cpu: &mut Cpu, bus: &mut Bus, flags: u32, error: BiosError) {
-    cpu.set_reg(0, flags);
-    let before = (cpu.state_digest(), bus.state_digest());
-    assert_eq!(
-        bios::call(bios::SERVICE_REGISTER_RAM_RESET, cpu, bus),
-        Err(Error::Bios(error))
-    );
-    assert_eq!((cpu.state_digest(), bus.state_digest()), before);
-    assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0010);
-    assert_eq!(bus.read32(EWRAM_BASE).expect("ewram"), 0xA5A5_A5A5);
 }
 
 #[test]
@@ -177,47 +164,49 @@ fn register_ram_reset_all_memory_flags_preserves_iwram_tail() {
 }
 
 #[test]
-fn register_ram_reset_documented_but_unmodeled_groups_are_pre_effect_errors() {
+fn register_ram_reset_groups_five_to_seven_reach_the_modelled_io_set() {
     let (mut cpu, mut bus) = fresh();
-    seed(&mut bus);
     bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
-    for bit in 5..=7 {
-        let flags = 1u32 << bit;
-        assert_reset_error(
-            &mut cpu,
-            &mut bus,
-            flags,
-            BiosError::UnsupportedResetFlags { flags },
-        );
-    }
-    let flags = 0xFF;
-    assert_reset_error(
-        &mut cpu,
-        &mut bus,
-        flags,
-        BiosError::UnsupportedResetFlags { flags },
-    );
+    bus.write16(BG0CNT_ADDR, 0x1234).expect("bg0cnt");
+    bus.write16(BG0HOFS_ADDR, 0x0102).expect("bg0hofs");
+    bus.write16(BG0VOFS_ADDR, 0x0203).expect("bg0vofs");
+    cpu.set_reg(0, 0xE0); // groups 5..7 only: no memory group selected.
+
+    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 5..7");
+
+    // Group 7 covers every modelled "other I/O" register; groups 5 and 6 model
+    // no SIO or sound state, so their selected set is empty. BG0HOFS/BG0VOFS are
+    // write-only on this bus, so the whole modelled state is compared against a
+    // fresh bus that only carries the unconditional forced blank.
+    let (_, mut expected) = fresh();
+    expected
+        .write16(DISPCNT_ADDR, 0x0080)
+        .expect("expected dispcnt");
+    assert_eq!(bus.state_digest(), expected.state_digest());
+    // DISPCNT is not part of group 7; only the unconditional forced blank shows.
+    assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0080);
 }
 
 #[test]
-fn register_ram_reset_reserved_bits_are_pre_effect_errors() {
+fn register_ram_reset_all_documented_groups_are_accepted() {
     let (mut cpu, mut bus) = fresh();
     seed(&mut bus);
+    cpu.set_reg(0, 0xFF);
+    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 0xFF");
+    assert_zero32(&bus, EWRAM_BASE, EWRAM_LEN);
+    assert_zero16(&bus, PALETTE_BASE, PALETTE_LEN);
+    assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0080);
+}
+
+#[test]
+fn register_ram_reset_ignores_bits_above_the_documented_byte() {
+    // The documented service examines only bits 0..7; higher bits are ignored
+    // rather than rejected, so they select nothing and still force blank.
+    let (mut cpu, mut bus) = fresh();
+    bus.write32(EWRAM_BASE, 0xDEAD_BEEF).expect("seed");
     bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
-    for bit in 8..32 {
-        let flags = 1u32 << bit;
-        assert_reset_error(
-            &mut cpu,
-            &mut bus,
-            flags,
-            BiosError::ReservedResetFlags { flags },
-        );
-    }
-    let flags = u32::MAX;
-    assert_reset_error(
-        &mut cpu,
-        &mut bus,
-        flags,
-        BiosError::ReservedResetFlags { flags },
-    );
+    cpu.set_reg(0, 0x0000_0100);
+    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset bit 8");
+    assert_eq!(bus.read32(EWRAM_BASE).expect("ewram"), 0xDEAD_BEEF);
+    assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0080);
 }

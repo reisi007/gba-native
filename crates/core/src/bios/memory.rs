@@ -24,15 +24,12 @@ const WORD_BIT: u32 = 1 << 26;
 const CPU_SET_MASK: u32 = 0x051F_FFFF;
 /// CpuFastSet: count bits 0..20, fill bit 24; bit 26 is reserved here.
 const CPU_FAST_SET_MASK: u32 = 0x011F_FFFF;
-const RESET_UNMODELED_GROUPS: u32 = 0xE0;
-const RESET_DOCUMENTED_MASK: u32 = 0xFF;
-const RESET_RESERVED_MASK: u32 = !RESET_DOCUMENTED_MASK;
 const IWRAM_PRESERVED_LEN: usize = 512;
 const DISPCNT_FORCED_BLANK: u16 = 0x0080;
 
 pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
     match service {
-        super::SERVICE_REGISTER_RAM_RESET => validate_reset_flags(cpu.reg(0)),
+        super::SERVICE_REGISTER_RAM_RESET => Ok(()),
         super::SERVICE_CPU_SET => validate_cpu_set(cpu, bus),
         super::SERVICE_CPU_FAST_SET => validate_cpu_fast_set(cpu, bus),
         _ => unreachable!("memory validator only receives memory services"),
@@ -149,10 +146,16 @@ fn validate_cpu_fast_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
 }
 
 /// SWI 01h `RegisterRamReset`: clear the selected memory regions, preserve the
-/// top 512 bytes of IWRAM, and always force blank via DISPCNT=0080h.
+/// top 512 bytes of IWRAM, reset the modelled I/O groups and always force blank
+/// via DISPCNT=0080h.
+///
+/// Groups 5 (SIO) and 6 (sound) have **no modelled state** in this bus, so their
+/// selected set is empty by construction rather than by omission. Group 7 resets
+/// exactly the modelled "other I/O" registers. Bits 8..31 carry no documented
+/// meaning and are ignored, matching the documented BIOS behaviour instead of
+/// rejecting the call.
 pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let flags = cpu.reg(0);
-    validate_reset_flags(flags)?;
     if flags & 0x01 != 0 {
         fill_words(bus, EWRAM_BASE, EWRAM_LEN, 0)?;
     }
@@ -171,21 +174,11 @@ pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         // (OBJ enable) and the OAM attribute state are separate.
         fill_halfwords(bus, OAM_BASE, OAM_LEN)?;
     }
+    if flags & 0x80 != 0 {
+        bus.reset_group7_io();
+    }
     // Always forced blank, even with flags==0, per the documented service.
     bus.write16(DISPCNT_ADDR, DISPCNT_FORCED_BLANK)?;
-    Ok(())
-}
-
-fn validate_reset_flags(flags: u32) -> Result<()> {
-    if flags & RESET_RESERVED_MASK != 0 {
-        return Err(Error::Bios(BiosError::ReservedResetFlags { flags }));
-    }
-    if flags & RESET_UNMODELED_GROUPS != 0 {
-        // GBATEK documents bits 5..7 as valid SIO/sound/other-register groups,
-        // but this bus has no corresponding state to reset. Reject them before
-        // any selected memory region or DISPCNT can be changed.
-        return Err(Error::Bios(BiosError::UnsupportedResetFlags { flags }));
-    }
     Ok(())
 }
 

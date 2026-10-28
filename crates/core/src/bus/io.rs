@@ -72,6 +72,15 @@ impl IoState {
         })
     }
 
+    /// SWI 01h group 7 over the *modelled* "other I/O" set. DISPCNT is
+    /// deliberately absent: the service forces blank separately, and GBATEK
+    /// documents the forced-blank value surviving the group-7 clear.
+    pub(super) fn reset_group7(&mut self) {
+        self.bg0cnt = 0;
+        self.bg0hofs = 0;
+        self.bg0vofs = 0;
+    }
+
     pub(super) fn append_digest(&self, bytes: &mut Vec<u8>) {
         bytes.extend_from_slice(&self.dispcnt.to_le_bytes());
         bytes.extend_from_slice(&self.bg0cnt.to_le_bytes());

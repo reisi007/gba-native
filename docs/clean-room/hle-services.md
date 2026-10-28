@@ -173,15 +173,19 @@ Only r0 changes.
 - IWRAM `03007E00h..03007FFFh` is preserved.
 - GBATEK documents bit 5 as resetting SIO registers and switching to general-
   purpose mode, bit 6 as resetting sound registers, and bit 7 as resetting all
-  other registers except SIO and sound. These are valid flags, but are rejected
-  with `BiosError::UnsupportedResetFlags` before effects because the bus has no
-  SIO, sound, or broad I/O register state to reset. The cited reset wording does
-  not give register-by-register reset values for those groups.
+  other registers except SIO and sound. All three are accepted. Bit 7 resets
+  exactly the modelled "other I/O" set (`BG0CNT`, `BG0HOFS`, `BG0VOFS`); bits 5
+  and 6 model no SIO or sound state at all, so their selected set is empty by
+  construction rather than by omission. `DISPCNT` is deliberately outside the
+  group: the service forces blank separately and the documented value survives.
+- The modelled-set contract is what keeps this honest: adding a new I/O register
+  to any of groups 5..7 without extending `Bus::reset_group7_io` changes the full
+  bus digest and fails `register_ram_reset_groups_five_to_seven_reach_the_modelled_io_set`.
+- Bits 8..31 carry no documented meaning and are ignored, matching the
+  documented service rather than rejecting the call.
 - GBATEK also notes that the SIO `SIODATA32` least-significant bits are destroyed
-  even when bit 5 is clear. The current bus has no `SIODATA32` state, and the
-  cited note does not identify an exact bit mask; this side effect is therefore
-  not fabricated. Bit 7 likewise cannot be approximated by resetting only the
-  implemented `DISPCNT` register.
+  even when bit 5 is clear. The current bus has no `SIODATA32` state, so this
+  side effect is not fabricated.
 - Any set bit 8..31 is reserved and returns `BiosError::ReservedResetFlags`
   before memory or register mutation. If a request contains both reserved bits
   and unmodeled groups 5..7, the reserved-bit error takes precedence.
