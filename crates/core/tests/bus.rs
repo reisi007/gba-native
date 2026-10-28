@@ -1,10 +1,11 @@
 //! Bus region boundaries, ROM windows, explicit unsupported accesses and the
-//! documented byte-store rules that this prototype actually implements.
+//! documented byte-store rules and host-injected KEYINPUT state implemented here.
 
 use gba_native_core::bus::{
     BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
-    IWRAM_LEN, KEYINPUT_ADDR, KEYINPUT_RELEASED, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN,
-    VRAM_BASE, VRAM_LEN,
+    IWRAM_LEN, KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT,
+    KEY_START, KEY_UP, KEYINPUT_ADDR, KEYINPUT_RELEASED, OAM_BASE, OAM_LEN, PALETTE_BASE,
+    PALETTE_LEN, VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::{Cartridge, ROM_BASE};
 use gba_native_core::error::Error;
@@ -117,10 +118,12 @@ fn implemented_io_registers_and_keyinput_are_explicit() {
     bus.write16(DISPCNT_ADDR, 0x0403).expect("dispcnt");
     assert_eq!(bus.dispcnt(), 0x0403);
     assert_eq!(bus.read16(DISPCNT_ADDR), Ok(0x0403));
+    bus.set_pressed_keys(KEY_A);
     assert!(matches!(
         bus.write16(KEYINPUT_ADDR, 0),
         Err(Error::UnsupportedIoWrite { .. })
     ));
+    assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED & !KEY_A));
     assert!(matches!(
         bus.read16(DISPCNT_ADDR + 4),
         Err(Error::UnsupportedIoRead { .. })
@@ -146,6 +149,59 @@ fn implemented_io_registers_and_keyinput_are_explicit() {
         bus.read8(DISPCNT_ADDR + 0x400),
         Err(Error::Unmapped { .. })
     ));
+}
+
+#[test]
+fn host_pressed_keys_map_to_active_low_keyinput_and_ignore_unused_bits() {
+    let mut bus = Bus::new(cart(0x200));
+    assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED));
+
+    let mappings = [
+        (KEY_A, 1 << 0),
+        (KEY_B, 1 << 1),
+        (KEY_SELECT, 1 << 2),
+        (KEY_START, 1 << 3),
+        (KEY_RIGHT, 1 << 4),
+        (KEY_LEFT, 1 << 5),
+        (KEY_UP, 1 << 6),
+        (KEY_DOWN, 1 << 7),
+        (KEY_R, 1 << 8),
+        (KEY_L, 1 << 9),
+    ];
+    for (key, keyinput_bit) in mappings {
+        bus.set_pressed_keys(key);
+        assert_eq!(
+            bus.read16(KEYINPUT_ADDR),
+            Ok(KEYINPUT_RELEASED & !keyinput_bit),
+            "host key mask {key:#06x}"
+        );
+    }
+
+    bus.set_pressed_keys(KEY_A | KEY_START);
+    assert_eq!(
+        bus.read16(KEYINPUT_ADDR),
+        Ok(KEYINPUT_RELEASED & !(KEY_A | KEY_START))
+    );
+    bus.set_pressed_keys(KEY_UP | KEY_RIGHT | KEY_B);
+    assert_eq!(
+        bus.read16(KEYINPUT_ADDR),
+        Ok(KEYINPUT_RELEASED & !(KEY_UP | KEY_RIGHT | KEY_B))
+    );
+
+    bus.set_pressed_keys(KEY_A | !KEY_MASK);
+    assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED & !KEY_A));
+}
+
+#[test]
+fn keyinput_state_is_included_in_bus_digest() {
+    let mut bus = Bus::new(cart(0x200));
+    let released = bus.state_digest();
+    bus.set_pressed_keys(KEY_A | KEY_START);
+    let pressed = bus.state_digest();
+    assert_ne!(released, pressed);
+
+    bus.set_pressed_keys(0);
+    assert_eq!(bus.state_digest(), released);
 }
 
 #[test]

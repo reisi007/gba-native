@@ -113,8 +113,9 @@ The first-class browser target has a separate synthetic-only implementation in
 - Pixels offers async construction for Web targets, but this crate uses the
   native blocking path;
 - a browser needs canvas/surface creation, async init and user file input;
-- core input (`KEYINPUT`) is still not integrated by this frontend and remains
-  documented released-only in the core;
+- core input (`KEYINPUT`) now accepts a host-injected pressed mask, but neither
+  optional frontend consumes it; there is no frame-synchronous sampling or
+  interactive-gameplay support;
 - native AOT harnesses cannot be assumed to run unchanged in a browser;
 - per-ROM browser execution or browser AOT; browser scaling is not an FSR/DLSS
   label.

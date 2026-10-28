@@ -10,7 +10,9 @@ not a roadmap promise and not a retail-game compatibility statement.
 ## Status and evidence language
 
 - Experimental prototype; no retail game is supported or known playable.
-- No BIOS is supplied or executed; direct entry is a test policy.
+- No BIOS is supplied or executed; direct entry is a test policy. The core can
+  receive a host-injected pressed-key mask through `Bus::set_pressed_keys`, but
+  this is not interactive game support and has no frame-sampling guarantee.
 - The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
   `B`/`BL`/`BX` and the corresponding Thumb ALU/high-register/long-branch
   subset are implemented and independently tested. ARM word/byte single data
@@ -159,14 +161,19 @@ Implemented regions and widths:
   registers. Other widths/addresses return explicit errors.
 - Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
   halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
-  writes; and KEYINPUT halfword read (`0x03FF`, all buttons released). BG0
-  scroll reads are write-only-register `UnsupportedIoRead` errors. Scroll writes
-  retain only documented bits 0..8; unused upper bits have no state effect.
+  writes; and KEYINPUT halfword read (`0x04000130`). The host injects a `u16`
+  pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
+  Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
+  Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
+  guest writes remain `UnsupportedIoWrite`. This host setter provides no frame
+  scheduler, sampling guarantee or timing claim. BG0 scroll reads are
+  write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
+  documented bits 0..8; unused upper bits have no state effect.
   Every other width/address, including the last I/O byte at `0x040003FF`, stays
   an `UnsupportedIoRead`/`UnsupportedIoWrite` rather than `Unmapped`. Mutable
-  display-register state is included in `Bus::state_digest`. There is no VCOUNT,
-  DISPSTAT, DMA, timer, interrupt, sound, serial, WAITCNT, BG affine parameter
-  or save-register state.
+  display-register and dynamic KEYINPUT state are included in `Bus::state_digest`.
+  There is no VCOUNT, DISPSTAT, DMA, timer, interrupt, sound, serial, WAITCNT,
+  BG affine parameter or save-register state.
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
   and unmapped addresses are errors.
 - CPU data-transfer rules actually implemented and tested:

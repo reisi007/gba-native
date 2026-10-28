@@ -1,11 +1,16 @@
 //! Deliberately small memory bus.
 //!
 //! Implemented: EWRAM, IWRAM, the documented DISPCNT/KEYINPUT and BG0 registers,
-//! palette, VRAM, OAM and the three documented ROM windows. Everything else is
-//! an explicit error. No open-bus, DMA, save, BIOS, mirror or timing behavior is
-//! fabricated.
+//! palette, VRAM, OAM and the three documented ROM windows. KEYINPUT receives a
+//! host-injected pressed mask, without a frame-sampling or timing guarantee.
+//! Everything else is an explicit error. No open-bus, DMA, save, BIOS, mirror
+//! or timing behavior is fabricated.
 
 mod io;
+pub use io::{
+    KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
+    KEY_UP,
+};
 
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
@@ -37,6 +42,7 @@ pub struct Bus {
     vram: Vec<u8>,
     oam: Vec<u8>,
     io: io::IoState,
+    pressed_keys: u16,
 }
 
 impl Bus {
@@ -49,7 +55,17 @@ impl Bus {
             vram: vec![0; VRAM_LEN],
             oam: vec![0; OAM_LEN],
             io: io::IoState::default(),
+            pressed_keys: 0,
         }
+    }
+
+    /// Sets the host-injected GBA key mask, where one means pressed.
+    ///
+    /// KEYINPUT reads expose this state active-low. Bits outside [`KEY_MASK`]
+    /// are ignored. This does not provide frame-synchronous sampling or a
+    /// timing guarantee.
+    pub fn set_pressed_keys(&mut self, pressed: u16) {
+        self.pressed_keys = pressed & KEY_MASK;
     }
 
     pub fn cart(&self) -> &Cartridge {
@@ -122,7 +138,7 @@ impl Bus {
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
             return self
                 .io
-                .read16(addr)
+                .read16(addr, self.pressed_keys)
                 .unwrap_or(Err(Error::UnsupportedIoRead { addr, width: 16 }));
         }
         if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
@@ -355,7 +371,7 @@ impl Bus {
         bytes.extend_from_slice(&self.vram);
         bytes.extend_from_slice(&self.oam);
         self.io.append_digest(&mut bytes);
-        bytes.extend_from_slice(&KEYINPUT_RELEASED.to_le_bytes());
+        bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
         sha256::digest(&bytes)
     }
 

@@ -104,7 +104,9 @@ retail cartridges**.
 
 ## Non-claims
 
-- No BIOS boot, no retail-game playability, no save/audio/input interaction.
+- No BIOS boot, no retail-game playability, no save/audio or game-level input
+  interaction. The core accepts host-injected KEYINPUT state, but has no frame
+  scheduler, sampling guarantee or timing claim.
 - No cycle/frame timing, DMA, IRQ, full tile/sprite PPU or playable window
   frontend. A bounded static Mode 0 BG0 text-background snapshot subset exists
   alongside bitmap modes; it is not a scanline/frame renderer, and other BG

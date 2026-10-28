@@ -110,9 +110,11 @@ lockfiles.
   `UnsupportedIoRead`/`UnsupportedIoWrite`, not `Unmapped`.
 - Palette/VRAM byte-store duplication and OAM byte-store ignore behavior.
 - DISPCNT and BG0CNT halfword R/W; BG0HOFS/BG0VOFS halfword write-only;
-  scroll bits 9..15 do not affect state. KEYINPUT reports all buttons released.
-  Other I/O and unimplemented widths remain explicit errors, and mutable BG0
-  register state changes `Bus::state_digest`.
+  scroll bits 9..15 do not affect state. KEYINPUT defaults to all buttons
+  released; host pressed-mask tests cover active-low mapping for all ten keys,
+  unused-bit masking, digest inclusion and rejected guest writes. Other I/O and
+  unimplemented widths remain explicit errors, and mutable BG0 register state
+  changes `Bus::state_digest`.
 - ARM/Thumb ALU, NZCV for carry/borrow/overflow, condition-false no-op, PC
   advance, direct branches, `BL` link/return, BX ARM↔Thumb round trip, PC
   operand pipeline values, and aligned ALU PC writes.
