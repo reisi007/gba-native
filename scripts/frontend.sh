@@ -52,12 +52,12 @@ cargo build --locked --manifest-path apps/desktop/Cargo.toml
 
 info "frontend dependency tree (core runtime only; no AOT/root facade)"
 TREE=$(cargo tree --locked --offline --manifest-path apps/desktop/Cargo.toml)
-printf '%s\n' "$TREE" | grep -q 'gba-native-core v' ||
+printf '%s\n' "$TREE" | grep 'gba-native-core v' >/dev/null ||
   fail "frontend dependency tree is missing the gba-native-core runtime"
-if printf '%s\n' "$TREE" | grep -Eq '(^|[[:space:]])gba-native-aot v'; then
+if printf '%s\n' "$TREE" | grep -E '(^|[[:space:]])gba-native-aot v' >/dev/null; then
   fail "frontend must not depend on host-side gba-native-aot tooling"
 fi
-if printf '%s\n' "$TREE" | grep -Eq '(^|[[:space:]])gba-native v'; then
+if printf '%s\n' "$TREE" | grep -E '(^|[[:space:]])gba-native v' >/dev/null; then
   fail "frontend must not depend on the root gba-native compatibility facade"
 fi
 

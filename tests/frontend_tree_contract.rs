@@ -24,6 +24,14 @@ case \" $* \" in
         printf '|-- gba-native v0.1.0 (/fake/root)\\n'
         ;;
       nocore) printf '|-- some-unrelated-runtime v0.1.0 (/fake/other)\\n' ;;
+      large)
+        printf '|-- gba-native-core v0.1.0 (/fake/core)\\n'
+        i=0
+        while [ \"$i\" -lt 100000 ]; do
+          printf '|-- some-unrelated-runtime v0.1.0 (/fake/other)\\n'
+          i=$((i + 1))
+        done
+        ;;
     esac
     ;;
 esac
@@ -65,7 +73,7 @@ fn stderr(output: &Output) -> String {
 }
 
 #[test]
-fn frontend_gate_rejects_missing_core_or_host_tooling_in_the_tree() {
+fn frontend_gate_checks_the_resolved_dependency_tree() {
     let temp = TempDir::new("contract");
     let bin = temp.path().join("bin");
     fs::create_dir_all(&bin).expect("fake bin");
@@ -82,8 +90,8 @@ fn frontend_gate_rejects_missing_core_or_host_tooling_in_the_tree() {
         ("root", "must not depend on the root gba-native"),
         ("nocore", "missing the gba-native-core"),
     ];
-    for (tree, expected) in cases {
-        let output = Command::new("bash")
+    let run_gate = |tree| {
+        Command::new("bash")
             .arg(repo_root().join("scripts/frontend.sh"))
             .current_dir(repo_root())
             .env("PATH", &path)
@@ -91,7 +99,10 @@ fn frontend_gate_rejects_missing_core_or_host_tooling_in_the_tree() {
             .env("CARGO_TARGET_DIR", "target/frontend")
             .env_remove("RATCHET_BIN")
             .output()
-            .expect("run frontend gate");
+            .expect("run frontend gate")
+    };
+    for (tree, expected) in cases {
+        let output = run_gate(tree);
         assert!(
             !output.status.success(),
             "tree {tree} must fail the frontend gate\n{}",
@@ -103,4 +114,16 @@ fn frontend_gate_rejects_missing_core_or_host_tooling_in_the_tree() {
             stderr(&output)
         );
     }
+
+    let output = run_gate("large");
+    assert!(
+        output.status.success(),
+        "a large valid tree must pass without a broken pipe\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("optional frontend gate passed"),
+        "large valid tree must complete the frontend gate\n{}",
+        stderr(&output)
+    );
 }
