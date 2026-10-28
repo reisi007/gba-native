@@ -24,7 +24,9 @@ const WORD_BIT: u32 = 1 << 26;
 const CPU_SET_MASK: u32 = 0x051F_FFFF;
 /// CpuFastSet: count bits 0..20, fill bit 24; bit 26 is reserved here.
 const CPU_FAST_SET_MASK: u32 = 0x011F_FFFF;
-const RESET_MEMORY_MASK: u32 = 0x1F;
+const RESET_UNMODELED_GROUPS: u32 = 0xE0;
+const RESET_DOCUMENTED_MASK: u32 = 0xFF;
+const RESET_RESERVED_MASK: u32 = !RESET_DOCUMENTED_MASK;
 const IWRAM_PRESERVED_LEN: usize = 512;
 const DISPCNT_FORCED_BLANK: u16 = 0x0080;
 
@@ -175,9 +177,13 @@ pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
 }
 
 fn validate_reset_flags(flags: u32) -> Result<()> {
-    if flags & !RESET_MEMORY_MASK != 0 {
-        // Bits 5..7 are serial/sound/other-register resets. They are not
-        // implemented and must fail before any partial memory mutation.
+    if flags & RESET_RESERVED_MASK != 0 {
+        return Err(Error::Bios(BiosError::ReservedResetFlags { flags }));
+    }
+    if flags & RESET_UNMODELED_GROUPS != 0 {
+        // GBATEK documents bits 5..7 as valid SIO/sound/other-register groups,
+        // but this bus has no corresponding state to reset. Reject them before
+        // any selected memory region or DISPCNT can be changed.
         return Err(Error::Bios(BiosError::UnsupportedResetFlags { flags }));
     }
     Ok(())

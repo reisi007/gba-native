@@ -167,9 +167,12 @@ are in `hle-services.md`.
   sentinel word at every rounded end, fill source-read counts,
   ascending-overlap smear, and range/alignment/reserved-bit failures before
   mutation. The table is not computed from the production rounding formula.
-- `crates/core/tests/bios_reset.rs` and `crates/core/tests/bios_dispatch.rs`: IWRAM-tail preservation,
-  unconditional forced blank, and explicit `UnsupportedService`/unsupported
-  reset-flag results that mutate nothing.
+- `crates/core/tests/bios_reset.rs` and `crates/core/tests/bios_dispatch.rs`: flags
+  0..4 memory-reset regressions, IWRAM-tail preservation and unconditional
+  forced blank; documented-but-unmodeled flags 5..7 return
+  `UnsupportedResetFlags`, while each reserved bit 8..31 returns
+  `ReservedResetFlags`, all before mutation. Dispatch also checks explicit
+  `UnsupportedService` results that mutate nothing.
 
 These tests use synthetic RAM/ROM fixtures only and require no user-supplied
 ROM, BIOS image, save, network or external crate. This is not evidence for BIOS

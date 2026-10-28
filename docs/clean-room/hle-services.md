@@ -171,15 +171,29 @@ Only r0 changes.
 - Implemented flags: bit 0 EWRAM (256 KiB), bit 1 IWRAM (all but the last 512
   bytes), bit 2 palette (1 KiB), bit 3 VRAM (96 KiB), bit 4 OAM (1 KiB).
 - IWRAM `03007E00h..03007FFFh` is preserved.
-- Bits 5, 6, 7 and every higher bit are rejected with
-  `BiosError::UnsupportedResetFlags` **before** any memory or register mutation.
-  SIO, sound and other-register resets are not faked.
-- `DISPCNT=0080h` is written unconditionally, including for flags zero, so a
-  display snapshot becomes forced-blank white.
+- GBATEK documents bit 5 as resetting SIO registers and switching to general-
+  purpose mode, bit 6 as resetting sound registers, and bit 7 as resetting all
+  other registers except SIO and sound. These are valid flags, but are rejected
+  with `BiosError::UnsupportedResetFlags` before effects because the bus has no
+  SIO, sound, or broad I/O register state to reset. The cited reset wording does
+  not give register-by-register reset values for those groups.
+- GBATEK also notes that the SIO `SIODATA32` least-significant bits are destroyed
+  even when bit 5 is clear. The current bus has no `SIODATA32` state, and the
+  cited note does not identify an exact bit mask; this side effect is therefore
+  not fabricated. Bit 7 likewise cannot be approximated by resetting only the
+  implemented `DISPCNT` register.
+- Any set bit 8..31 is reserved and returns `BiosError::ReservedResetFlags`
+  before memory or register mutation. If a request contains both reserved bits
+  and unmodeled groups 5..7, the reserved-bit error takes precedence.
+- Every accepted request writes `DISPCNT=0080h`, including flags zero, so a
+  display snapshot becomes forced-blank white. Invalid and unmodeled requests
+  fail validation before this write.
 - Clears use 16-bit or 32-bit bus writes, not byte writes. OAM zeroing is not a
   claim that objects are disabled; DISPCNT bit 6 and OAM attribute state are
   separate.
-- No save, persistence, audio, serial or other I/O state is touched.
+- The service does not model save/persistence, audio, serial or other I/O state
+  beyond its forced `DISPCNT` write; the unmodeled `SIODATA32` bug is an explicit
+  limitation noted above.
 
 ## Deliberately unimplemented
 
@@ -216,7 +230,10 @@ implementation:
   every rounded end, fill source-read count, ascending-overlap smear, and the
   range/alignment/reserved-bit failures before mutation. The table is not
   computed from the production rounding formula.
-- Reset: IWRAM-tail preservation and the unconditional forced-blank snapshot.
+- Reset: flags 0..4, IWRAM-tail preservation and unconditional forced blank;
+  each documented-but-unmodeled flag 5..7 and every reserved bit 8..31 is
+  checked as a pre-effect error. Reserved bits take classification precedence
+  when combined with flags 5..7.
 - Dispatch: explicit `UnsupportedService` results that mutate nothing.
 
 `crates/core/tests/swi_decode.rs` checks typed ARM/Thumb comments.

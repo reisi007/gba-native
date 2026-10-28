@@ -63,8 +63,11 @@ pub enum BiosError {
     UnsupportedSource { service: u8, addr: u32 },
     /// The destination range is not in a write-capable memory region.
     UnsupportedDestination { service: u8, addr: u32 },
-    /// `RegisterRamReset` requested a reset beyond the implemented memory bits.
+    /// `RegisterRamReset` requested documented reset groups 5..7, which are
+    /// valid but not represented by this bus model.
     UnsupportedResetFlags { flags: u32 },
+    /// `RegisterRamReset` set reserved flag bits 8..31.
+    ReservedResetFlags { flags: u32 },
 }
 
 impl fmt::Display for BiosError {
@@ -114,7 +117,11 @@ impl fmt::Display for BiosError {
             ),
             BiosError::UnsupportedResetFlags { flags } => write!(
                 f,
-                "RegisterRamReset flags 0x{flags:08X} request unsupported reset bits 5..31"
+                "RegisterRamReset flags 0x{flags:08X} request documented reset groups 5..7 that are not modeled"
+            ),
+            BiosError::ReservedResetFlags { flags } => write!(
+                f,
+                "RegisterRamReset flags 0x{flags:08X} set reserved bits 8..31"
             ),
         }
     }

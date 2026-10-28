@@ -73,6 +73,18 @@ fn assert_value16(bus: &Bus, base: u32, len: usize, value: u16) {
     }
 }
 
+fn assert_reset_error(cpu: &mut Cpu, bus: &mut Bus, flags: u32, error: BiosError) {
+    cpu.set_reg(0, flags);
+    let before = (cpu.state_digest(), bus.state_digest());
+    assert_eq!(
+        bios::call(bios::SERVICE_REGISTER_RAM_RESET, cpu, bus),
+        Err(Error::Bios(error))
+    );
+    assert_eq!((cpu.state_digest(), bus.state_digest()), before);
+    assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0010);
+    assert_eq!(bus.read32(EWRAM_BASE).expect("ewram"), 0xA5A5_A5A5);
+}
+
 #[test]
 fn register_ram_reset_with_zero_flags_only_forces_blank() {
     let (mut cpu, mut bus) = fresh();
@@ -165,19 +177,47 @@ fn register_ram_reset_all_memory_flags_preserves_iwram_tail() {
 }
 
 #[test]
-fn register_ram_reset_unsupported_flags_are_pre_effect_errors() {
+fn register_ram_reset_documented_but_unmodeled_groups_are_pre_effect_errors() {
     let (mut cpu, mut bus) = fresh();
     seed(&mut bus);
     bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
-    for flags in [0x20u32, 0x40, 0x80, 0x100, 0x8000_0000, 0xFFFF_FFFF] {
-        cpu.set_reg(0, flags);
-        let before = (cpu.state_digest(), bus.state_digest());
-        assert_eq!(
-            bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus),
-            Err(Error::Bios(BiosError::UnsupportedResetFlags { flags }))
+    for bit in 5..=7 {
+        let flags = 1u32 << bit;
+        assert_reset_error(
+            &mut cpu,
+            &mut bus,
+            flags,
+            BiosError::UnsupportedResetFlags { flags },
         );
-        assert_eq!((cpu.state_digest(), bus.state_digest()), before);
-        assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0010);
-        assert_eq!(bus.read32(EWRAM_BASE).expect("ewram"), 0xA5A5_A5A5);
     }
+    let flags = 0xFF;
+    assert_reset_error(
+        &mut cpu,
+        &mut bus,
+        flags,
+        BiosError::UnsupportedResetFlags { flags },
+    );
+}
+
+#[test]
+fn register_ram_reset_reserved_bits_are_pre_effect_errors() {
+    let (mut cpu, mut bus) = fresh();
+    seed(&mut bus);
+    bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
+    for bit in 8..32 {
+        let flags = 1u32 << bit;
+        assert_reset_error(
+            &mut cpu,
+            &mut bus,
+            flags,
+            BiosError::ReservedResetFlags { flags },
+        );
+    }
+    let flags = u32::MAX;
+    assert_reset_error(
+        &mut cpu,
+        &mut bus,
+        flags,
+        BiosError::ReservedResetFlags { flags },
+    );
 }

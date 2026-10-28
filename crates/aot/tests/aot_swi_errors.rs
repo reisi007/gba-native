@@ -225,7 +225,7 @@ fn known_service_preconditions_fail_before_native_svc_framing() {
     assert_unchanged_native_error(
         &reset,
         2,
-        "flags 0x00000020 request unsupported reset bits 5..31",
+        "request documented reset groups 5..7 that are not modeled",
         &expected,
     );
 }
