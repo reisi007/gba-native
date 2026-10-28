@@ -100,6 +100,19 @@ Relevant anchors actually consulted for this milestone:
   `#bios-interrupt-handling`: SWI comment extraction, the four documented
   handler-save values and SYSTEM-mode switch, exception entry/return flags and
   vector, GBA stack tops, and the boundary that IRQ nesting is not modeled.
+- `#gba-memory-map`, `#gba-io-map`, `#lcd-io-interrupts-and-status` and
+  `#gba-unpredictable-things`: the I/O block address range, the documented
+  8/16/32-bit I/O access widths, `VCOUNT` at `0x04000006` as a readable 16-bit
+  register with the current scanline in bits 0..7 and zeros in bits 8..15, the
+  LCD status/interrupt field layout, and the document's notes on register-width
+  and byte-lane behavior. Only the `VCOUNT` byte lanes at `0x04000006`/
+  `0x04000007` are added from this group; the pre-existing byte-addressed
+  sound-register reads are unchanged, every other I/O address keeps the existing
+  register-specific dispatch, and otherwise-unmodelled reads remain explicit
+  unsupported-width errors. These anchors were consulted on
+  2026-10-28 in the upstream GBATEK document at
+  <https://problemkaputt.de/gbatek.htm>, which is the same reference text as S1;
+  that retrieval was not separately retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.

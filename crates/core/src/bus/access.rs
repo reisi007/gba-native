@@ -83,6 +83,9 @@ impl Bus {
             return Err(Error::UnsupportedSave { addr });
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(value) = self.io.irq().read8(addr) {
+                return Ok(value);
+            }
             if let Some(value) = self.sound_read8(addr) {
                 return Ok(value);
             }

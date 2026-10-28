@@ -187,6 +187,20 @@ Implemented regions and widths:
   `Bus::state_digest`. Sound registers remain storage-only apart from bounded
   Sound A/B FIFO queues; timer registers are storage-only. There is no serial or
   save-register state, and no BG affine parameter state.
+- `VCOUNT` byte lanes: the host-driven frame model already exposes a read-only
+  `VCOUNT` halfword at `0x04000006`. This change adds an 8-bit read path for
+  exactly that register: `0x04000006` returns its low byte and `0x04000007` its
+  high byte. The model reports `0` in the active phase and `160` in the modelled
+  VBlank phase, so the high byte is always `0` and the halfword value is
+  unchanged by the byte path. The pre-existing byte-addressed sound-register
+  reads are unchanged, and every other I/O address keeps the existing
+  register-specific dispatch. Otherwise-unmodelled reads remain explicit
+  `UnsupportedIoRead { width: 8 }` errors, including the neighbouring `DISPSTAT`
+  lanes and the byte above `VCOUNT`. This follows GBATEK `#gba-io-map` and
+  `#lcd-io-interrupts-and-status` for the documented 8/16/32-bit I/O access and
+  the `VCOUNT` bit layout, but it is not scanline timing: the model has no 228
+  scanlines, HBlank or per-line counter. Byte writes to `VCOUNT` remain
+  ignored-and-recorded like any other unmodelled I/O write.
 
 ### DMA channels
 

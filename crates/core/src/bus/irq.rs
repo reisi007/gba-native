@@ -73,6 +73,25 @@ impl IrqState {
         })
     }
 
+    /// Byte lanes of the modelled `VCOUNT` halfword only.
+    ///
+    /// GBATEK `#gba-io-map` and `#lcd-io-interrupts-and-status` describe I/O as
+    /// 8/16/32-bit accessible and `VCOUNT` (`0x04000006`) as a readable 16-bit
+    /// register whose bits 0..7 are the current scanline and bits 8..15 zero.
+    /// This model reports `0` or `160`, so the high lane is always zero. The
+    /// new path handles only `VCOUNT`: byte-addressed sound-register reads
+    /// predate this change and are unchanged, every other I/O address keeps the
+    /// existing register-specific dispatch, and otherwise-unmodelled reads
+    /// remain explicit unsupported-width errors.
+    pub(super) fn read8(&self, addr: u32) -> Option<u8> {
+        let vcount = self.read16(VCOUNT_ADDR)?;
+        Some(match addr {
+            VCOUNT_ADDR => vcount as u8,
+            addr if addr == VCOUNT_ADDR + 1 => (vcount >> 8) as u8,
+            _ => return None,
+        })
+    }
+
     pub(super) fn write16(&mut self, addr: u32, value: u16) -> Option<()> {
         match addr {
             DISPSTAT_ADDR => self.dispstat = value & DISPSTAT_WRITABLE,
@@ -163,6 +182,7 @@ mod tests {
     use super::*;
     use crate::bus::Bus;
     use crate::cart::Cartridge;
+    use crate::error::Error;
 
     fn bus() -> Bus {
         Bus::new(Cartridge::from_bytes(vec![0u8; 0x200]).expect("cart"))
@@ -190,6 +210,37 @@ mod tests {
         assert!(bus.irq_pending());
         bus.write16(IF_ADDR, 1).expect("clear");
         assert!(!bus.irq_pending(), "write-one-to-clear");
+    }
+
+    #[test]
+    fn vcount_byte_lanes_track_phase_and_reject_selected_other_reads() {
+        let mut bus = bus();
+        // Active phase: low lane 0, high lane 0, halfword value unchanged.
+        assert_eq!(bus.read8(VCOUNT_ADDR).expect("active low lane"), 0);
+        assert_eq!(bus.read8(VCOUNT_ADDR + 1).expect("active high lane"), 0);
+        assert_eq!(bus.read16(VCOUNT_ADDR).expect("vcount"), 0);
+
+        bus.tick_frames(FRAME_INSTRUCTIONS - VBLANK_INSTRUCTIONS);
+        // VBlank phase: documented first VBlank line in the low lane only.
+        assert_eq!(
+            bus.read8(VCOUNT_ADDR).expect("vblank low lane"),
+            VBLANK_LINE
+        );
+        assert_eq!(bus.read8(VCOUNT_ADDR + 1).expect("vblank high lane"), 0);
+        assert_eq!(bus.read16(VCOUNT_ADDR).expect("vcount"), 160);
+
+        // The newly added VCOUNT byte path covers only the two lanes above.
+        // These selected addresses have no existing byte path, so they remain
+        // explicit width errors (unlike pre-existing sound-register byte reads).
+        for addr in [DISPSTAT_ADDR, DISPSTAT_ADDR + 1, VCOUNT_ADDR + 2, IF_ADDR] {
+            assert!(
+                matches!(
+                    bus.read8(addr),
+                    Err(Error::UnsupportedIoRead { width: 8, .. })
+                ),
+                "{addr:#010x} must stay an unsupported 8-bit I/O read"
+            );
+        }
     }
 
     #[test]

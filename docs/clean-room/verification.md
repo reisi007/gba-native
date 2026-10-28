@@ -61,11 +61,11 @@ lockfiles.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
    --locked`. It pins every target: 193 core integration tests across 28 files,
-   40 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
+   41 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
    library unit tests, 31 root integration tests across six files and 5 root
-   binary unit tests, exactly 325 selected package tests. The workspace
+   binary unit tests, exactly 326 selected package tests. The workspace
    compatibility contracts and frontend-tree failure contract add four tests to
-   the full `cargo test -- --list` inventory (329 total). The web clean-checkout
+   the full `cargo test -- --list` inventory (330 total). The web clean-checkout
   bootstrap test is included in the root integration targets; no prior core,
   AOT or root tests are removed. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
@@ -155,6 +155,13 @@ lockfiles.
   raises VBlank/IF, IRQ gating requires IME/IE/pending, and timer registers retain
   storage-only behavior. Sound FIFO state is bounded and host-driven; no audio,
   timer-triggered sample consumption or automatic FIFO DMA is generated.
+  `VCOUNT` is readable as its modelled halfword and, since the byte-lane round,
+  through exactly the two byte lanes at `0x04000006`/`0x04000007`. That new path
+  handles only `VCOUNT`: the pre-existing byte-addressed sound-register reads
+  are unchanged, every other address keeps the existing register-specific I/O
+  dispatch, and otherwise-unmodelled reads remain explicit unsupported-width
+  errors, including the neighbouring `DISPSTAT` lanes and the byte above
+  `VCOUNT`.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
@@ -484,6 +491,34 @@ After bounded DMA1/2 Sound FIFO support was added, the same read-only native
 zero-address failure and stopped at `unsupported 8-bit I/O read at 0x04000006`.
 This records only progress past the earlier failure; no recognizable screen,
 boot, gameplay, automatic audio request or compatibility result was established.
+
+The VCOUNT byte-lane change supersedes that stop. It widens exactly one existing
+modelled register: `0x04000006` and `0x04000007` now return the low and high byte
+of the modelled `VCOUNT` halfword (`0` in the active phase, `160` in the modelled
+VBlank phase, so the high byte is always `0`). The new path handles only
+`VCOUNT`: the pre-existing byte-addressed sound-register reads are unchanged,
+every other I/O address keeps the existing register-specific dispatch, and
+otherwise-unmodelled reads remain explicit unsupported-width errors, including
+the `DISPSTAT` lanes and the byte immediately above `VCOUNT`. The synthetic
+regression is
+`crates/core/src/bus/irq.rs::bus::irq::tests::vcount_byte_lanes_track_phase_and_reject_selected_other_reads`;
+it checks both phases, both lanes, the unchanged 16-bit `VCOUNT` value and that
+the `DISPSTAT` lanes and the byte above `VCOUNT` still error. This adds no
+scanline counter, HBlank, IRQ scheduling, open-bus behavior or frame timing, and
+the supplied ROM was not executed for this round and stayed external and
+unmodified.
+
+Afterwards `./scripts/full.sh` passed for this task and ended with
+`==> full gate passed`: `cargo fmt --check`, Clippy with warnings denied, the
+debug and release test suites, the demo, the synthetic native AOT proof
+(`native_vs_reference=match`) and the Ratchet slow tier
+(`COHERENT — 1 of 1 gates passed`). The pinned workspace inventory is 326
+selected package tests and 330 total tests. Independent Luna review round 1
+raised two medium documentation findings about this log and about the byte-read
+wording; this follow-up corrects both, and a second review round is not recorded
+here. These results establish only the listed implementation subset and
+synthetic proof; they are not a retail compatibility, hardware timing, boot,
+rendering or playable-gameplay result. No push or CI run occurred.
 
 For the bounded DMA/FIFO change, `./scripts/full.sh` passed: fmt, clippy, debug
 and release tests, demo, native AOT proof (`native_vs_reference=match`) and the
