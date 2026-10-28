@@ -14,6 +14,8 @@ Retrieved HTML: 5,473,181 bytes; SHA-256:
 `a701cf0f5be47b23dd31298d7dc593a7cccb3ae9a59087dea940305565025b70`.
 This identifies the fetched document, not an immutable upstream version. Public
 reference material is cited and paraphrased, not vendored into this project.
+Additional current sections below were fetched from this URL on 2026-10-28; that
+retrieval was not separately retained or hashed.
 
 Relevant anchors actually consulted for this milestone:
 
@@ -58,7 +60,18 @@ Relevant anchors actually consulted for this milestone:
   base-in-list behavior.
 - `#thumb-opcodes-jumps-and-calls`: conditional/unconditional branches and the
   two-half BL/BLX encoding.
-- `#lcd-io-display-control`, `#lcd-vram-bitmap-bg-modes`.
+- `#lcd-io-display-control`: mode selection, BG enable flags and forced blank.
+- `#lcd-io-bg-control`: BG priority, character/screen bases, color depth,
+  mosaic, reserved bits, text-map sizes and quadrant ordering.
+- `#lcd-io-bg-scrolling`: BG0 horizontal/vertical offsets and text-mode use.
+- `#lcd-vram-overview`: the first 64 KiB BG allocation in tile/map modes and
+  the separate final 32 KiB OBJ allocation.
+- `#lcd-vram-character-data`: 8x8 4bpp/8bpp tile layout and pixel ordering.
+- `#lcd-vram-bg-screen-data-format-bg-map`: text map entries, flips, palette
+  banks and screen-block arrangement.
+- `#lcd-color-palettes`: BG palette layout, transparent index zero, backdrop
+  color and RGB555 channel fields.
+- `#lcd-vram-bitmap-bg-modes`.
 - `#bios-function-summary`, `#bios-arithmetic-functions`,
   `#swi-06h-gba-or-swi-09h-nds7nds9dsi7dsi9---div`,
   `#swi-07h-gba---divarm`,

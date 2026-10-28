@@ -88,8 +88,10 @@ retail cartridges**.
 ## Non-claims
 
 - No BIOS boot, no retail-game playability, no save/audio/input interaction.
-- No cycle timing, frame timing, DMA, IRQ, tile/sprite PPU or playable window
-  frontend.
+- No cycle/frame timing, DMA, IRQ, full tile/sprite PPU or playable window
+  frontend. A bounded static Mode 0 BG0 text-background snapshot subset exists
+  alongside bitmap modes; it is not a scanline/frame renderer, and other BG
+  layers and OBJ/sprite rendering remain unsupported.
 - No GPU vendor SDK, FSR, DLSS, ML model or custom upscaling shader/integration.
 - No successful REA analysis or native Evidence record.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and

@@ -2,8 +2,9 @@
 //! documented byte-store rules that this prototype actually implements.
 
 use gba_native_core::bus::{
-    Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE, IWRAM_LEN, KEYINPUT_ADDR,
-    KEYINPUT_RELEASED, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
+    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
+    IWRAM_LEN, KEYINPUT_ADDR, KEYINPUT_RELEASED, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN,
+    VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::{Cartridge, ROM_BASE};
 use gba_native_core::error::Error;
@@ -110,7 +111,7 @@ fn byte_stores_to_16bit_video_memory_duplicate_or_ignore() {
 }
 
 #[test]
-fn io_is_limited_to_dispcnt_and_keyinput() {
+fn implemented_io_registers_and_keyinput_are_explicit() {
     let mut bus = Bus::new(cart(0x200));
     assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED));
     bus.write16(DISPCNT_ADDR, 0x0403).expect("dispcnt");
@@ -144,6 +145,50 @@ fn io_is_limited_to_dispcnt_and_keyinput() {
     assert!(matches!(
         bus.read8(DISPCNT_ADDR + 0x400),
         Err(Error::Unmapped { .. })
+    ));
+}
+
+#[test]
+fn bg0_register_widths_write_only_scroll_and_digest_are_explicit() {
+    let mut bus = Bus::new(cart(0x200));
+    let initial = bus.state_digest();
+    bus.write16(BG0CNT_ADDR, 0x8123).expect("BG0CNT write");
+    assert_eq!(bus.read16(BG0CNT_ADDR), Ok(0x8123));
+    let with_control = bus.state_digest();
+    assert_ne!(initial, with_control);
+
+    // Scroll bits 9..15 are unused and have no state effect.
+    bus.write16(BG0HOFS_ADDR, 0x0200)
+        .expect("ignored scroll bits");
+    assert_eq!(bus.state_digest(), with_control);
+    bus.write16(BG0HOFS_ADDR, 0x0105)
+        .expect("horizontal scroll");
+    let with_horizontal = bus.state_digest();
+    assert_ne!(with_control, with_horizontal);
+    bus.write16(BG0VOFS_ADDR, 0x01FE).expect("vertical scroll");
+    assert_ne!(with_horizontal, bus.state_digest());
+
+    for addr in [BG0HOFS_ADDR, BG0VOFS_ADDR] {
+        assert!(matches!(
+            bus.read16(addr),
+            Err(Error::UnsupportedIoRead { addr: actual, width: 16 }) if actual == addr
+        ));
+    }
+    assert!(matches!(
+        bus.read8(BG0CNT_ADDR),
+        Err(Error::UnsupportedIoRead { width: 8, .. })
+    ));
+    assert!(matches!(
+        bus.read32(BG0CNT_ADDR),
+        Err(Error::UnsupportedIoRead { width: 32, .. })
+    ));
+    assert!(matches!(
+        bus.write8(BG0CNT_ADDR, 0),
+        Err(Error::UnsupportedIoWrite { width: 8, .. })
+    ));
+    assert!(matches!(
+        bus.write32(BG0CNT_ADDR, 0),
+        Err(Error::UnsupportedIoWrite { width: 32, .. })
     ));
 }
 

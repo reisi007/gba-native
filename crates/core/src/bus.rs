@@ -1,8 +1,11 @@
 //! Deliberately small memory bus.
 //!
-//! Implemented: EWRAM, IWRAM, DISPCNT/KEYINPUT, palette, VRAM, OAM and the
-//! three documented ROM windows. Everything else is an explicit error. No
-//! open-bus, DMA, save, BIOS, mirror or timing behavior is fabricated.
+//! Implemented: EWRAM, IWRAM, the documented DISPCNT/KEYINPUT and BG0 registers,
+//! palette, VRAM, OAM and the three documented ROM windows. Everything else is
+//! an explicit error. No open-bus, DMA, save, BIOS, mirror or timing behavior is
+//! fabricated.
+
+mod io;
 
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
@@ -20,6 +23,9 @@ pub const VRAM_LEN: usize = 96 * 1024;
 pub const OAM_BASE: u32 = 0x0700_0000;
 pub const OAM_LEN: usize = 1024;
 pub const DISPCNT_ADDR: u32 = 0x0400_0000;
+pub const BG0CNT_ADDR: u32 = 0x0400_0008;
+pub const BG0HOFS_ADDR: u32 = 0x0400_0010;
+pub const BG0VOFS_ADDR: u32 = 0x0400_0012;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
 
@@ -30,7 +36,7 @@ pub struct Bus {
     palette: Vec<u8>,
     vram: Vec<u8>,
     oam: Vec<u8>,
-    dispcnt: u16,
+    io: io::IoState,
 }
 
 impl Bus {
@@ -42,7 +48,7 @@ impl Bus {
             palette: vec![0; PALETTE_LEN],
             vram: vec![0; VRAM_LEN],
             oam: vec![0; OAM_LEN],
-            dispcnt: 0,
+            io: io::IoState::default(),
         }
     }
 
@@ -51,7 +57,15 @@ impl Bus {
     }
 
     pub fn dispcnt(&self) -> u16 {
-        self.dispcnt
+        self.io.dispcnt()
+    }
+
+    pub(crate) fn bg0cnt(&self) -> u16 {
+        self.io.bg0cnt()
+    }
+
+    pub(crate) fn bg0_scroll(&self) -> (u16, u16) {
+        self.io.bg0_scroll()
     }
 
     pub fn read8(&self, addr: u32) -> Result<u8> {
@@ -106,11 +120,10 @@ impl Bus {
             ]));
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
-            return match addr {
-                DISPCNT_ADDR => Ok(self.dispcnt),
-                KEYINPUT_ADDR => Ok(KEYINPUT_RELEASED),
-                _ => Err(Error::UnsupportedIoRead { addr, width: 16 }),
-            };
+            return self
+                .io
+                .read16(addr)
+                .unwrap_or(Err(Error::UnsupportedIoRead { addr, width: 16 }));
         }
         if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
             return Ok(u16::from_le_bytes([
@@ -241,14 +254,10 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
-            return match addr {
-                DISPCNT_ADDR => {
-                    self.dispcnt = value;
-                    Ok(())
-                }
-                KEYINPUT_ADDR => Err(Error::UnsupportedIoWrite { addr, width: 16 }),
-                _ => Err(Error::UnsupportedIoWrite { addr, width: 16 }),
-            };
+            return self
+                .io
+                .write16(addr, value)
+                .unwrap_or(Err(Error::UnsupportedIoWrite { addr, width: 16 }));
         }
         if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
             self.palette[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -338,14 +347,14 @@ impl Bus {
                 + self.palette.len()
                 + self.vram.len()
                 + self.oam.len()
-                + 4,
+                + 10,
         );
         bytes.extend_from_slice(&self.ewram);
         bytes.extend_from_slice(&self.iwram);
         bytes.extend_from_slice(&self.palette);
         bytes.extend_from_slice(&self.vram);
         bytes.extend_from_slice(&self.oam);
-        bytes.extend_from_slice(&self.dispcnt.to_le_bytes());
+        self.io.append_digest(&mut bytes);
         bytes.extend_from_slice(&KEYINPUT_RELEASED.to_le_bytes());
         sha256::digest(&bytes)
     }

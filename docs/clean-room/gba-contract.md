@@ -157,12 +157,16 @@ Implemented regions and widths:
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
   require 4-byte alignment. I/O supports only halfword access to the implemented
   registers. Other widths/addresses return explicit errors.
-- Implemented I/O: DISPCNT halfword read/write and KEYINPUT halfword read
-  (`0x03FF`, all buttons released). The I/O window is
-  `0x04000000..=0x040003FF`; every other read/write in it, including the last
-  byte at `0x040003FF`, returns `UnsupportedIoRead`/`UnsupportedIoWrite` rather
-  than `Unmapped`. There is no VCOUNT, DISPSTAT, DMA, timer, interrupt, sound,
-  serial, WAITCNT, BG affine parameter or save-register state.
+- Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
+  halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
+  writes; and KEYINPUT halfword read (`0x03FF`, all buttons released). BG0
+  scroll reads are write-only-register `UnsupportedIoRead` errors. Scroll writes
+  retain only documented bits 0..8; unused upper bits have no state effect.
+  Every other width/address, including the last I/O byte at `0x040003FF`, stays
+  an `UnsupportedIoRead`/`UnsupportedIoWrite` rather than `Unmapped`. Mutable
+  display-register state is included in `Bus::state_digest`. There is no VCOUNT,
+  DISPSTAT, DMA, timer, interrupt, sound, serial, WAITCNT, BG affine parameter
+  or save-register state.
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
   and unmapped addresses are errors.
 - CPU data-transfer rules actually implemented and tested:
@@ -408,22 +412,41 @@ half (`0xE800..0xEFFF`) and register form are rejected.
 ## Display snapshot
 
 Native image is 240x160, converted from RGB555 to RGB888 by bit replication
-(`(v << 3) | (v >> 2)` per channel). This is a state snapshot, not a scanline
-PPU.
+(`(v << 3) | (v >> 2)` per channel). This is a static state snapshot, not a
+scanline PPU, frame renderer or timing claim.
 
-- Mode 3: 240x160 direct RGB555 halfwords at VRAM offset 0.
-- Mode 4: 240x160 palette indices; frame 0 at 0, frame 1 at `0xA000`, selected by
-  DISPCNT bit 4.
-- Mode 5: 160x128 RGB555 halfwords; frame 0/1 as above; rest of the 240x160
-  output is backdrop (palette entry 0).
-- Forced blank (DISPCNT bit 7) yields white.
-- BG2 disabled (bit 10 clear) yields backdrop.
-- DISPCNT mode bits other than 3/4/5, CGB bit 3, BG0/BG1/BG3 enables, OBJ enable,
-  or any window enable are rejected as `UnsupportedPpuFeature`/display-mode
-  errors. Bits 5/6 are accepted because they do not affect this bitmap subset.
-- Tiles, sprites, OAM rendering, windows, blending, mosaic, nonidentity affine
-  transforms and scanline effects are absent. Mosaic/blending registers are
-  unsupported I/O, so they cannot be enabled through this bus.
+- Mode 0 implements BG0 text-background snapshots only. After unsupported-layer
+  validation, BG0 disabled yields the backdrop (BG palette entry 0); forced
+  blank (DISPCNT bit 7) yields white. Other enabled BG layers, OBJ, windows and
+  CGB mode return `UnsupportedPpuFeature`. Otherwise nonblank Modes 1 and 2
+  remain `UnsupportedDisplayMode`.
+- BG0CNT priority is read and ignored because only one layer is composed.
+  Character base (bits 2..3) selects a 16 KiB unit, color depth (bit 7) selects
+  4bpp/8bpp, screen base (bits 8..12) selects a 2 KiB unit, and size (bits
+  14..15) selects 256x256, 512x256, 256x512 or 512x512 pixels. Mosaic (bit 6)
+  returns `UnsupportedBgControl`; reserved bits 4..5 and 13 also fail explicitly
+  when enabled BG0 is rendered.
+- Text maps use 32x32-entry (2 KiB) screen blocks. Larger sizes select SC0..SC3
+  in row-major screen-block order at base +0, +2 KiB, +4 KiB and +6 KiB. BG0
+  scroll uses the low nine bits of each write-only offset register and wraps at
+  the selected background dimensions. Map entries select a tile, horizontal
+  and vertical flip, and (in 4bpp mode) one of 16 palette banks.
+- 4bpp tiles use 32 bytes and low-nibble-first left pixels; 8bpp tiles use 64
+  bytes and one palette index per pixel. Palette index 0 is transparent in
+  either depth and reveals the backdrop, which is BG palette entry 0. Nonzero
+  indices read the selected BG palette entries and convert RGB555 to RGB888.
+- Mode 0 BG maps and tile data are restricted to the first 64 KiB of VRAM.
+  Selecting a map/tile byte outside that documented BG allocation returns
+  `BgVramOutOfRange`; it does not read the separate OBJ allocation or wrap.
+- Modes 3, 4 and 5 retain the existing bitmap paths: Mode 3 is 240x160 direct
+  RGB555 at VRAM offset 0; Mode 4 is 240x160 palette indices with frame 0 at 0
+  and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
+  with the remainder of the 240x160 output set to backdrop (palette entry 0).
+  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop. Bits 5/6
+  remain accepted because they do not affect these implemented snapshots.
+- OBJ rendering, other BG layers, OAM, windows, blending, BG0 mosaic,
+  nonidentity affine transforms and scanline effects remain absent. Unsupported
+  registers still fail through the I/O bus rather than being treated as no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output

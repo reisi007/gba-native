@@ -79,6 +79,14 @@ pub enum Error {
     UnsupportedPpuFeature {
         dispcnt: u16,
     },
+    UnsupportedBgControl {
+        bgcnt: u16,
+        reason: &'static str,
+    },
+    BgVramOutOfRange {
+        addr: u32,
+        width: u8,
+    },
     OutputTooSmall {
         width: u32,
         height: u32,
@@ -173,12 +181,19 @@ impl fmt::Display for Error {
             Error::UnsupportedDisplayMode { mode } => {
                 write!(
                     f,
-                    "display mode {mode} is not implemented (only modes 3, 4 and 5)"
+                    "display mode {mode} is not implemented (only Mode 0 BG0 and modes 3, 4 and 5)"
                 )
             }
             Error::UnsupportedPpuFeature { dispcnt } => write!(
                 f,
                 "DISPCNT 0x{dispcnt:04X} requests an unsupported PPU feature"
+            ),
+            Error::UnsupportedBgControl { bgcnt, reason } => {
+                write!(f, "BG0CNT 0x{bgcnt:04X} is unsupported: {reason}")
+            }
+            Error::BgVramOutOfRange { addr, width } => write!(
+                f,
+                "BG0 {width}-byte access at 0x{addr:08X} is outside Mode 0 BG VRAM (first 64 KiB)"
             ),
             Error::OutputTooSmall { width, height } => write!(
                 f,

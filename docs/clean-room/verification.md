@@ -60,14 +60,14 @@ lockfiles.
   including Pixels/Winit/WGPU and wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-  --locked`. It pins every target: 168 core integration tests across 26 files,
-  32 core library unit tests, 34 AOT integration tests across 13 files, 13 AOT
+  --locked`. It pins every target: 178 core integration tests across 27 files,
+  32 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
   library unit tests, 26 root integration tests across five files and 5 root
-  binary unit tests, exactly 278 selected package tests. The three workspace
+  binary unit tests, exactly 297 selected package tests. The three workspace
   compatibility contracts and frontend-tree failure contract add four tests to
-  the full `cargo test` count (282 total). The web clean-checkout bootstrap test
-  is included in the root integration targets; no prior core, AOT or root tests
-  are removed. Bare
+  the full `cargo test -- --list` inventory (301 total). The web clean-checkout
+  bootstrap test is included in the root integration targets; no prior core,
+  AOT or root tests are removed. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
   unrelated working directory that owns all generated output, and the quality
   counter is run through `--bin quality-counter` from the same directory.
@@ -109,7 +109,10 @@ lockfiles.
   return explicit errors. The last I/O byte `0x040003FF` reports
   `UnsupportedIoRead`/`UnsupportedIoWrite`, not `Unmapped`.
 - Palette/VRAM byte-store duplication and OAM byte-store ignore behavior.
-- DISPCNT/KEYINPUT only; KEYINPUT reports all buttons released.
+- DISPCNT and BG0CNT halfword R/W; BG0HOFS/BG0VOFS halfword write-only;
+  scroll bits 9..15 do not affect state. KEYINPUT reports all buttons released.
+  Other I/O and unimplemented widths remain explicit errors, and mutable BG0
+  register state changes `Bus::state_digest`.
 - ARM/Thumb ALU, NZCV for carry/borrow/overflow, condition-false no-op, PC
   advance, direct branches, `BL` link/return, BX ARM↔Thumb round trip, PC
   operand pipeline values, and aligned ALU PC writes.
@@ -278,11 +281,19 @@ expectations, not from the decoder/interpreter:
 
 ### Display and presentation
 
+- Mode 0 BG0 static snapshot: independent 4bpp palette-bank/transparency and
+  8bpp palette tests; horizontal/vertical flips; all four text-map sizes and
+  screen-block quadrants; low-nine-bit scroll, horizontal/vertical wrap;
+  disabled BG0/backdrop and forced blank; reserved/mosaic/other-layer/mode
+  errors; and map/tile accesses beyond the first 64 KiB BG VRAM allocation.
+- `crates/core/tests/bus.rs` checks BG0 register widths, write-only scroll reads,
+  ignored scroll upper bits, state digests and preserved unsupported-I/O errors.
 - Mode 3 complete 240x160 image asserted pixel-by-pixel against RGB555
   conversion. The synthetic guest image is asserted over every pixel.
 - Mode 4 palette index and frame page; mode 5 160x128 bounds/backdrop; forced
   blank white; BG2-disabled backdrop.
-- Unsupported display mode and OBJ/BG/window layers rejected.
+- Mode 1/2 remain unsupported; unsupported OBJ/BG/window/CGB features are
+  rejected. Mode 3/4/5 bitmap behavior remains covered by the existing tests.
 - Integer nearest scaling, exact 3:2 letterboxing, invalid sizes, and explicit
   rejection of FSR1/temporal-FSR/ML-FSR/DLSS names.
 - PPM header and payload length.
@@ -650,8 +661,11 @@ not initial HEAD sizes, and are not used as historical evidence.
 No hardware conformance ROM suite has been run. No retail game is supported or
 known playable. No BIOS boots; only the bounded synthetic SWI entry/return path
 is tested. Other exception entry/return, interrupt delivery, save persistence,
-audio, input interaction, DMA, cycle timing, tile/sprite rendering or a playable
-frontend is verified. The optional synthetic `apps/desktop` frontend presents
+audio, input interaction, DMA, cycle timing, other BG modes/layers, OBJ/sprite
+rendering or a playable frontend is verified. The static Mode 0 BG0 snapshot is
+only a synthetic, documentation-driven capability slice; it is not evidence
+that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
+optional synthetic `apps/desktop` frontend presents
 one static bitmap and has build/unit-test evidence plus one local macOS Metal
 smoke observation. The separate `apps/web` foundation presents that synthetic
 fixture through browser WebGPU/WebGL2 and has local build/functional-E2E evidence;
