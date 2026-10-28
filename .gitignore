@@ -8,3 +8,8 @@
 *.srm
 *.ss0
 .DS_Store
+
+# MIT-licensed black-box test ROMs; see tests/roms/gba-tests/README.md.
+# This must stay last: on a case-insensitive checkout `*.GBA` also matches
+# `.gba`, so the negation has to come after every ignore pattern.
+!/tests/roms/**/*.gba
