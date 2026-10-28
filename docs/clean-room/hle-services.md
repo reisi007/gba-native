@@ -137,11 +137,14 @@ Only r0 changes.
 - The expanded `units * width` range is checked before the first bus access.
   Overflow returns `RangeOverflow`; a range that leaves its documented bus
   region or crosses into another one returns `RangeOutsideRegion`.
-- Source regions are EWRAM, IWRAM, palette, VRAM, OAM and the three ROM windows.
+- Source regions are the full 16 MiB EWRAM/IWRAM mirror windows, palette, VRAM,
+  OAM and the three ROM windows. Crossing physical RAM-bank mirror seams within
+  one address window is valid; crossing from EWRAM to IWRAM is not.
   I/O, save space and unmapped addresses are `UnsupportedSource`. A source
   range reaching the 16 KiB BIOS area returns `Error::BiosAccess` instead of
   being read or silently rejected as success.
-- Destination regions are EWRAM, IWRAM, palette, VRAM and OAM. ROM, I/O, save
+- Destination regions are the full 16 MiB EWRAM/IWRAM mirror windows, palette,
+  VRAM and OAM. ROM, I/O, save
   space, BIOS and unmapped destinations are `UnsupportedDestination`; the whole
   unsupported range is rejected rather than partially attempted.
 - Fill reads exactly one source unit and writes it repeatedly. Copy reads and
@@ -173,31 +176,31 @@ Only r0 changes.
 - IWRAM `03007E00h..03007FFFh` is preserved.
 - GBATEK documents bit 5 as resetting SIO registers and switching to general-
   purpose mode, bit 6 as resetting sound registers, and bit 7 as resetting all
-  other registers except SIO and sound. All three are accepted. Bit 7 resets
-  exactly the modelled "other I/O" set (`BG0CNT`, `BG0HOFS`, `BG0VOFS`); bits 5
-  and 6 model no SIO or sound state at all, so their selected set is empty by
-  construction rather than by omission. `DISPCNT` is deliberately outside the
-  group: the service forces blank separately and the documented value survives.
-- The modelled-set contract is what keeps this honest: adding a new I/O register
-  to any of groups 5..7 without extending `Bus::reset_group7_io` changes the full
-  bus digest and fails `register_ram_reset_groups_five_to_seven_reach_the_modelled_io_set`.
+  other registers except SIO and sound. All three are accepted. Group 5 has no
+  modeled serial state. Group 6 applies only the sufficiently specified sound
+  effects: `SOUNDCNT_L := 0`, `SOUNDCNT_H := 0x880E`, `SOUNDCNT_X := 0`, clears
+  the upper SOUNDBIAS bits while preserving the low 10, and clears wave RAM.
+  Other sound bytes remain unchanged because their end values are ambiguous.
+  Group 7 clears exactly the modeled "other I/O" set: BG0 registers, WAITCNT,
+  DMA, DISPSTAT/IE/IF/IME and timer registers. `DISPCNT` is deliberately outside
+  group 7: the service forces blank separately and that value survives.
+- Regressions compare the full bus digest: group 7 clears its modeled set while
+  preserving sound; group 6 applies known effects while preserving group-7
+  state and unresolved sound bytes. Any newly modeled register must be assigned
+  to the correct reset group and added to these expectations.
 - Bits 8..31 carry no documented meaning and are ignored, matching the
   documented service rather than rejecting the call.
 - GBATEK also notes that the SIO `SIODATA32` least-significant bits are destroyed
   even when bit 5 is clear. The current bus has no `SIODATA32` state, so this
   side effect is not fabricated.
-- Any set bit 8..31 is reserved and returns `BiosError::ReservedResetFlags`
-  before memory or register mutation. If a request contains both reserved bits
-  and unmodeled groups 5..7, the reserved-bit error takes precedence.
-- Every accepted request writes `DISPCNT=0080h`, including flags zero, so a
-  display snapshot becomes forced-blank white. Invalid and unmodeled requests
-  fail validation before this write.
+- Every request writes `DISPCNT=0080h`, including flags zero, so a display
+  snapshot becomes forced-blank white.
 - Clears use 16-bit or 32-bit bus writes, not byte writes. OAM zeroing is not a
   claim that objects are disabled; DISPCNT bit 6 and OAM attribute state are
   separate.
-- The service does not model save/persistence, audio, serial or other I/O state
-  beyond its forced `DISPCNT` write; the unmodeled `SIODATA32` bug is an explicit
-  limitation noted above.
+- Sound register storage remains non-audio state; no audio is generated. Serial
+  state and the documented unconditional `SIODATA32` side effect remain
+  unmodeled; no save/persistence behavior is claimed.
 
 ## Deliberately unimplemented
 
@@ -205,8 +208,8 @@ The following are explicit `BiosError::UnsupportedService` values, never spins
 or silent successes:
 
 - `00h` SoftReset and `26h` HardReset (no CPU reset/reboot model here).
-- `02h` Halt, `04h` IntrWait and `05h` VBlankIntrWait: they require IRQ, IF/IE,
-  IME and timing state that this prototype does not model.
+- `02h` Halt, `04h` IntrWait and `05h` VBlankIntrWait: IRQ/frame state is
+  modelled, but these wait-service semantics are not implemented.
 - `03h` Stop/Sleep and `27h` CustomHalt.
 - `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, affine setup and every
   other service not listed above.

@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 
 const BIOS_END: u32 = 0x0000_4000;
 const ROM_WINDOW_LEN: u32 = 0x0200_0000;
+const WORK_RAM_WINDOW_LEN: u32 = 0x0100_0000;
 const COUNT_MASK: u32 = 0x001F_FFFF;
 const FILL_BIT: u32 = 1 << 24;
 const WORD_BIT: u32 = 1 << 26;
@@ -149,11 +150,10 @@ fn validate_cpu_fast_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
 /// top 512 bytes of IWRAM, reset the modelled I/O groups and always force blank
 /// via DISPCNT=0080h.
 ///
-/// Groups 5 (SIO) and 6 (sound) have **no modelled state** in this bus, so their
-/// selected set is empty by construction rather than by omission. Group 7 resets
-/// exactly the modelled "other I/O" registers. Bits 8..31 carry no documented
-/// meaning and are ignored, matching the documented BIOS behaviour instead of
-/// rejecting the call.
+/// Group 5 (SIO) has no modelled state, group 6 resets the modelled sound
+/// register storage, and group 7 resets exactly the modelled "other I/O" set.
+/// Bits 8..31 carry no documented meaning and are ignored, matching the
+/// documented BIOS behaviour instead of rejecting them.
 pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let flags = cpu.reg(0);
     if flags & 0x01 != 0 {
@@ -173,6 +173,9 @@ pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         // Zero-filling OAM does not by itself disable objects; DISPCNT bit 6
         // (OBJ enable) and the OAM attribute state are separate.
         fill_halfwords(bus, OAM_BASE, OAM_LEN)?;
+    }
+    if flags & 0x40 != 0 {
+        bus.reset_group6_sound();
     }
     if flags & 0x80 != 0 {
         bus.reset_group7_io();
@@ -329,10 +332,10 @@ impl Region {
 }
 
 fn region_of(addr: u32) -> Option<Region> {
-    if offset_in(addr, EWRAM_BASE, EWRAM_LEN) {
+    if in_window(addr, EWRAM_BASE, WORK_RAM_WINDOW_LEN) {
         return Some(Region::Ewram);
     }
-    if offset_in(addr, IWRAM_BASE, IWRAM_LEN) {
+    if in_window(addr, IWRAM_BASE, WORK_RAM_WINDOW_LEN) {
         return Some(Region::Iwram);
     }
     if offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
@@ -350,6 +353,10 @@ fn region_of(addr: u32) -> Option<Region> {
         }
     }
     None
+}
+
+fn in_window(addr: u32, base: u32, len: u32) -> bool {
+    addr.checked_sub(base).is_some_and(|offset| offset < len)
 }
 
 fn offset_in(addr: u32, base: u32, len: usize) -> bool {
@@ -385,9 +392,19 @@ mod tests {
     }
 
     #[test]
-    fn region_classification_has_no_mirrors() {
+    fn region_classification_includes_work_ram_mirrors() {
         assert!(matches!(region_of(EWRAM_BASE), Some(Region::Ewram)));
-        assert_eq!(region_of(EWRAM_BASE + EWRAM_LEN as u32), None);
+        assert!(matches!(
+            region_of(EWRAM_BASE + EWRAM_LEN as u32),
+            Some(Region::Ewram)
+        ));
+        assert!(matches!(region_of(0x02FF_FFFF), Some(Region::Ewram)));
+        assert!(matches!(region_of(IWRAM_BASE), Some(Region::Iwram)));
+        assert!(matches!(
+            region_of(IWRAM_BASE + IWRAM_LEN as u32),
+            Some(Region::Iwram)
+        ));
+        assert!(matches!(region_of(0x03FF_FFFF), Some(Region::Iwram)));
         assert_eq!(region_of(0x0000_0000), None);
         assert_eq!(region_of(0x0400_0000), None);
         assert!(matches!(

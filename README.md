@@ -37,9 +37,9 @@ the root workspace lockfile contains only these three internal path packages.
 | Area | State |
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
-| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset; Thumb MUL remains explicit |
+| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA and Thumb MUL |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches and the bounded framed SWI entry/return path |
-| Bus (RAM, VRAM, palette, OAM, ROM windows) | Small explicit subset; unsupported accesses error |
+| Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
 | ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
 | BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot, other exceptions or timing |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
@@ -131,9 +131,10 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   Neither branch is a playable standalone game, GUI frontend, save-aware app,
   final application or complete browser app: the WASM artifact is a
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or
-  persistence. Automated tests use synthetic fixtures; a separate local
-  supplied-ROM execution attempt and its explicit unsupported-service result
-  are recorded in the verification log, not as a compatibility claim.
+  persistence. Automated tests use synthetic fixtures; local supplied-ROM
+  attempts and their outcomes are recorded in the verification log. The latest
+  bounded run still stops on an explicit BIOS-access error; this is not a
+  compatibility, boot or playability claim.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
   paths are resolved into that root, symlinks below it are refused, and the
   location is validated before any directory is created. An existing explicit
@@ -308,9 +309,10 @@ open pending independent verification and CI; local tests alone do not close it.
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
-  SVC frame, six-service HLE dispatch and full CPSR return; other exception
-  classes, IRQ delivery and BIOS boot are not implemented.
-- Thumb: register ALU operations (all except `MUL`, which is explicit), shift by
+  SVC frame, six-service HLE dispatch and full CPSR return. IRQ delivery uses
+  the host-driven frame model and the documented IWRAM handler pointer; BIOS
+  boot is not implemented.
+- Thumb: register ALU operations including `MUL`, shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
   `MOV`/`CMP` are an explicit **Design** extension beyond the documented
@@ -321,8 +323,10 @@ open pending independent verification and CI; local tests alone do not close it.
   unconditional `B`, and typed SWI to the six documented HLE services. The
   ARMv5 `BLX` second half and register form are rejected;
   empty stack/block lists and unaligned SP/base are explicit errors.
-- Memory: exact EWRAM/IWRAM/palette/VRAM/OAM regions, three ROM windows,
-  DISPCNT and KEYINPUT. No mirrors, open bus, DMA, timers, interrupts or saves.
+- Memory/I/O: EWRAM and IWRAM mirrors, exact palette/VRAM/OAM regions, three ROM
+  windows, selected display/input/WAITCNT/DMA/IRQ/sound/timer registers. Unused
+  I/O writes are ignored and recorded; unmodelled reads remain errors. There is
+  no open bus, save support, cycle timing, audio generation or ticking timer.
 - Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.
   Tiles, sprites, windows, blending and affine transforms are unsupported.
 - AOT: only immutable ROM blocks; unknown targets use the reference interpreter;

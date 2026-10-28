@@ -164,27 +164,74 @@ fn register_ram_reset_all_memory_flags_preserves_iwram_tail() {
 }
 
 #[test]
-fn register_ram_reset_groups_five_to_seven_reach_the_modelled_io_set() {
+fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
     let (mut cpu, mut bus) = fresh();
     bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
     bus.write16(BG0CNT_ADDR, 0x1234).expect("bg0cnt");
     bus.write16(BG0HOFS_ADDR, 0x0102).expect("bg0hofs");
     bus.write16(BG0VOFS_ADDR, 0x0203).expect("bg0vofs");
-    cpu.set_reg(0, 0xE0); // groups 5..7 only: no memory group selected.
+    bus.write16(0x0400_0084, 0x1234).expect("sound register");
+    cpu.set_reg(0, 0xA0); // groups 5 and 7; sound group 6 is not selected.
 
-    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 5..7");
+    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 5 and 7");
 
-    // Group 7 covers every modelled "other I/O" register; groups 5 and 6 model
-    // no SIO or sound state, so their selected set is empty. BG0HOFS/BG0VOFS are
-    // write-only on this bus, so the whole modelled state is compared against a
-    // fresh bus that only carries the unconditional forced blank.
+    // Group 7 resets the modelled "other I/O" set, group 5 has no SIO state,
+    // and the unselected group 6 leaves sound storage untouched. Scroll
+    // registers are write-only, so compare the full bus digest.
     let (_, mut expected) = fresh();
+    expected
+        .write16(0x0400_0084, 0x1234)
+        .expect("expected sound register");
     expected
         .write16(DISPCNT_ADDR, 0x0080)
         .expect("expected dispcnt");
     assert_eq!(bus.state_digest(), expected.state_digest());
     // DISPCNT is not part of group 7; only the unconditional forced blank shows.
     assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0080);
+}
+
+#[test]
+fn register_ram_reset_group_six_applies_known_sound_effects_only() {
+    let (mut cpu, mut bus) = fresh();
+    bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
+    bus.write16(BG0CNT_ADDR, 0x1234).expect("bg0cnt");
+    bus.write16(0x0400_0060, 0x55AA)
+        .expect("unresolved sound register");
+    bus.write16(0x0400_0080, 0x1111).expect("sound control L");
+    bus.write16(0x0400_0082, 0x2222).expect("sound control H");
+    bus.write16(0x0400_0084, 0x1234).expect("sound register");
+    bus.write16(0x0400_0088, 0xABCD).expect("sound bias");
+    bus.write16(0x0400_0090, 0x3456).expect("wave RAM");
+    bus.write32(0x0400_00A0, 0xDEAD_BEEF)
+        .expect("unresolved FIFO state");
+    bus.write16(0x0400_0102, 0x5678).expect("timer register");
+    cpu.set_reg(0, 0x40);
+
+    bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset sound group");
+
+    let (_, mut expected) = fresh();
+    expected
+        .write16(BG0CNT_ADDR, 0x1234)
+        .expect("expected bg0cnt");
+    expected
+        .write16(0x0400_0060, 0x55AA)
+        .expect("expected unresolved sound register");
+    expected
+        .write16(0x0400_0082, 0x880E)
+        .expect("expected sound control H");
+    expected
+        .write16(0x0400_0088, 0x03CD)
+        .expect("expected retained sound bias");
+    expected
+        .write32(0x0400_00A0, 0xDEAD_BEEF)
+        .expect("expected unresolved FIFO state");
+    expected
+        .write16(0x0400_0102, 0x5678)
+        .expect("expected timer register");
+    expected
+        .write16(DISPCNT_ADDR, 0x0080)
+        .expect("expected forced blank");
+    assert_eq!(bus.state_digest(), expected.state_digest());
 }
 
 #[test]

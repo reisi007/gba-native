@@ -2,7 +2,7 @@
 //! ARMv4 base-in-list specials, PC entries, condition-false behavior and the
 //! documented non-atomic partial-failure policy.
 
-use gba_native_core::bus::{Bus, EWRAM_BASE, EWRAM_LEN};
+use gba_native_core::bus::{Bus, EWRAM_BASE, PALETTE_BASE, PALETTE_LEN};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
 use gba_native_core::decode::decode_arm;
@@ -197,7 +197,9 @@ fn unaligned_base_is_rejected_before_any_access_or_writeback() {
 
 #[test]
 fn partial_multiaccess_failure_is_observable_and_never_promises_atomicity() {
-    let last_word = EWRAM_BASE + EWRAM_LEN as u32 - 4;
+    // The work-RAM windows mirror, so the palette boundary is the shortest
+    // region whose next word is genuinely unmapped.
+    let last_word = PALETTE_BASE + PALETTE_LEN as u32 - 4;
 
     // LDM: the first register is written, the second access fails, no WB.
     let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 1, 3, 0b0110));

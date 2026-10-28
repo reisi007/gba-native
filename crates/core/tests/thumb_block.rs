@@ -2,7 +2,7 @@
 //! full-descending SP, LDMIA/STMIA writeback and base-in-list specials,
 //! unaligned-base policy and non-atomic partial failure.
 
-use gba_native_core::bus::{Bus, EWRAM_BASE, EWRAM_LEN};
+use gba_native_core::bus::{Bus, EWRAM_BASE, PALETTE_BASE, PALETTE_LEN};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
 use gba_native_core::decode::decode_thumb;
@@ -162,9 +162,11 @@ fn unaligned_sp_or_block_base_is_rejected_before_any_access() {
 
 #[test]
 fn partial_stack_and_block_failure_is_not_atomic() {
-    let last_word = EWRAM_BASE + EWRAM_LEN as u32 - 4;
+    // Work RAM mirrors, so the palette boundary is the shortest region whose
+    // next word is genuinely unmapped.
+    let last_word = PALETTE_BASE + PALETTE_LEN as u32 - 4;
 
-    // PUSH: SP + 4 makes the first of two words land in the last EWRAM word
+    // PUSH: SP + 4 makes the first of two words land in the last palette word
     // and the second one past the end.
     let (mut cpu, mut bus) = thumb(push(0b0011, false));
     cpu.set_reg(13, last_word + 8);

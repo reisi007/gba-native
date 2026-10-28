@@ -103,18 +103,20 @@ lockfiles.
 
 ### Bus, CPU and decoder
 
-- Exact ends of EWRAM/IWRAM/palette/VRAM/OAM; out-of-region addresses error.
+- EWRAM/IWRAM mirror throughout their 16 MiB windows; palette/VRAM/OAM retain
+  exact ends and out-of-region accesses error.
 - Three ROM windows alias the same bytes; ROM writes and overreads error.
-- BIOS, save, unknown I/O, unimplemented I/O, bad widths and unaligned accesses
-  return explicit errors. The last I/O byte `0x040003FF` reports
-  `UnsupportedIoRead`/`UnsupportedIoWrite`, not `Unmapped`.
+- BIOS, save, unmodelled I/O reads, bad widths and unaligned accesses return
+  explicit errors. Unmodelled I/O writes are ignored and recorded in a bounded
+  4096-address sample; the total operation count and truncation flag are exposed.
+  The unused `0x04000400..=0x04FFFFFF` window is likewise write-only ignored.
 - Palette/VRAM byte-store duplication and OAM byte-store ignore behavior.
 - DISPCNT and BG0CNT halfword R/W; BG0HOFS/BG0VOFS halfword write-only;
   scroll bits 9..15 do not affect state. KEYINPUT defaults to all buttons
   released; host pressed-mask tests cover active-low mapping for all ten keys,
-  unused-bit masking, digest inclusion and rejected guest writes. Other I/O and
-  unimplemented widths remain explicit errors, and mutable BG0 register state
-  changes `Bus::state_digest`.
+  unused-bit masking and digest inclusion. Guest KEYINPUT writes have no effect.
+  32-bit I/O composes halfword accesses, and mutable BG0 register state changes
+  `Bus::state_digest`.
 - ARM/Thumb ALU, NZCV for carry/borrow/overflow, condition-false no-op, PC
   advance, direct branches, `BL` link/return, BX ARM↔Thumb round trip, PC
   operand pipeline values, and aligned ALU PC writes.
@@ -145,6 +147,9 @@ lockfiles.
 - `crates/core/src/bus/dma.rs`: word and halfword copies advance by one data
   unit, a fixed source fills the destination, CNT_L keeps its written value,
   and a repeating channel stays enabled.
+- `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the frame boundary
+  raises VBlank/IF, IRQ gating requires IME/IE/pending, and sound/timer
+  registers retain their storage-only behavior.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
@@ -177,10 +182,10 @@ are in `hle-services.md`.
   mutation. The table is not computed from the production rounding formula.
 - `crates/core/tests/bios_reset.rs` and `crates/core/tests/bios_dispatch.rs`: flags
   0..4 memory-reset regressions, IWRAM-tail preservation and unconditional
-  forced blank; flags 5..7 are accepted and bit 7 restores the whole modelled
-  I/O set (compared by full bus digest against a fresh bus), while bits 8..31
-  select nothing and still force blank. Dispatch also checks explicit
-  `UnsupportedService` results that mutate nothing.
+  forced blank; flags 5..7 are accepted, group 6 applies the known sound effects,
+  and group 7 resets the modelled other-I/O set while preserving sound (full bus
+  digest regressions). Bits 8..31 select nothing and still force blank. Dispatch
+  also checks explicit `UnsupportedService` results that mutate nothing.
 
 These tests use synthetic RAM/ROM fixtures only and require no user-supplied
 ROM, BIOS image, save, network or external crate. This is not evidence for BIOS
@@ -456,15 +461,19 @@ offline and do not require wasm-bindgen, Node, a browser or the wasm32 target.
   a complete frontend, per-ROM workload behavior beyond the synthetic fixture,
   or any retail-game/playability claim.
 
-### Local supplied-ROM execution attempt (2026-10-28)
+### Local supplied-ROM execution attempts (2026-10-28)
 
-The owner-supplied ROM was kept external and read-only. Native macOS ARM64 and
-WASM module builds completed, but executing either artifact stopped with the
-same explicit core error: `BIOS HLE: RegisterRamReset flags 0x000000FF request
-unsupported reset bits 5..31`. This is not a boot or gameplay result; the
-prototype's documented HLE boundary rejects the requested reset flags. A
-modified in-memory copy was rejected as `ROM mismatch` by the WASM binding
-before guest execution. No filename, digest or ROM bytes are recorded here.
+The owner-supplied ROM was kept external and read-only. The initial native
+macOS ARM64 and WASM module attempts stopped at
+`RegisterRamReset flags 0x000000FF request unsupported reset bits 5..31`; that
+historical failure was superseded when groups 5..7 were modelled.
+
+A later bounded native run advances past the reset and initialization accesses,
+but still stops with `BIOS access at 0x00000000: direct-entry mode has no BIOS`.
+This is not a boot or gameplay result, and the error alone does not distinguish
+an HLE source preflight from a guest data read. A modified in-memory copy was
+rejected as `ROM mismatch` by the WASM binding before guest execution. No
+filename, digest or ROM bytes are recorded here.
 
 The macOS x86_64 artifact also built. Windows MSVC did not link because
 `link.exe` was unavailable, and Linux x86_64 did not link because a Linux linker

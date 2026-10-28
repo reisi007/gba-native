@@ -83,14 +83,12 @@ impl IoState {
                 self.waitcnt = value & 0x3FFF;
                 Ok(())
             }
-            KEYINPUT_ADDR => Err(Error::UnsupportedIoWrite { addr, width: 16 }),
+            // KEYINPUT is read-only on hardware: the write has no effect.
+            KEYINPUT_ADDR => Ok(()),
             _ => return None,
         })
     }
 
-    /// SWI 01h group 7 over the *modelled* "other I/O" set. DISPCNT is
-    /// deliberately absent: the service forces blank separately, and GBATEK
-    /// documents the forced-blank value surviving the group-7 clear.
     pub(super) fn dma(&self) -> &DmaState {
         &self.dma
     }
@@ -130,8 +128,11 @@ impl IoState {
         self.waitcnt = 0;
         self.dma = DmaState::default();
         self.irq.reset_group7();
-        self.sound.reset();
         self.timer.reset();
+    }
+
+    pub(super) fn reset_group6(&mut self) {
+        self.sound.reset_group6();
     }
 
     pub(super) fn append_digest(&self, bytes: &mut Vec<u8>) {

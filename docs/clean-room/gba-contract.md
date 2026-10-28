@@ -87,7 +87,7 @@ S1. Guest ARM/Thumb SWIs dispatch to those same services through
 
 | SWI | Service | Boundary |
 | --- | --- | --- |
-| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, resets the modelled group-7 I/O set, always forces blank, and ignores bits 8..31; groups 5 (SIO) and 6 (sound) model no state |
+| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, applies the specified group-6 sound effects and modelled group-7 I/O reset, always forces blank, and ignores bits 8..31; group 5 (SIO) has no modeled state |
 | `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
 | `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
 | `08h` | `Sqrt` | Floor unsigned integer square root of r0 |
@@ -144,7 +144,7 @@ Implemented regions and widths:
 | --- | --- | --- | --- | --- |
 | EWRAM | `0x02000000` | 256 KiB | 8/16/32 | 8/16/32 |
 | IWRAM | `0x03000000` | 32 KiB | 8/16/32 | 8/16/32 |
-| I/O | `0x04000000` | implemented registers only | 16 | 16 |
+| I/O | `0x04000000` | implemented registers only | register-specific 8/16/32 | register-specific 8/16/32 |
 | Palette | `0x05000000` | 1 KiB | 8/16/32 | 8/16/32 |
 | VRAM | `0x06000000` | 96 KiB | 8/16/32 | 8/16/32 |
 | OAM | `0x07000000` | 1 KiB | 8/16/32 | 8/16/32 |
@@ -153,12 +153,14 @@ Implemented regions and widths:
 - The three ROM windows alias the same immutable cartridge bytes via a 32 MiB
   offset mask. Writes return `RomWrite`; reads past the image return
   `RomOverread`. ROM bytes cannot be mutated through the bus.
-- No general address mirroring is modeled. EWRAM/VRAM/palette/OAM addresses just
-  outside their exact regions are `Unmapped`; this prototype does not claim the
-  GBA's partial-decoding mirrors or open-bus behavior.
+- Work RAM mirrors its bank across the documented 16 MiB window: 256 KiB EWRAM
+  over `0x02000000..=0x02FFFFFF` and 32 KiB IWRAM over `0x03000000..=0x03FFFFFF`
+  (`#gba-memory-map`). No other mirroring is modelled: VRAM/palette/OAM addresses
+  just outside their exact regions are `Unmapped`, and no open-bus behaviour is
+  claimed.
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
-  require 4-byte alignment. I/O supports halfword access to the implemented
-  registers, plus 32-bit reads/writes over the DMA address pairs.
+  require 4-byte alignment. I/O uses register-specific 8/16-bit access, and a
+  32-bit access composes two halfword accesses (including across register pairs).
 - Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
   halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
   writes; KEYINPUT halfword read (`0x04000130`); WAITCNT (`0x04000204`) halfword
@@ -167,15 +169,23 @@ Implemented regions and widths:
   pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
-  guest writes remain `UnsupportedIoWrite`. This host setter provides no frame
-  scheduler, sampling guarantee or timing claim. BG0 scroll reads are
+  guest writes have no effect. This host setter provides no frame scheduler,
+  sampling guarantee or timing claim. BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
-  Every other width/address, including the last I/O byte at `0x040003FF`, stays
-  an `UnsupportedIoRead`/`UnsupportedIoWrite` rather than `Unmapped`. Mutable
-  display-register and dynamic KEYINPUT state are included in `Bus::state_digest`.
-  There is no VCOUNT, DISPSTAT, timer, interrupt, sound or serial state, and no
-  BG affine parameter or save-register state.
+  A 32-bit I/O access is composed from two halfword accesses, as on hardware.
+- I/O write policy: a write that no modelled register claims is **ignored and
+  recorded** (`Bus::ignored_io_writes`); the first 4096 distinct addresses are
+  retained, while `ignored_io_write_count` and `ignored_io_writes_truncated`
+  report total operations and whether the sample overflowed. This matches the
+  hardware behaviour for unused I/O space and for the unused
+  `0x04000400..=0x04FFFFFF` window. Reads of unmodelled registers stay explicit
+  errors, because open bus is not modelled.
+  `KEYINPUT` is read-only: a write is accepted with no effect. This keeps the
+  set of silently-dropped addresses small, inspectable and out of the digest.
+  Mutable display-register and dynamic KEYINPUT state are included in
+  `Bus::state_digest`. Sound and timer blocks are storage-only; there is no
+  serial or save-register state, and no BG affine parameter state.
 
 ### DMA channels
 

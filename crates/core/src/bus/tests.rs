@@ -37,10 +37,9 @@ fn rejects_unsupported_and_out_of_bounds() {
         bus.read16(0x0400_000A),
         Err(Error::UnsupportedIoRead { .. })
     ));
-    assert!(matches!(
-        bus.write16(0x0400_000A, 0),
-        Err(Error::UnsupportedIoWrite { .. })
-    ));
+    // Unmodelled I/O writes are ignored and recorded, not rejected.
+    assert_eq!(bus.write16(0x0400_000A, 0), Ok(()));
+    assert_eq!(bus.ignored_io_writes(), &[0x0400_000A]);
     assert!(matches!(
         bus.write8(0x0800_0000, 0),
         Err(Error::RomWrite { .. })
@@ -53,12 +52,24 @@ fn rejects_unsupported_and_out_of_bounds() {
         bus.read32(0x0200_0002),
         Err(Error::UnalignedWord { .. })
     ));
-    assert!(matches!(
-        bus.read8(0x0204_0000),
-        Err(Error::Unmapped { .. })
-    ));
+    // Work RAM mirrors across its 16 MiB window instead of being unmapped.
+    assert_eq!(bus.read8(0x0204_0000), Ok(0));
+    assert_eq!(bus.read8(0x02FF_FFFF), Ok(0));
+    assert_eq!(bus.read8(0x0300_8000), Ok(0));
     assert!(matches!(
         bus.read8(0x0E00_0000),
         Err(Error::UnsupportedSave { .. })
     ));
+}
+
+#[test]
+fn work_ram_range_validation_accepts_mirrors_and_bank_wraps() {
+    assert!(Bus::is_work_ram_range(0x0204_0000, 16));
+    assert!(Bus::is_work_ram_range(0x0300_8000, 16));
+    assert!(Bus::is_work_ram_range(
+        IWRAM_BASE + IWRAM_LEN as u32 - 8,
+        16
+    ));
+    assert!(!Bus::is_work_ram_range(0x03FF_FFF8, 16));
+    assert!(!Bus::is_work_ram_range(EWRAM_BASE, 0));
 }

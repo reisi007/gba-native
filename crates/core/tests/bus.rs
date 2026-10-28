@@ -56,21 +56,19 @@ fn rom_windows_are_immutable_aliases() {
 }
 
 #[test]
-fn ram_and_video_region_ends_are_exact() {
+fn work_ram_mirrors_and_video_region_ends_are_exact() {
     let mut bus = Bus::new(cart(0x200));
+    // Work RAM mirrors its bank across the whole 16 MiB window, so a bank end
+    // aliases the bank start instead of being unmapped.
     bus.write32(EWRAM_BASE, 0x1122_3344).expect("ewram");
+    assert_eq!(bus.fetch16(EWRAM_BASE + EWRAM_LEN as u32), Ok(0x3344));
     assert_eq!(bus.read32(EWRAM_BASE + EWRAM_LEN as u32 - 4), Ok(0));
-    assert!(matches!(
-        bus.read8(EWRAM_BASE + EWRAM_LEN as u32),
-        Err(Error::Unmapped { .. })
-    ));
+    assert_eq!(bus.read8(EWRAM_BASE + EWRAM_LEN as u32), Ok(0x44));
 
     bus.write32(IWRAM_BASE, 0xAABB_CCDD).expect("iwram");
+    assert_eq!(bus.fetch16(IWRAM_BASE + IWRAM_LEN as u32), Ok(0xCCDD));
     assert_eq!(bus.read32(IWRAM_BASE + IWRAM_LEN as u32 - 4), Ok(0));
-    assert!(matches!(
-        bus.read8(IWRAM_BASE + IWRAM_LEN as u32),
-        Err(Error::Unmapped { .. })
-    ));
+    assert_eq!(bus.read8(IWRAM_BASE + IWRAM_LEN as u32), Ok(0xDD));
 
     bus.write16(VRAM_BASE + VRAM_LEN as u32 - 2, 0x1234)
         .expect("vram end");
@@ -119,10 +117,8 @@ fn implemented_io_registers_and_keyinput_are_explicit() {
     assert_eq!(bus.dispcnt(), 0x0403);
     assert_eq!(bus.read16(DISPCNT_ADDR), Ok(0x0403));
     bus.set_pressed_keys(KEY_A);
-    assert!(matches!(
-        bus.write16(KEYINPUT_ADDR, 0),
-        Err(Error::UnsupportedIoWrite { .. })
-    ));
+    // KEYINPUT is read-only; a write is accepted and has no effect.
+    assert_eq!(bus.write16(KEYINPUT_ADDR, 0), Ok(()));
     assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED & !KEY_A));
     assert!(matches!(
         bus.read16(DISPCNT_ADDR + 2),
@@ -132,23 +128,69 @@ fn implemented_io_registers_and_keyinput_are_explicit() {
         bus.read8(DISPCNT_ADDR),
         Err(Error::UnsupportedIoRead { width: 8, .. })
     ));
+    // 32-bit I/O is two halfword reads; the second half (0x04000002) fails.
     assert!(matches!(
         bus.read32(DISPCNT_ADDR),
-        Err(Error::UnsupportedIoRead { width: 32, .. })
+        Err(Error::UnsupportedIoRead { width: 16, .. })
     ));
     // 0x040003FF is the last I/O byte; it is unsupported I/O, not unmapped.
     assert!(matches!(
         bus.read8(DISPCNT_ADDR + 0x3FF),
         Err(Error::UnsupportedIoRead { width: 8, .. })
     ));
-    assert!(matches!(
-        bus.write8(DISPCNT_ADDR + 0x3FF, 0),
-        Err(Error::UnsupportedIoWrite { width: 8, .. })
-    ));
+    // Unmodelled I/O writes are ignored and recorded.
+    assert_eq!(bus.write8(DISPCNT_ADDR + 0x3FF, 0), Ok(()));
     assert!(matches!(
         bus.read8(DISPCNT_ADDR + 0x400),
         Err(Error::Unmapped { .. })
     ));
+}
+
+#[test]
+fn ignored_io_writes_are_recorded_without_mutating_guest_state() {
+    let mut bus = Bus::new(cart(0x200));
+    let before = bus.state_digest();
+
+    // 0xA8 is an unmodelled halfword; 32-bit writes compose two halfwords.
+    bus.write32(0x0400_00A8, 0x1234_5678)
+        .expect("unused I/O write");
+    // A write in the unused I/O address window is ignored too.
+    bus.write16(0x0400_0400, 0xABCD)
+        .expect("unused I/O window write");
+    bus.write16(0x0400_00A8, 0x9ABC)
+        .expect("repeat unused I/O address");
+
+    assert_eq!(
+        bus.ignored_io_writes(),
+        &[0x0400_00A8, 0x0400_00AA, 0x0400_0400]
+    );
+    assert_eq!(bus.state_digest(), before);
+    assert_eq!(bus.ignored_io_write_count(), 4);
+    assert!(!bus.ignored_io_writes_truncated());
+    assert!(matches!(
+        bus.read16(0x0400_00A8),
+        Err(Error::UnsupportedIoRead { .. })
+    ));
+    assert!(matches!(
+        bus.read16(0x0400_0400),
+        Err(Error::Unmapped { .. })
+    ));
+}
+
+#[test]
+fn ignored_io_write_log_is_bounded_and_reports_truncation() {
+    let mut bus = Bus::new(cart(0x200));
+    let before = bus.state_digest();
+    for offset in 0..4098u32 {
+        bus.write8(0x0400_0400 + offset, offset as u8)
+            .expect("unused I/O write");
+    }
+
+    assert_eq!(bus.ignored_io_writes().len(), 4096);
+    assert_eq!(bus.ignored_io_writes()[0], 0x0400_0400);
+    assert_eq!(bus.ignored_io_write_count(), 4098);
+    assert!(bus.ignored_io_writes_truncated());
+    assert_eq!(bus.state_digest(), before);
 }
 
 #[test]
@@ -234,18 +276,13 @@ fn bg0_register_widths_write_only_scroll_and_digest_are_explicit() {
         bus.read8(BG0CNT_ADDR),
         Err(Error::UnsupportedIoRead { width: 8, .. })
     ));
+    // A 32-bit I/O read is two halfword reads, so the second half fails first.
     assert!(matches!(
         bus.read32(BG0CNT_ADDR),
-        Err(Error::UnsupportedIoRead { width: 32, .. })
+        Err(Error::UnsupportedIoRead { width: 16, .. })
     ));
-    assert!(matches!(
-        bus.write8(BG0CNT_ADDR, 0),
-        Err(Error::UnsupportedIoWrite { width: 8, .. })
-    ));
-    assert!(matches!(
-        bus.write32(BG0CNT_ADDR, 0),
-        Err(Error::UnsupportedIoWrite { width: 32, .. })
-    ));
+    assert_eq!(bus.write8(BG0CNT_ADDR, 0), Ok(()));
+    assert_eq!(bus.write32(BG0CNT_ADDR, 0), Ok(()));
 }
 
 #[test]

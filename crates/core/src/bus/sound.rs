@@ -43,8 +43,16 @@ impl SoundState {
         true
     }
 
-    pub(super) fn reset(&mut self) {
-        *self = Self::default();
+    /// Apply only the documented RegisterRamReset group-6 effects that are
+    /// sufficiently specified in the reviewed behavior report. Other sound
+    /// bytes stay untouched rather than guessing ambiguous end values.
+    pub(super) fn reset_group6(&mut self) {
+        self.regs[0x20..0x22].fill(0); // SOUNDCNT_L
+        self.regs[0x22..0x24].copy_from_slice(&0x880Eu16.to_le_bytes()); // SOUNDCNT_H
+        self.regs[0x24..0x26].fill(0); // SOUNDCNT_X ends disabled
+        let bias = u16::from_le_bytes([self.regs[0x28], self.regs[0x29]]) & 0x03FF;
+        self.regs[0x28..0x2A].copy_from_slice(&bias.to_le_bytes());
+        self.regs[0x30..0x40].fill(0); // 16-byte wave-RAM area
     }
 
     pub(super) fn append_digest(&self, bytes: &mut Vec<u8>) {
@@ -71,17 +79,5 @@ impl Bus {
     pub(super) fn sound_write16(&mut self, addr: u32, value: u16) -> bool {
         let bytes = value.to_le_bytes();
         self.sound_write8(addr, bytes[0]) && self.sound_write8(addr + 1, bytes[1])
-    }
-
-    pub(super) fn sound_read32(&self, addr: u32) -> Option<u32> {
-        let low = self.sound_read16(addr)? as u32;
-        let high = self.sound_read16(addr + 2)? as u32;
-        Some(low | (high << 16))
-    }
-
-    pub(super) fn sound_write32(&mut self, addr: u32, value: u32) -> bool {
-        let halves = value.to_le_bytes();
-        self.sound_write16(addr, u16::from_le_bytes([halves[0], halves[1]]))
-            && self.sound_write16(addr + 2, u16::from_le_bytes([halves[2], halves[3]]))
     }
 }

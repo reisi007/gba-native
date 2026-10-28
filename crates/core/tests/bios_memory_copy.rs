@@ -164,6 +164,46 @@ fn cpu_set_forward_overlap_smears_instead_of_snapshotting() {
 }
 
 #[test]
+fn cpu_set_and_cpu_fast_set_accept_work_ram_mirrors() {
+    let (mut cpu, mut bus) = fresh();
+
+    // CpuSet crosses the physical EWRAM-bank seam through its CPU-visible
+    // mirror window; both halfwords remain in the same address-space region.
+    let ewram_source = EWRAM_BASE + EWRAM_LEN as u32 - 2;
+    let ewram_destination = EWRAM_BASE + 0x0008_0200;
+    bus.write16(ewram_source, 0x1111).expect("seed EWRAM tail");
+    bus.write16(EWRAM_BASE, 0x2222)
+        .expect("seed EWRAM mirror target");
+    set_args(&mut cpu, ewram_source, ewram_destination, 2);
+    bios::call(bios::SERVICE_CPU_SET, &mut cpu, &mut bus).expect("mirrored CpuSet");
+    assert_eq!(bus.read16(ewram_destination).expect("destination"), 0x1111);
+    assert_eq!(
+        bus.read16(ewram_destination + 2)
+            .expect("next mirrored unit"),
+        0x2222
+    );
+
+    // CpuFastSet accepts mirrored source and destination addresses in IWRAM.
+    let iwram_source = IWRAM_BASE + 0x100;
+    let iwram_destination = IWRAM_BASE + 0x200;
+    let source_alias = IWRAM_BASE + 0x0001_0100;
+    let destination_alias = IWRAM_BASE + 0x0002_0200;
+    for word in 0..8u32 {
+        bus.write32(iwram_source + word * 4, 0xCAFE_0000 + word)
+            .expect("seed IWRAM");
+    }
+    set_args(&mut cpu, source_alias, destination_alias, 8);
+    bios::call(bios::SERVICE_CPU_FAST_SET, &mut cpu, &mut bus).expect("mirrored CpuFastSet");
+    for word in 0..8u32 {
+        assert_eq!(
+            bus.read32(iwram_destination + word * 4)
+                .expect("IWRAM target"),
+            0xCAFE_0000 + word
+        );
+    }
+}
+
+#[test]
 fn cpu_set_rejects_alignment_reserved_bios_and_ranges_before_mutation() {
     let (mut cpu, mut bus) = fresh();
     let destination = EWRAM_BASE + 0xA00;
@@ -201,8 +241,8 @@ fn cpu_set_rejects_alignment_reserved_bios_and_ranges_before_mutation() {
         Err(Error::BiosAccess { addr: 0x3FFE })
     );
 
-    // Crosses the EWRAM boundary.
-    set_args(&mut cpu, EWRAM_BASE + EWRAM_LEN as u32 - 2, destination, 2);
+    // Crosses the end of the 16 MiB EWRAM address window into IWRAM.
+    set_args(&mut cpu, 0x02FF_FFFE, destination, 2);
     assert!(matches!(
         bios::call(bios::SERVICE_CPU_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::RangeOutsideRegion { .. }))
@@ -216,12 +256,16 @@ fn cpu_set_rejects_alignment_reserved_bios_and_ranges_before_mutation() {
     ));
 
     // ROM, I/O and unmapped destinations are rejected whole.
-    for bad_destination in [ROM_BASE, 0x0400_0000, EWRAM_BASE + EWRAM_LEN as u32] {
+    for bad_destination in [ROM_BASE, 0x0400_0000, 0x0480_0000] {
         set_args(&mut cpu, EWRAM_BASE, bad_destination, 1);
-        assert!(matches!(
-            bios::call(bios::SERVICE_CPU_SET, &mut cpu, &mut bus),
-            Err(Error::Bios(BiosError::UnsupportedDestination { .. }))
-        ));
+        let error = bios::call(bios::SERVICE_CPU_SET, &mut cpu, &mut bus);
+        assert!(
+            matches!(
+                error,
+                Err(Error::Bios(BiosError::UnsupportedDestination { .. }))
+            ),
+            "destination {bad_destination:#010X}: {error:?}"
+        );
     }
 
     // I/O is not a read source either.
@@ -367,8 +411,9 @@ fn cpu_fast_set_rejects_reserved_bits_alignment_and_rounded_overflow() {
         Err(Error::Bios(BiosError::Misaligned { align: 4, .. }))
     ));
 
-    // One requested word rounds up to eight and crosses the EWRAM end.
-    set_args(&mut cpu, EWRAM_BASE, EWRAM_BASE + EWRAM_LEN as u32 - 4, 1);
+    // One requested word rounds up to eight and crosses the EWRAM address
+    // window into IWRAM (crossing a physical bank seam is valid).
+    set_args(&mut cpu, EWRAM_BASE, 0x02FF_FFFC, 1);
     assert!(matches!(
         bios::call(bios::SERVICE_CPU_FAST_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::RangeOutsideRegion { .. }))

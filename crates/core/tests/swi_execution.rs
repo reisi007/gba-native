@@ -44,6 +44,12 @@ fn prepared_cpu() -> Cpu {
 fn arm_div_enters_svc_frames_and_returns_with_full_cpsr() {
     let mut bus = fixture(&[arm_swi(0x06)]);
     let mut cpu = prepared_cpu();
+    // Place the SVC frame above the physical IWRAM bank to exercise the
+    // documented mirror through the same guest-visible bus accesses.
+    set_mode(&mut cpu, Mode::Svc);
+    let mirrored_svc_sp = IWRAM_BASE + IWRAM_LEN as u32 + 0x10;
+    cpu.set_reg(13, mirrored_svc_sp);
+    set_mode(&mut cpu, Mode::System);
     cpu.set_reg(0, (-1234i32) as u32);
     cpu.set_reg(1, 10);
     cpu.set_reg(11, 0x1122_3344);
@@ -67,13 +73,26 @@ fn arm_div_enters_svc_frames_and_returns_with_full_cpsr() {
     assert_eq!(cpu.reg(11), 0x1122_3344);
     assert_eq!(cpu.reg(12), 0x5566_7788);
     assert_eq!(cpu.reg(14), 0xAABB_CCDD);
-    assert_eq!(bus.read32(SVC_FRAME).expect("saved SPSR"), expected_cpsr);
-    assert_eq!(bus.read32(SVC_FRAME + 4).expect("saved r11"), 0x1122_3344);
-    assert_eq!(bus.read32(SVC_FRAME + 8).expect("saved r12"), 0x5566_7788);
-    assert_eq!(bus.read32(SVC_FRAME + 12).expect("saved LR"), ENTRY + 4);
+    let mirrored_frame = mirrored_svc_sp - 16;
+    assert_eq!(
+        bus.read32(mirrored_frame).expect("saved SPSR"),
+        expected_cpsr
+    );
+    assert_eq!(
+        bus.read32(mirrored_frame + 4).expect("saved r11"),
+        0x1122_3344
+    );
+    assert_eq!(
+        bus.read32(mirrored_frame + 8).expect("saved r12"),
+        0x5566_7788
+    );
+    assert_eq!(
+        bus.read32(mirrored_frame + 12).expect("saved LR"),
+        ENTRY + 4
+    );
 
     set_mode(&mut cpu, Mode::Svc);
-    assert_eq!(cpu.reg(13), 0x0300_7FE0);
+    assert_eq!(cpu.reg(13), mirrored_svc_sp);
     assert_eq!(cpu.reg(14), ENTRY + 4);
     assert_eq!(
         cpu.read_psr(Psr::Spsr).expect("restored SPSR"),
@@ -206,7 +225,8 @@ fn invalid_svc_stack_is_rejected_without_frame_or_service_effects() {
     let mut bus = fixture(&[arm_swi(0x08)]);
     let mut cpu = prepared_cpu();
     set_mode(&mut cpu, Mode::Svc);
-    cpu.set_reg(13, 0x0400_0000);
+    // This places the frame beyond the full 16 MiB IWRAM mirror window.
+    cpu.set_reg(13, 0x0400_0010);
     set_mode(&mut cpu, Mode::System);
     let before = (cpu.state_digest(), bus.state_digest());
 
