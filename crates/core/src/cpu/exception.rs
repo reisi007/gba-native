@@ -18,6 +18,24 @@ impl Cpu {
         self.sp[Mode::Svc.bank()] = value;
     }
 
+    /// True while the CPSR I bit masks IRQs.
+    pub(crate) fn irq_masked(&self) -> bool {
+        self.cpsr & FLAG_I != 0
+    }
+
+    /// ARM7TDMI IRQ entry. `LR_irq` receives the return address that the
+    /// documented `SUBS PC,LR,#4` epilogue rewinds by one instruction, and the
+    /// handler address is the pointer the guest wrote to `0x03007FFC`.
+    pub(crate) fn enter_irq(&mut self, handler: u32) -> u32 {
+        let old_cpsr = self.cpsr;
+        self.spsr[Mode::Irq.bank()] = Some(old_cpsr);
+        self.lr[Mode::Irq.bank()] = self.pc.wrapping_add(4);
+        // IRQ entry switches to ARM state with IRQs masked and FIQ unchanged.
+        self.cpsr = (old_cpsr & !(MODE_MASK | FLAG_T)) | Mode::Irq.bits() | FLAG_I;
+        self.pc = handler & !3;
+        old_cpsr
+    }
+
     /// ARM7TDMI SWI entry. The caller has already validated the service and
     /// rejected unsupported SVC-origin nesting.
     pub(crate) fn enter_swi(&mut self, resume_pc: u32) -> u32 {

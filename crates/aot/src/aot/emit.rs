@@ -182,6 +182,7 @@ fn condition_expression(cond: Cond) -> String {
 }
 
 fn emit_tick(out: &mut String, indent: &str) {
+    writeln!(out, "{indent}bus.tick_frame();").unwrap();
     writeln!(out, "{indent}*budget -= 1;").unwrap();
     writeln!(out, "{indent}if *budget == 0 {{").unwrap();
     writeln!(out, "{indent}    return Ok(Next::Halt);").unwrap();

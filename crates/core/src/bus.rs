@@ -8,6 +8,9 @@
 
 mod dma;
 mod io;
+mod irq;
+mod sound;
+mod timer;
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
@@ -115,6 +118,9 @@ impl Bus {
             return Err(Error::UnsupportedSave { addr });
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(value) = self.sound_read8(addr) {
+                return Ok(value);
+            }
             return Err(Error::UnsupportedIoRead { addr, width: 8 });
         }
         Err(Error::Unmapped { addr })
@@ -139,6 +145,15 @@ impl Bus {
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
             if let Some(value) = self.dma_read16(addr) {
+                return Ok(value);
+            }
+            if let Some(value) = self.io.irq().read16(addr) {
+                return Ok(value);
+            }
+            if let Some(value) = self.sound_read16(addr) {
+                return Ok(value);
+            }
+            if let Some(value) = self.timer_read16(addr) {
                 return Ok(value);
             }
             return self
@@ -195,7 +210,13 @@ impl Bus {
             ]));
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(value) = self.sound_read32(addr) {
+                return Ok(value);
+            }
             // DMA address registers are 32-bit halves of a 16-bit I/O block.
+            if let Some(value) = self.sound_read32(addr) {
+                return Ok(value);
+            }
             if self.dma_read16(addr).is_some() && self.dma_read16(addr + 2).is_some() {
                 let low = u32::from(self.read16(addr)?);
                 let high = u32::from(self.read16(addr + 2)?);
@@ -238,6 +259,9 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if self.sound_write8(addr, value) {
+                return Ok(());
+            }
             return Err(Error::UnsupportedIoWrite { addr, width: 8 });
         }
         if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
@@ -284,6 +308,15 @@ impl Bus {
             if let Some(result) = self.dma_write16(addr, value) {
                 return result;
             }
+            if self.io.irq_mut().write16(addr, value).is_some() {
+                return Ok(());
+            }
+            if self.sound_write16(addr, value) {
+                return Ok(());
+            }
+            if self.timer_write16(addr, value) {
+                return Ok(());
+            }
             return self
                 .io
                 .write16(addr, value)
@@ -324,6 +357,9 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if self.sound_write32(addr, value) {
+                return Ok(());
+            }
             if self.dma_read16(addr).is_some() && self.dma_read16(addr + 2).is_some() {
                 self.write16(addr, value as u16)?;
                 self.write16(addr + 2, (value >> 16) as u16)?;

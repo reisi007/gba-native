@@ -1,6 +1,9 @@
 use crate::error::{Error, Result};
 
 use super::dma::DmaState;
+use super::irq::IrqState;
+use super::sound::SoundState;
+use super::timer::TimerState;
 use super::{
     BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, DISPCNT_ADDR, KEYINPUT_ADDR, KEYINPUT_RELEASED,
     WAITCNT_ADDR,
@@ -28,6 +31,9 @@ pub(super) struct IoState {
     bg0vofs: u16,
     waitcnt: u16,
     dma: DmaState,
+    irq: IrqState,
+    sound: SoundState,
+    timer: TimerState,
 }
 
 impl IoState {
@@ -93,12 +99,39 @@ impl IoState {
         &mut self.dma
     }
 
+    pub(super) fn timer(&self) -> &TimerState {
+        &self.timer
+    }
+
+    pub(super) fn timer_mut(&mut self) -> &mut TimerState {
+        &mut self.timer
+    }
+
+    pub(super) fn sound(&self) -> &SoundState {
+        &self.sound
+    }
+
+    pub(super) fn sound_mut(&mut self) -> &mut SoundState {
+        &mut self.sound
+    }
+
+    pub(super) fn irq(&self) -> &IrqState {
+        &self.irq
+    }
+
+    pub(super) fn irq_mut(&mut self) -> &mut IrqState {
+        &mut self.irq
+    }
+
     pub(super) fn reset_group7(&mut self) {
         self.bg0cnt = 0;
         self.bg0hofs = 0;
         self.bg0vofs = 0;
         self.waitcnt = 0;
         self.dma = DmaState::default();
+        self.irq.reset_group7();
+        self.sound.reset();
+        self.timer.reset();
     }
 
     pub(super) fn append_digest(&self, bytes: &mut Vec<u8>) {
@@ -108,5 +141,8 @@ impl IoState {
         bytes.extend_from_slice(&self.bg0vofs.to_le_bytes());
         bytes.extend_from_slice(&self.waitcnt.to_le_bytes());
         self.dma.append_digest(bytes);
+        self.irq.append_digest(bytes);
+        self.sound.append_digest(bytes);
+        self.timer.append_digest(bytes);
     }
 }

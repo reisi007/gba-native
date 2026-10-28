@@ -278,7 +278,17 @@ fn psr_source_value(cpu: &Cpu, src: PsrSrc) -> u32 {
 pub fn run_budget(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<u64> {
     let mut used = 0;
     while used < budget {
+        // Deliver a pending interrupt between instructions. Without a handler
+        // pointer at 0x03007FFC there is nowhere to dispatch, so the request
+        // stays latched instead of being dropped.
+        if !cpu.irq_masked()
+            && bus.irq_pending()
+            && let Some(handler) = bus.irq_handler()
+        {
+            cpu.enter_irq(handler);
+        }
         step(cpu, bus)?;
+        bus.tick_frame();
         used += 1;
     }
     Ok(used)

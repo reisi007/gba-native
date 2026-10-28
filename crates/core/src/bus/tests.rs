@@ -32,12 +32,13 @@ fn rejects_unsupported_and_out_of_bounds() {
         bus.read8(0x0000_0010),
         Err(Error::BiosAccess { .. })
     ));
+    // BG1CNT stays unimplemented; DISPSTAT/VCOUNT are now modelled.
     assert!(matches!(
-        bus.read16(0x0400_0004),
+        bus.read16(0x0400_000A),
         Err(Error::UnsupportedIoRead { .. })
     ));
     assert!(matches!(
-        bus.write16(0x0400_0004, 0),
+        bus.write16(0x0400_000A, 0),
         Err(Error::UnsupportedIoWrite { .. })
     ));
     assert!(matches!(

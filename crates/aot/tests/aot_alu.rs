@@ -219,6 +219,8 @@ fn native_alu_shift_bl_fixture_matches_hand_expected_state_and_bus() {
     expected_bus
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("expected DISPCNT write");
+    // The frame model advances once per retired instruction.
+    expected_bus.tick_frames(BUDGET);
     assert_eq!(report.bus_sha256, sha256::hex(&expected_bus.state_digest()));
     assert_eq!(report.vram_sha256, sha256::hex(&expected_bus.vram_digest()));
     let image = display::snapshot(&expected_bus).expect("expected image");

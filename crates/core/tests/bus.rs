@@ -125,7 +125,7 @@ fn implemented_io_registers_and_keyinput_are_explicit() {
     ));
     assert_eq!(bus.read16(KEYINPUT_ADDR), Ok(KEYINPUT_RELEASED & !KEY_A));
     assert!(matches!(
-        bus.read16(DISPCNT_ADDR + 4),
+        bus.read16(DISPCNT_ADDR + 2),
         Err(Error::UnsupportedIoRead { .. })
     ));
     assert!(matches!(
