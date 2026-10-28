@@ -143,8 +143,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   logo bytes, BIOS bytes or save data. The original ROM is read-only input.
   Generated AOT source must not contain a ROM byte array or raw image copy; bind
   SHA-256+length and require a caller-supplied `--rom PATH`.
-- Do not use third-party emulator implementation sources, game decompilations,
-  BIOS disassemblies or leaked SDKs.
+- Do not use third-party emulator implementation sources, game decompilations or
+  leaked SDKs. BIOS disassembly analysis remains prohibited except that a
+  separate analyst may inspect only public GBA BIOS `RegisterRamReset` (`01h`)
+  material through the reviewed behavior-only process in
+  `docs/clean-room/protocol.md`; all other BIOS analysis remains prohibited.
 - `#![forbid(unsafe_code)]` applies to the core, the AOT crate and the root
   facade. Do not add `unsafe`, JIT memory mappings, executable heap memory or a
   dependency on a JIT.

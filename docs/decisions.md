@@ -243,3 +243,15 @@ module, not a browser application or GPU renderer: there is no HTML/JS UI, game
 input, save profile, persistence, full frontend or playability claim, and the
 broader per-ROM application targets in D11/D12 remain open. This slice does not
 close issue #10.
+
+## D16 — Narrow RegisterRamReset disassembly-analysis exception
+
+Decided by the owner on 2026-10-28. This narrowly supersedes only D8's
+no-disassembly clause for separate-analyst inspection of public GBA BIOS SWI
+`RegisterRamReset` (`01h`), solely through the reviewed behavior-only process in
+`docs/clean-room/protocol.md`. It authorizes analysis, not BIOS-byte handling,
+code reconstruction, or implementation based on unseen disassembly. D8's other
+constraints remain unchanged: unsupported or unknown effects must fail
+explicitly, and no fake success is permitted. This remains an informal process,
+not a legal clean-room certification. This records permission only; it does not
+claim the analysis has been performed or the service implemented.

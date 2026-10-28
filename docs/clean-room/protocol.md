@@ -16,6 +16,23 @@ The current work is a documentation-driven independent implementation, **not a
 certified two-team/legal clean-room process**. The same agent reads public
 specifications and implements them. This document is not a legal opinion.
 
+### Narrow BIOS analysis exception: RegisterRamReset (01h)
+
+By owner authorization dated 2026-10-28, a separate analyst may inspect only the
+public GBA BIOS disassembly for SWI `RegisterRamReset` (`01h`). The analyst's
+behavior-only report may contain externally observable behavioral requirements,
+hardware-register effects, confidence, source links and uncertainties only. It
+must contain no pseudocode, disassembly, BIOS internal symbols or addresses,
+instruction sequence, or implementation-specific control flow. Source links may
+remain in the analyst-to-orchestrator report, but the orchestrator must remove
+or replace any link that exposes BIOS disassembly before handing the reviewed
+report to an implementer. The implementer receives only that sanitized report
+and existing public hardware documentation.
+Unknown effects remain unsupported and must fail closed. No BIOS bytes or ROM
+bytes may be saved or committed. This is an informal process, not a legal
+clean-room certification. Do not add the disassembly source to `sources.md`
+until analysis has actually been performed.
+
 If subsequent REA work examines a reference implementation, separate the analyst
 and implementer contexts. The analyst may deliver behavioral requirements,
 input/output observations and uncertainty, but not pseudocode, disassembly,
