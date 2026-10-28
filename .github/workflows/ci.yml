@@ -34,3 +34,34 @@ jobs:
 
       - name: Full gate
         run: ./scripts/full.sh
+
+  # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets
+  # below compile the generated harness for the *installed host* triple, so this
+  # job is only meaningful on an Apple-silicon runner. The host check makes an
+  # unexpected runner fail loudly instead of silently testing another triple.
+  # Both targets use synthetic fixtures only; no retail ROM or BIOS image is
+  # read, and this is not a cross-compilation or platform-support claim.
+  macos-arm-native-aot:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Require an aarch64-apple-darwin host
+        run: |
+          rustc -vV
+          cargo -vV
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          if [ "$host" != "aarch64-apple-darwin" ]; then
+            echo "::error::Expected host aarch64-apple-darwin but rustc reports '$host'. This job requires an arm64 macOS runner and would otherwise test a different triple."
+            exit 1
+          fi
+
+      - name: Target-profile synthetic native AOT build
+        run: cargo test --offline --locked -p gba-native-aot --test aot_target_build
+
+      - name: Synthetic CLI AOT build contract
+        run: cargo test --offline --locked -p gba-native --test cli_aot_build

@@ -444,6 +444,42 @@ removes only the directory it created.
   host can cross-compile it, and the produced executable is not a playable game,
   GUI, save-aware app, final application or WASM build.
 
+### macOS ARM native AOT CI gate (configured 2026-10-29)
+
+`.github/workflows/ci.yml` adds a separate `macos-arm-native-aot` job on
+`macos-latest` with Rust 1.98.0. It makes the existing native `aot build` path
+repeatable on Apple silicon: it prints `rustc -vV`/`cargo -vV`, fails with an
+explicit error unless `rustc -vV` reports the host `aarch64-apple-darwin`, and
+then runs the two existing synthetic integration targets:
+
+```text
+cargo test --offline --locked -p gba-native-aot --test aot_target_build
+cargo test --offline --locked -p gba-native --test cli_aot_build
+```
+
+- `aot_target_build` builds and executes an `aarch64-apple-darwin` release
+  harness against a synthetic ROM, and rejects a different synthetic image.
+  `cli_aot_build` invokes `aot build`, then checks the target-specific executable,
+  owned workspace, ordered metadata and source/executable SHA-256 values; it does
+  not execute the generated executable. Neither target exercises a cross target.
+- Scope is synthetic fixtures only: no supplied or retail ROM, no BIOS image, no
+  save data. Test commands use `--offline --locked`; generated nested crate
+  builds use `--offline`. The hosted job still uses networked checkout/toolchain
+  setup. The default workspace dependency set stays empty.
+- This is native compilation of ROM-generated code for the host that runs the
+  job, not classical host cross-compilation. It does not cover the Apple x86_64
+  or iOS/Metal targets, does not change AOT semantics or the WASM branch, and
+  establishes no boot, gameplay, runtime-compatibility or further
+  platform-support claim. The Linux `gates` job, `scripts/short.sh` and
+  `scripts/full.sh` are unchanged.
+- The job requires an arm64 `macos-latest` runner. Where the label resolves to an
+  Intel host, the host check fails instead of recording a macOS ARM result.
+- Status: configured but not yet observed. No CI run of this job is recorded
+  here. The same two targets were re-run locally on the current arm64 macOS host
+  (`aarch64-apple-darwin`) with Rust 1.99.1 and the CI-pinned Rust 1.98.0:
+  `aot_target_build` 4 passed and `cli_aot_build` 2 passed on each toolchain.
+  That is local host evidence, not the CI result.
+
 ### ROM-bound WASM module build (2026-10-27, local)
 
 The `--target wasm32-unknown-unknown` branch is covered by tool-free library

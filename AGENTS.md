@@ -62,7 +62,11 @@ tools under root `target/`; do not install global tools or run Cargo inside
 `apps/web/` without a root-level `CARGO_TARGET_DIR`. It is independent of
 `short.sh`/`full.sh` and the default three-package workspace.
 
-CI runs the same two scripts. The optional desktop and browser workflows run
+CI runs the same two scripts. A separate `macos-arm-native-aot` job on
+`macos-latest` asserts an `aarch64-apple-darwin` host and runs the synthetic
+`aot_target_build` and `cli_aot_build` integration targets for ROM-bound native
+AOT; it uses synthetic fixtures only and is neither a cross-compilation nor a
+platform-support claim. The optional desktop and browser workflows run
 `scripts/frontend.sh` and `scripts/web.sh --ci` separately. The underlying root
 gates remain:
 
