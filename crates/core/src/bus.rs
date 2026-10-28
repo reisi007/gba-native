@@ -6,6 +6,7 @@
 //! Everything else is an explicit error. No open-bus, DMA, save, BIOS, mirror
 //! or timing behavior is fabricated.
 
+mod dma;
 mod io;
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
@@ -31,6 +32,7 @@ pub const DISPCNT_ADDR: u32 = 0x0400_0000;
 pub const BG0CNT_ADDR: u32 = 0x0400_0008;
 pub const BG0HOFS_ADDR: u32 = 0x0400_0010;
 pub const BG0VOFS_ADDR: u32 = 0x0400_0012;
+pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
 
@@ -136,6 +138,9 @@ impl Bus {
             ]));
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(value) = self.dma_read16(addr) {
+                return Ok(value);
+            }
             return self
                 .io
                 .read16(addr, self.pressed_keys)
@@ -190,6 +195,12 @@ impl Bus {
             ]));
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            // DMA address registers are 32-bit halves of a 16-bit I/O block.
+            if self.dma_read16(addr).is_some() && self.dma_read16(addr + 2).is_some() {
+                let low = u32::from(self.read16(addr)?);
+                let high = u32::from(self.read16(addr + 2)?);
+                return Ok(low | (high << 16));
+            }
             return Err(Error::UnsupportedIoRead { addr, width: 32 });
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
@@ -270,6 +281,9 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(result) = self.dma_write16(addr, value) {
+                return result;
+            }
             return self
                 .io
                 .write16(addr, value)
@@ -310,6 +324,11 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if self.dma_read16(addr).is_some() && self.dma_read16(addr + 2).is_some() {
+                self.write16(addr, value as u16)?;
+                self.write16(addr + 2, (value >> 16) as u16)?;
+                return Ok(());
+            }
             return Err(Error::UnsupportedIoWrite { addr, width: 32 });
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
@@ -428,68 +447,4 @@ fn require_word(addr: u32) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bus() -> Bus {
-        let cart = Cartridge::from_bytes(vec![0u8; 0x200]).expect("cart");
-        Bus::new(cart)
-    }
-
-    #[test]
-    fn ram_is_little_endian() {
-        let mut bus = bus();
-        bus.write32(EWRAM_BASE, 0x1234_5678).expect("write");
-        assert_eq!(bus.read8(EWRAM_BASE).expect("byte"), 0x78);
-        assert_eq!(bus.read16(EWRAM_BASE).expect("half"), 0x5678);
-        assert_eq!(bus.read32(EWRAM_BASE).expect("word"), 0x1234_5678);
-    }
-
-    #[test]
-    fn byte_writes_to_video_memory_duplicate() {
-        let mut bus = bus();
-        bus.write8(VRAM_BASE + 3, 0xAB).expect("vram byte");
-        assert_eq!(bus.read16(VRAM_BASE + 2).expect("vram half"), 0xABAB);
-        bus.write8(PALETTE_BASE + 1, 0xCD).expect("palette byte");
-        assert_eq!(bus.read16(PALETTE_BASE).expect("palette half"), 0xCDCD);
-        bus.write8(OAM_BASE + 1, 0xEF).expect("oam byte");
-        assert_eq!(bus.read16(OAM_BASE).expect("oam half"), 0);
-    }
-
-    #[test]
-    fn rejects_unsupported_and_out_of_bounds() {
-        let mut bus = bus();
-        assert!(matches!(
-            bus.read8(0x0000_0010),
-            Err(Error::BiosAccess { .. })
-        ));
-        assert!(matches!(
-            bus.read16(0x0400_0004),
-            Err(Error::UnsupportedIoRead { .. })
-        ));
-        assert!(matches!(
-            bus.write16(0x0400_0004, 0),
-            Err(Error::UnsupportedIoWrite { .. })
-        ));
-        assert!(matches!(
-            bus.write8(0x0800_0000, 0),
-            Err(Error::RomWrite { .. })
-        ));
-        assert!(matches!(
-            bus.read16(0x0600_0001),
-            Err(Error::UnalignedHalfword { .. })
-        ));
-        assert!(matches!(
-            bus.read32(0x0200_0002),
-            Err(Error::UnalignedWord { .. })
-        ));
-        assert!(matches!(
-            bus.read8(0x0204_0000),
-            Err(Error::Unmapped { .. })
-        ));
-        assert!(matches!(
-            bus.read8(0x0E00_0000),
-            Err(Error::UnsupportedSave { .. })
-        ));
-    }
-}
+mod tests;

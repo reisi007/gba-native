@@ -157,11 +157,13 @@ Implemented regions and widths:
   outside their exact regions are `Unmapped`; this prototype does not claim the
   GBA's partial-decoding mirrors or open-bus behavior.
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
-  require 4-byte alignment. I/O supports only halfword access to the implemented
-  registers. Other widths/addresses return explicit errors.
+  require 4-byte alignment. I/O supports halfword access to the implemented
+  registers, plus 32-bit reads/writes over the DMA address pairs.
 - Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
   halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
-  writes; and KEYINPUT halfword read (`0x04000130`). The host injects a `u16`
+  writes; KEYINPUT halfword read (`0x04000130`); WAITCNT (`0x04000204`) halfword
+  read/write, retaining only documented bits 0..13; and the four DMA channels
+  `0x040000B0..0x040000DF` (see below). The host injects a `u16`
   pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
@@ -172,8 +174,25 @@ Implemented regions and widths:
   Every other width/address, including the last I/O byte at `0x040003FF`, stays
   an `UnsupportedIoRead`/`UnsupportedIoWrite` rather than `Unmapped`. Mutable
   display-register and dynamic KEYINPUT state are included in `Bus::state_digest`.
-  There is no VCOUNT, DISPSTAT, DMA, timer, interrupt, sound, serial, WAITCNT,
+  There is no VCOUNT, DISPSTAT, timer, interrupt, sound or serial state, and no
   BG affine parameter or save-register state.
+
+### DMA channels
+
+`DMA0..DMA3` expose SAD, DAD, CNT_L and CNT_H at `0x040000B0 + 12*n`, as 16-bit
+registers plus 32-bit reads/writes over the address pairs. SAD, DAD and CNT_L
+keep their written values, matching the documented hardware note that the
+transfer uses internal pointers; a count of zero means the channel maximum
+(`0x4000`, or `0x10000` for DMA3). Destination and source control support
+increment, decrement and fixed addressing; source control 3 is rejected because
+the documented encoding prohibits it. The channel transfers on the 0->1 edge of
+the enable bit and clears that bit after a non-repeating transfer.
+
+**Stated limitations.** This model has no cycle, scanline, HBlank or VBlank
+event, so a transfer runs once at the enable edge regardless of the start-timing
+field, and a repeating channel stays enabled without being re-armed. Those are
+recorded as limitations, not as emulated behaviour. There is no Game Pak DRQ,
+video-capture or sound-FIFO timing mode, and no DMA-driven IRQ.
 - Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
   and unmapped addresses are errors.
 - CPU data-transfer rules actually implemented and tested:

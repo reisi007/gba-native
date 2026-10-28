@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
 
+use super::dma::DmaState;
 use super::{
     BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, DISPCNT_ADDR, KEYINPUT_ADDR, KEYINPUT_RELEASED,
+    WAITCNT_ADDR,
 };
 
 /// Valid host pressed-mask bits in KEYINPUT order: A, B, Select, Start, Right,
@@ -24,6 +26,8 @@ pub(super) struct IoState {
     bg0cnt: u16,
     bg0hofs: u16,
     bg0vofs: u16,
+    waitcnt: u16,
+    dma: DmaState,
 }
 
 impl IoState {
@@ -44,6 +48,7 @@ impl IoState {
             DISPCNT_ADDR => Ok(self.dispcnt),
             BG0CNT_ADDR => Ok(self.bg0cnt),
             BG0HOFS_ADDR | BG0VOFS_ADDR => Err(Error::UnsupportedIoRead { addr, width: 16 }),
+            WAITCNT_ADDR => Ok(self.waitcnt),
             KEYINPUT_ADDR => Ok(KEYINPUT_RELEASED & !pressed_keys),
             _ => return None,
         })
@@ -67,6 +72,11 @@ impl IoState {
                 self.bg0vofs = value & 0x01FF;
                 Ok(())
             }
+            WAITCNT_ADDR => {
+                // GBATEK: bits 0..13 are the wait-state fields, 14..15 unused.
+                self.waitcnt = value & 0x3FFF;
+                Ok(())
+            }
             KEYINPUT_ADDR => Err(Error::UnsupportedIoWrite { addr, width: 16 }),
             _ => return None,
         })
@@ -75,10 +85,20 @@ impl IoState {
     /// SWI 01h group 7 over the *modelled* "other I/O" set. DISPCNT is
     /// deliberately absent: the service forces blank separately, and GBATEK
     /// documents the forced-blank value surviving the group-7 clear.
+    pub(super) fn dma(&self) -> &DmaState {
+        &self.dma
+    }
+
+    pub(super) fn dma_mut(&mut self) -> &mut DmaState {
+        &mut self.dma
+    }
+
     pub(super) fn reset_group7(&mut self) {
         self.bg0cnt = 0;
         self.bg0hofs = 0;
         self.bg0vofs = 0;
+        self.waitcnt = 0;
+        self.dma = DmaState::default();
     }
 
     pub(super) fn append_digest(&self, bytes: &mut Vec<u8>) {
@@ -86,5 +106,7 @@ impl IoState {
         bytes.extend_from_slice(&self.bg0cnt.to_le_bytes());
         bytes.extend_from_slice(&self.bg0hofs.to_le_bytes());
         bytes.extend_from_slice(&self.bg0vofs.to_le_bytes());
+        bytes.extend_from_slice(&self.waitcnt.to_le_bytes());
+        self.dma.append_digest(bytes);
     }
 }

@@ -38,6 +38,11 @@ Relevant anchors actually consulted for this milestone:
 - `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`: MUL/MLA encoding,
   the `Rd`/`Rm` and R15 restrictions, low-32-bit result and the documented
   N/Z/C/V rule that C is "destroyed" on ARMv4.
+- `#40000b8h---dma0cnt_l---dma-0-word-count-w-14-bit-14000h` and
+  `#40000bah---dma0cnt_h---dma-0-control-rw`: DMA channel registers, the
+  zero-means-maximum count, the addressing-control fields, the documented
+  prohibition on source control 3, and the note that SAD/DAD/CNT_L keep their
+  written values while the transfer uses internal pointers.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC

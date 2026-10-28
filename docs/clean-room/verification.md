@@ -142,6 +142,9 @@ lockfiles.
   errors, conditional no-op, and CPSR/Thumb coherence. See
   `crates/core/tests/psr_transfer.rs`, `crates/core/tests/psr_field_mask.rs` and
   `crates/core/tests/psr_banking.rs`.
+- `crates/core/src/bus/dma.rs`: word and halfword copies advance by one data
+  unit, a fixed source fills the destination, CNT_L keeps its written value,
+  and a repeating channel stays enabled.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.

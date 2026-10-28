@@ -47,6 +47,10 @@ pub enum Error {
     NonExecutable {
         addr: u32,
     },
+    /// A DMA transfer shape this bounded model cannot execute faithfully.
+    UnsupportedDma {
+        detail: &'static str,
+    },
     /// Bounded policy for block/stack transfers: the low bits of the base would
     /// be ignored by hardware, but the documented writeback source is not
     /// established, so no access or writeback is performed.
@@ -149,6 +153,9 @@ impl fmt::Display for Error {
                     f,
                     "instruction fetch from non-executable memory at 0x{addr:08X}"
                 )
+            }
+            Error::UnsupportedDma { detail } => {
+                write!(f, "unsupported DMA transfer: {detail}")
             }
             Error::UnalignedBlockBase { addr, thumb } => write!(
                 f,
