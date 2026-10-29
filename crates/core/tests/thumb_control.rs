@@ -69,6 +69,15 @@ fn bl_halves_have_independent_lr_updates_and_an_exact_budget_stop() {
         "return address keeps Thumb bit"
     );
     assert!(cpu.thumb(), "BL does not change instruction state");
+
+    // Independently chosen positive long offset exercises both halves away
+    // from the short-branch case above, without any cartridge-derived bytes.
+    let (mut cpu, mut bus) = thumb_with(&[bl_high(0x234), bl_low(0x28)]);
+    interpret::step(&mut cpu, &mut bus).expect("long BL high half");
+    assert_eq!(cpu.reg(14), EWRAM_BASE + 4 + 0x234000);
+    interpret::step(&mut cpu, &mut bus).expect("long BL low half");
+    assert_eq!(cpu.pc(), EWRAM_BASE + 4 + 0x234000 + 0x50);
+    assert_eq!(cpu.reg(14), (EWRAM_BASE + 4) | 1);
 }
 
 #[test]
