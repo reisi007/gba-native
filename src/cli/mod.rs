@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -146,9 +146,11 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut budget = 1_000_000u64;
     let mut snapshot_output = None;
     let mut synthetic_bios_zero_fill = false;
+    let mut bios_rom_writes = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
+            "--synthetic-bios-rom-writes" => bios_rom_writes = true,
             "--budget" => {
                 let value = args
                     .next()
@@ -174,6 +176,9 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     } else {
         Bus::new(cart)
     };
+    if bios_rom_writes {
+        bus = bus.with_bios_write_policy(gba_native::bus::BiosWritePolicy::RomWritesDropped);
+    }
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     let output = if let Some(path) = snapshot_output {
         let image = display::snapshot(&bus)?;
@@ -195,6 +200,12 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("cpsr=0x{:08X}", cpu.cpsr());
     println!("thumb={}", if cpu.thumb() { 1 } else { 0 });
     println!("bios_data_policy={}", bus.bios_data_policy().name());
+    println!("bios_write_policy={}", bus.bios_write_policy().name());
+    if bios_rom_writes {
+        println!(
+            "bios_write_assumption=experimental documented mask-ROM no-effect writes; not BIOS data, opcodes or a compatibility claim"
+        );
+    }
     if synthetic_bios_zero_fill {
         println!(
             "bios_assumption=experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"

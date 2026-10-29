@@ -9,6 +9,14 @@ use super::*;
 
 const MAX_IGNORED_IO_WRITES: usize = 4096;
 
+/// Serial registers that answer byte-lane accesses (GBATEK `#gba-io-map`).
+fn is_serial_register(addr: u32) -> bool {
+    matches!(
+        addr & !1,
+        SIODATA32_L_ADDR | SIODATA32_H_ADDR | SIOCNT_ADDR | SIODATA8_ADDR | RCNT_ADDR
+    )
+}
+
 /// Work RAM mirrors its bank across a whole 16 MiB window (GBATEK
 /// `#gba-memory-map`): 256 KiB EWRAM over `0x02000000..=0x02FFFFFF` and 32 KiB
 /// IWRAM over `0x03000000..=0x03FFFFFF`. Both lengths are powers of two.
@@ -130,6 +138,9 @@ impl Bus {
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
             if let Some(value) = self.io.irq().read8(addr) {
+                return Ok(value);
+            }
+            if let Some(value) = self.serial_read8(addr) {
                 return Ok(value);
             }
             if let Some(value) = self.sound_read8(addr) {
@@ -258,10 +269,54 @@ impl Bus {
         Err(Error::Unmapped { addr })
     }
 
+    /// Byte lane of a modelled serial register.
+    ///
+    /// GBATEK `#gba-io-map` documents the I/O block as 8/16/32-bit accessible,
+    /// so the modelled serial registers answer byte reads from their halfword
+    /// storage. Only this whitelist is widened; every other I/O byte read keeps
+    /// the existing explicit unsupported-width error.
+    fn serial_read8(&self, addr: u32) -> Option<u8> {
+        if !is_serial_register(addr) {
+            return None;
+        }
+        let value = self.io.read16(addr & !1, self.pressed_keys)?.ok()?;
+        Some(if addr & 1 == 0 {
+            value as u8
+        } else {
+            (value >> 8) as u8
+        })
+    }
+
+    /// Byte lane store into a modelled serial register.
+    ///
+    /// The written byte replaces its lane; the other lane keeps its value.
+    fn serial_write8(&mut self, addr: u32, value: u8) -> Option<Result<()>> {
+        if !is_serial_register(addr) {
+            return None;
+        }
+        let base = addr & !1;
+        let current = self.io.read16(base, self.pressed_keys)?.ok()?;
+        let merged = if addr & 1 == 0 {
+            (current & 0xFF00) | u16::from(value)
+        } else {
+            (current & 0x00FF) | (u16::from(value) << 8)
+        };
+        self.io.write16(base, merged)
+    }
+
+    /// Applies the selected BIOS write policy to a store into the BIOS range.
+    fn bios_store(&self, addr: u32) -> Result<()> {
+        match self.bios_write_policy {
+            BiosWritePolicy::Strict => Err(Error::BiosAccess { addr }),
+            BiosWritePolicy::RomWritesDropped => Ok(()),
+        }
+    }
+
     pub fn write8(&mut self, addr: u32, value: u8) -> Result<()> {
         if is_bios(addr) {
-            // The data policy never permits BIOS writes.
-            return Err(Error::BiosAccess { addr });
+            // BIOS is mask ROM: the strict default reports the store, the
+            // explicit opt-in models the documented "no effect" behavior.
+            return self.bios_store(addr);
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             self.ewram[offset] = value;
@@ -272,6 +327,9 @@ impl Bus {
             return Ok(());
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
+            if let Some(result) = self.serial_write8(addr, value) {
+                return result;
+            }
             if self.sound_write8(addr, value) {
                 return Ok(());
             }
@@ -318,7 +376,7 @@ impl Bus {
             return Ok(());
         }
         if is_bios(addr) {
-            return Err(Error::BiosAccess { addr });
+            return self.bios_store(addr);
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             self.ewram[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -376,7 +434,7 @@ impl Bus {
             return Ok(());
         }
         if is_bios(addr) {
-            return Err(Error::BiosAccess { addr });
+            return self.bios_store(addr);
         }
         if let Some(offset) = mirror_offset(addr, EWRAM_BASE, EWRAM_LEN) {
             self.ewram[offset..offset + 4].copy_from_slice(&value.to_le_bytes());

@@ -176,8 +176,9 @@ Only r0 changes.
 - IWRAM `03007E00h..03007FFFh` is preserved.
 - GBATEK documents bit 5 as resetting SIO registers and switching to general-
   purpose mode, bit 6 as resetting sound registers, and bit 7 as resetting all
-  other registers except SIO and sound. All three are accepted. Group 5 has no
-  modeled serial state. Group 6 applies only the sufficiently specified sound
+  other registers except SIO and sound. All three are accepted. Group 5 clears
+  the modeled `SIOCNT`/`RCNT`/`SIODATA*` storage and sets `RCNT` bit 15 for the
+  documented general-purpose mode. Group 6 applies only the sufficiently specified sound
   effects: `SOUNDCNT_L := 0`, `SOUNDCNT_H := 0x880E`, `SOUNDCNT_X := 0`, clears
   the upper SOUNDBIAS bits while preserving the low 10, clears wave RAM, and
   empties both modeled Sound FIFOs.
@@ -192,16 +193,19 @@ Only r0 changes.
 - Bits 8..31 carry no documented meaning and are ignored, matching the
   documented service rather than rejecting the call.
 - GBATEK also notes that the SIO `SIODATA32` least-significant bits are destroyed
-  even when bit 5 is clear. The current bus has no `SIODATA32` state, so this
-  side effect is not fabricated.
+  even when bit 5 is clear. The bus now stores `SIODATA32_L/H`, but that
+  undocumented-elsewhere side effect is still not fabricated, so a guest must
+  not rely on it.
 - Every request writes `DISPCNT=0080h`, including flags zero, so a display
   snapshot becomes forced-blank white.
 - Clears use 16-bit or 32-bit bus writes, not byte writes. OAM zeroing is not a
   claim that objects are disabled; DISPCNT bit 6 and OAM attribute state are
   separate.
 - Sound register storage remains non-audio state; no audio is generated. Serial
-  state and the documented unconditional `SIODATA32` side effect remain
-  unmodeled; no save/persistence behavior is claimed.
+  registers are documented storage only: there is no shift engine, no link
+  partner, no serial IRQ delivery and no unconditional `SIODATA32` side effect,
+  and a start request outside normal mode with the internal clock is an explicit
+  error. No save/persistence behavior is claimed.
 
 ## Deliberately unimplemented
 

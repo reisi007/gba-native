@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gba_native::bus::{BiosDataPolicy, Bus, PALETTE_BASE};
+use gba_native::bus::{BiosDataPolicy, BiosWritePolicy, Bus, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::display::Image;
@@ -38,12 +38,20 @@ pub(super) fn write_snapshot(
             "experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"
         }
     };
+    let bios_write_note = match bus.bios_write_policy() {
+        BiosWritePolicy::Strict => "fail-closed; BIOS stores are explicit errors",
+        BiosWritePolicy::RomWritesDropped => {
+            "experimental documented mask-ROM no-effect writes; no BIOS byte is stored, read or executed"
+        }
+    };
     let report = format!(
         "capture_kind=post_budget_bitmap_snapshot\n\
          rom_bytes={}\n\
          rom_sha256={}\n\
          bios_data_policy={}\n\
          bios_data_note={}\n\
+         bios_write_policy={}\n\
+         bios_write_note={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -66,6 +74,8 @@ pub(super) fn write_snapshot(
         cart.sha256_hex(),
         bus.bios_data_policy().name(),
         bios_data_note,
+        bus.bios_write_policy().name(),
+        bios_write_note,
         requested_budget,
         used_budget,
         stop_reason,

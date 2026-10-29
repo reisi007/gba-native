@@ -539,3 +539,33 @@ select Sound DMA, request FIFO refills, drive `VCOUNT`/HBlank/video capture or
 any other peripheral; `SOUNDCNT_H` timer-select bits stay storage-only. Synthetic
 ARM, Thumb and native-AOT parity tests establish only this bounded prototype
 contract.
+
+## D30 — Explicit mask-ROM write policy and serial register storage
+
+The uncovered stops on the external test cartridge were a `CpuSet` whose
+destination range lies wholly inside the 16 KiB BIOS (`0x00000000..=0x00003FFF`)
+and then, after that was modelled, stores into the Game Pak ROM window. On
+hardware the BIOS is mask ROM and a store there has no effect instead of being a
+CPU-visible fault, so the failure was a prototype policy boundary rather than a
+demonstrated defect.
+
+Two explicit policies replace the previous blanket rejection:
+
+- `BiosWritePolicy::Strict` remains the default and reports `BiosAccess`.
+- `BiosWritePolicy::RomWritesDropped` is an explicit host opt-in
+  (`run --synthetic-bios-rom-writes`) that completes the store with no effect.
+  It never stores, synthesizes, reads back or executes a BIOS byte, and the HLE
+  copy services accept a BIOS destination only under this policy.
+
+The serial registers `SIOCNT`, `RCNT`, `SIODATA32_L/H` and `SIODATA8` are
+documented R/W storage. Only a normal-mode transfer with the internal shift
+clock can be answered, and only because a disconnected port has a documented
+state (SI high, received bits one). Multiplay, UART, general-purpose/JOY-BUS and
+external-clock starts stay explicit `UnsupportedIoWrite` errors rather than
+fabricated completions; in general-purpose/JOY-BUS mode `SIOCNT` is documented
+as unused and is plain storage. `RegisterRamReset` group 5 clears that storage
+and selects general-purpose mode.
+
+The Game Pak ROM window keeps its own fail-closed `RomWrite` error: writing
+there depends on a flash command engine that this prototype does not model, so
+it must not be turned into a silent no-op.

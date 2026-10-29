@@ -1004,3 +1004,43 @@ playability claim; BIOS execution remains blocked and Issue #10 stays open.
   storage-only. Timer 0's documented unused count-up bit is ignored and reads
   zero rather than being treated as a timing mode. No ROM or BIOS file was read,
   executed, copied or modified in this round.
+
+## Round: documented mask-ROM writes and serial register storage (2026-10-29)
+
+The external test cartridge stopped at `CpuSet` after 161,544 instructions with a
+destination range wholly inside the 16 KiB BIOS. On hardware that is mask ROM, so
+the store has no effect; the prototype treated it as a fail-closed error. Two
+explicit, reported policies replace the blanket rejection without storing,
+reading or executing a BIOS byte:
+
+- `BiosWritePolicy::RomWritesDropped`, opted in with
+  `run --synthetic-bios-rom-writes`, completes a BIOS store with no effect. The
+  default `Strict` policy still reports `BiosAccess` for a bus store and
+  `UnsupportedDestination` for an HLE copy destination, and the HLE copy
+  services accept a BIOS destination only under the opt-in.
+- `SIOCNT`, `RCNT`, `SIODATA32_L/H` and `SIODATA8` are documented R/W storage
+  with byte-lane access. A started transfer with no connected partner finishes
+  with SI read high and received bits one. Only normal-mode starts with the
+  internal shift clock are answered; multiplay, UART, general-purpose/JOY-BUS
+  and external-clock starts stay explicit errors. `RegisterRamReset` group 5
+  clears the storage and selects general-purpose mode.
+
+`crates/core/tests/mask_rom_and_serial.rs` covers the strict and opt-in BIOS
+write paths, the unchanged `RomWrite`/`BiosAccess` boundaries, the serial storage
+and byte lanes, the disconnected-transfer result, the UART rejection and the
+group-5 reset (4 tests). The workspace inventory pins are updated accordingly
+(407 listed / 403 selected).
+
+Observed after the change: the same external run advanced from instruction
+161,544 to 183,066. The `CpuSet` calls to a BIOS destination now complete with no
+effect, the run passes the serial register reads, and it stops at a `SIOCNT`
+start request in normal 32-bit mode with the **external** shift clock, which
+cannot complete without a link partner. An intermediate variant that completed
+every start immediately reached instruction 886,682 and stopped at a guest store
+into the Game Pak ROM window; that variant fabricated a transfer, so it was
+replaced by the restricted model.
+
+`DISPCNT` was `0x0080` (forced blank) at every stop, so no start screen, frame or
+compatibility result was observed and none is claimed. The Game Pak window keeps
+its fail-closed error because writes there depend on an unmodelled flash command
+engine.

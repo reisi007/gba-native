@@ -49,6 +49,13 @@ pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
 
+/// Serial I/O data and control registers, modelled as documented storage only.
+pub const SIODATA32_L_ADDR: u32 = 0x0400_0120;
+pub const SIODATA32_H_ADDR: u32 = 0x0400_0122;
+pub const SIOCNT_ADDR: u32 = 0x0400_0128;
+pub const SIODATA8_ADDR: u32 = 0x0400_012A;
+pub const RCNT_ADDR: u32 = 0x0400_0134;
+
 /// Nominal hardware cycles attributed to one retired guest instruction.
 ///
 /// The instruction-count frame and timer models share this mapping. It is a
@@ -82,6 +89,35 @@ impl BiosDataPolicy {
     }
 }
 
+/// Host-selected policy for **writes** into the 16 KiB BIOS region.
+///
+/// The BIOS is mask ROM on hardware, so a store into `0x0000_0000..=0x0000_3FFF`
+/// has no effect instead of raising a CPU-visible error. The strict policy is the
+/// default and reports such an access as [`Error::BiosAccess`]; the explicit
+/// opt-in models the documented "no effect" behavior instead of silently
+/// dropping the store.
+///
+/// This is host configuration, not guest state, and is excluded from
+/// [`Bus::state_digest`]. It never makes BIOS data readable or executable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BiosWritePolicy {
+    /// Fail closed: every write into the BIOS range returns [`Error::BiosAccess`].
+    Strict,
+    /// **Experimental opt-in:** BIOS stores complete with no effect, matching
+    /// mask-ROM semantics. No BIOS byte is stored, fetched or synthesized.
+    RomWritesDropped,
+}
+
+impl BiosWritePolicy {
+    /// Stable label for CLI output and snapshot reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::RomWritesDropped => "rom-writes-dropped",
+        }
+    }
+}
+
 pub struct Bus {
     cart: Cartridge,
     ewram: Vec<u8>,
@@ -92,6 +128,7 @@ pub struct Bus {
     io: io::IoState,
     pressed_keys: u16,
     bios_data_policy: BiosDataPolicy,
+    bios_write_policy: BiosWritePolicy,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -126,6 +163,7 @@ impl Bus {
             io: io::IoState::default(),
             pressed_keys: 0,
             bios_data_policy: policy,
+            bios_write_policy: BiosWritePolicy::Strict,
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -135,6 +173,21 @@ impl Bus {
 
     pub fn bios_data_policy(&self) -> BiosDataPolicy {
         self.bios_data_policy
+    }
+
+    /// Selects the explicit opt-in for documented mask-ROM write semantics.
+    ///
+    /// Under [`BiosWritePolicy::RomWritesDropped`] a store into the BIOS range
+    /// completes without effect. This does not make the BIOS readable, stored or
+    /// executable and does not change any other address range.
+    #[must_use]
+    pub fn with_bios_write_policy(mut self, policy: BiosWritePolicy) -> Self {
+        self.bios_write_policy = policy;
+        self
+    }
+
+    pub fn bios_write_policy(&self) -> BiosWritePolicy {
+        self.bios_write_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.
@@ -195,6 +248,11 @@ impl Bus {
     /// deliberately absent: the service forces blank separately.
     pub fn reset_group7_io(&mut self) {
         self.io.reset_group7();
+    }
+
+    /// SWI 01h group 5 over the modelled serial-register storage.
+    pub fn reset_group5_sio(&mut self) {
+        self.io.reset_group5();
     }
 
     /// SWI 01h group 6 over the modelled sound-register storage.

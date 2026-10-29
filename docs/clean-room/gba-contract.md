@@ -13,7 +13,10 @@ not a roadmap promise and not a retail-game compatibility statement.
 - No BIOS is supplied or executed; direct entry is a test policy. BIOS data
   reads fail closed by default; `--synthetic-bios-zero-fill` is an explicit
   experimental opt-in for zero data reads only (see below), never authentic BIOS
-  data, opcodes or executable BIOS. The core can
+  data, opcodes or executable BIOS. BIOS stores fail closed by default;
+  `--synthetic-bios-rom-writes` is a separate explicit opt-in that models the
+  documented mask-ROM "store has no effect" behavior without storing any BIOS
+  byte. The core can
   receive a host-injected pressed-key mask through `Bus::set_pressed_keys`, but
   this is not interactive game support and has no frame-sampling guarantee.
 - The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
@@ -98,13 +101,23 @@ zero for `read8`, `read16` and `read32` across exactly that 16 KiB region, after
 the usual halfword/word alignment checks. This deterministic zero fill is an
 experimental fallback for bounded execution experiments; it is not authentic
 BIOS data, supplies no instruction bytes and is not a claim about any Nintendo
-BIOS or hardware behavior. Under **both** policies, `fetch16`/`fetch32` from
-BIOS return `NonExecutable`, BIOS writes return `BiosAccess`, and no other
-address or width is affected. The policy is host configuration, not guest state,
-and is excluded from `Bus::state_digest`. The only CLI surface is
-`run --synthetic-bios-zero-fill` (default remains strict); successful output and
-the optional snapshot report print the selected `bios_data_policy` and, under
-the opt-in, an explicit non-authentic note. Tests use synthetic fixtures only.
+BIOS or hardware behavior. Under both data policies, `fetch16`/`fetch32` from
+BIOS return `NonExecutable`; under the default write policy a BIOS store returns
+`BiosAccess`; and no other address or width is affected. The policy is host configuration, not guest state,
+and is excluded from `Bus::state_digest`.
+
+BIOS **stores** have a separate policy, `BiosWritePolicy`. The default `Strict`
+reports `BiosAccess`; the explicit `RomWritesDropped` opt-in completes the store
+with no effect, matching mask ROM. It never makes BIOS data readable or
+executable and does not affect the Game Pak ROM window, whose stores keep
+reporting `RomWrite`. The HLE copy services accept a BIOS destination only under
+that opt-in.
+
+The CLI surfaces are `run --synthetic-bios-zero-fill` and
+`run --synthetic-bios-rom-writes` (both default to strict); successful output and
+the optional snapshot report print `bios_data_policy` and `bios_write_policy`
+plus the matching non-authentic note for each opt-in. Tests use synthetic
+fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
@@ -115,7 +128,7 @@ S1. Guest ARM/Thumb SWIs dispatch to those same services through
 
 | SWI | Service | Boundary |
 | --- | --- | --- |
-| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, applies the specified group-6 sound effects and modelled group-7 I/O reset, always forces blank, and ignores bits 8..31; group 5 (SIO) has no modeled state |
+| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, applies the specified group-6 sound effects and modelled group-7 I/O reset, always forces blank, and ignores bits 8..31; group 5 (SIO) clears the modelled serial registers and selects general-purpose mode |
 | `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
 | `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
 | `08h` | `Sqrt` | Floor unsigned integer square root of r0 |
@@ -254,7 +267,14 @@ Implemented regions and widths:
   `Bus::state_digest`. Sound registers remain storage-only apart from bounded
   Sound A/B FIFO queues; timer counters, reload latches, controls and prescaler
   phases are part of the instruction-budget timer model (below). There is no
-  serial or save-register state, and no BG affine parameter state.
+  save-register state, no BG affine parameter state, and no serial shift engine.
+  The serial registers `SIOCNT`/`RCNT`/`SIODATA*` are documented storage only: a
+  transfer started with no link partner finishes immediately with SI read as
+  high and received bits all ones, because that is the documented state of a
+  disconnected port. Only a normal-mode start with the internal shift clock is
+  answered; multiplay, UART, general-purpose/JOY-BUS and external-clock starts
+  stay explicit `UnsupportedIoWrite` errors instead of fabricated transfers.
+  No serial IRQ is delivered.
 - `VCOUNT` and the instruction-count line model: the host-driven frame model
   exposes a read-only `VCOUNT` halfword at `0x04000006` with an 8-bit path for
   exactly that register: `0x04000006` returns its low byte and `0x04000007` its
