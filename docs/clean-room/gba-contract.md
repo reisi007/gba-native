@@ -113,11 +113,17 @@ executable and does not affect the Game Pak ROM window, whose stores keep
 reporting `RomWrite`. The HLE copy services accept a BIOS destination only under
 that opt-in.
 
-The CLI surfaces are `run --synthetic-bios-zero-fill` and
-`run --synthetic-bios-rom-writes` (both default to strict); successful output and
-the optional snapshot report print `bios_data_policy` and `bios_write_policy`
-plus the matching non-authentic note for each opt-in. Tests use synthetic
-fixtures only.
+A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
+The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
+documented no-effect store of a ROM-only cartridge. It never writes cartridge
+bytes, models no flash command engine and leaves the backup region
+(`0x0E00_0000..=0x0E00_FFFF`) an explicit `UnsupportedSave` error.
+
+The CLI surfaces are `run --synthetic-bios-zero-fill`,
+`run --synthetic-bios-rom-writes` and `run --synthetic-rom-writes-ignored` (all
+default to strict); successful output and the optional snapshot report print
+`bios_data_policy`, `bios_write_policy` and `rom_write_policy` plus the matching
+non-authentic note for each opt-in. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 

@@ -304,6 +304,14 @@ impl Bus {
         self.io.write16(base, merged)
     }
 
+    /// Applies the selected Game Pak ROM write policy to a store there.
+    fn rom_store(&self, addr: u32) -> Result<()> {
+        match self.rom_write_policy {
+            RomWritePolicy::Strict => Err(Error::RomWrite { addr }),
+            RomWritePolicy::Dropped => Ok(()),
+        }
+    }
+
     /// Applies the selected BIOS write policy to a store into the BIOS range.
     fn bios_store(&self, addr: u32) -> Result<()> {
         match self.bios_write_policy {
@@ -360,7 +368,7 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
-            return Err(Error::RomWrite { addr });
+            return self.rom_store(addr);
         }
         if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
             return Err(Error::UnsupportedSave { addr });
@@ -418,7 +426,7 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
-            return Err(Error::RomWrite { addr });
+            return self.rom_store(addr);
         }
         if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
             return Err(Error::UnsupportedSave { addr });
@@ -454,7 +462,7 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
-            return Err(Error::RomWrite { addr });
+            return self.rom_store(addr);
         }
         if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
             return Err(Error::UnsupportedSave { addr });

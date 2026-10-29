@@ -7,7 +7,8 @@
 //! the documented disconnected state and UART remains an explicit error.
 
 use gba_native_core::bus::{
-    BiosWritePolicy, Bus, RCNT_ADDR, SIOCNT_ADDR, SIODATA8_ADDR, SIODATA32_H_ADDR, SIODATA32_L_ADDR,
+    BiosWritePolicy, Bus, RCNT_ADDR, RomWritePolicy, SIOCNT_ADDR, SIODATA8_ADDR, SIODATA32_H_ADDR,
+    SIODATA32_L_ADDR,
 };
 use gba_native_core::cart::{Cartridge, ROM_BASE};
 use gba_native_core::error::Error;
@@ -131,4 +132,37 @@ fn group_five_reset_clears_the_modelled_serial_registers() {
     // GBATEK: group 5 also switches to general-purpose mode.
     assert_eq!(bus.read16(RCNT_ADDR), Ok(0x8000));
     assert_eq!(bus.read16(SIODATA32_L_ADDR), Ok(0));
+}
+
+#[test]
+fn rom_write_policy_is_explicit_and_never_stores_cartridge_bytes() {
+    let mut strict = Bus::new(cart(0x200));
+    assert_eq!(strict.rom_write_policy(), RomWritePolicy::Strict);
+    assert!(matches!(
+        strict.write16(ROM_BASE + 0xC8, 1),
+        Err(Error::RomWrite { .. })
+    ));
+
+    let mut lenient = Bus::new(cart(0x200)).with_rom_write_policy(RomWritePolicy::Dropped);
+    lenient
+        .write16(ROM_BASE + 0xC8, 1)
+        .expect("dropped ROM halfword store");
+    lenient
+        .write32(ROM_BASE, 0xFFFF_FFFF)
+        .expect("dropped ROM word store");
+    lenient
+        .write8(ROM_BASE + 3, 0xFF)
+        .expect("dropped ROM byte store");
+    // Nothing is stored: the cartridge image is unchanged.
+    assert_eq!(lenient.read16(ROM_BASE).expect("rom"), 0);
+    // ROM is still readable through the documented window.
+    assert_eq!(lenient.read32(ROM_BASE).expect("rom word"), 0);
+    // The save/flash region keeps its own explicit error.
+    assert!(matches!(
+        lenient.write8(0x0E00_0000, 0x01),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    // The policy is host configuration, not guest state.
+    let strict_twin = Bus::new(cart(0x200));
+    assert_eq!(lenient.state_digest(), strict_twin.state_digest());
 }

@@ -118,6 +118,35 @@ impl BiosWritePolicy {
     }
 }
 
+/// Host-selected policy for stores into the Game Pak ROM window.
+///
+/// A ROM-only cartridge cannot be written; a flash cartridge would need a
+/// command engine that this prototype does not model. The strict policy is the
+/// default and reports [`Error::RomWrite`]; the explicit opt-in models the
+/// documented no-effect store of a ROM-only cartridge and leaves the save/flash
+/// region (`0x0E00_0000..=0x0E00_FFFF`) an explicit error.
+///
+/// This is host configuration, not guest state, and is excluded from
+/// [`Bus::state_digest`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RomWritePolicy {
+    /// Fail closed: every Game Pak ROM store returns [`Error::RomWrite`].
+    Strict,
+    /// **Experimental opt-in:** ROM-only cartridge stores complete with no
+    /// effect. No flash command engine is modelled.
+    Dropped,
+}
+
+impl RomWritePolicy {
+    /// Stable label for CLI output and snapshot reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Dropped => "dropped",
+        }
+    }
+}
+
 pub struct Bus {
     cart: Cartridge,
     ewram: Vec<u8>,
@@ -129,6 +158,7 @@ pub struct Bus {
     pressed_keys: u16,
     bios_data_policy: BiosDataPolicy,
     bios_write_policy: BiosWritePolicy,
+    rom_write_policy: RomWritePolicy,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -164,6 +194,7 @@ impl Bus {
             pressed_keys: 0,
             bios_data_policy: policy,
             bios_write_policy: BiosWritePolicy::Strict,
+            rom_write_policy: RomWritePolicy::Strict,
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -188,6 +219,21 @@ impl Bus {
 
     pub fn bios_write_policy(&self) -> BiosWritePolicy {
         self.bios_write_policy
+    }
+
+    /// Selects the explicit opt-in for ROM-only cartridge store semantics.
+    ///
+    /// Under [`RomWritePolicy::Dropped`] a store into the Game Pak ROM window
+    /// completes without effect. Nothing is stored, and the save/flash region
+    /// keeps its own explicit error.
+    #[must_use]
+    pub fn with_rom_write_policy(mut self, policy: RomWritePolicy) -> Self {
+        self.rom_write_policy = policy;
+        self
+    }
+
+    pub fn rom_write_policy(&self) -> RomWritePolicy {
+        self.rom_write_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.

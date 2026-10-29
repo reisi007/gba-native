@@ -45,6 +45,7 @@ the root workspace lockfile contains only these three internal path packages.
 | BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
+| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No flash command engine, save type or persistence is modelled, and the save region keeps its explicit error |
 | Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
@@ -65,7 +66,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]

@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -147,10 +147,12 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut snapshot_output = None;
     let mut synthetic_bios_zero_fill = false;
     let mut bios_rom_writes = false;
+    let mut rom_writes = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
             "--synthetic-bios-rom-writes" => bios_rom_writes = true,
+            "--synthetic-rom-writes-ignored" => rom_writes = true,
             "--budget" => {
                 let value = args
                     .next()
@@ -179,6 +181,9 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if bios_rom_writes {
         bus = bus.with_bios_write_policy(gba_native::bus::BiosWritePolicy::RomWritesDropped);
     }
+    if rom_writes {
+        bus = bus.with_rom_write_policy(gba_native::bus::RomWritePolicy::Dropped);
+    }
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     let output = if let Some(path) = snapshot_output {
         let image = display::snapshot(&bus)?;
@@ -201,9 +206,15 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("thumb={}", if cpu.thumb() { 1 } else { 0 });
     println!("bios_data_policy={}", bus.bios_data_policy().name());
     println!("bios_write_policy={}", bus.bios_write_policy().name());
+    println!("rom_write_policy={}", bus.rom_write_policy().name());
     if bios_rom_writes {
         println!(
             "bios_write_assumption=experimental documented mask-ROM no-effect writes; not BIOS data, opcodes or a compatibility claim"
+        );
+    }
+    if rom_writes {
+        println!(
+            "rom_write_assumption=experimental ROM-only cartridge no-effect stores; flash command engines are not modelled"
         );
     }
     if synthetic_bios_zero_fill {

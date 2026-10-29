@@ -571,3 +571,20 @@ and selects general-purpose mode.
 The Game Pak ROM window keeps its own fail-closed `RomWrite` error: writing
 there depends on a flash command engine that this prototype does not model, so
 it must not be turned into a silent no-op.
+
+## D31 — Explicit ROM-only cartridge write policy
+
+After the BIOS destination and the serial start were modelled, the same external
+run stopped at a guest store into the Game Pak ROM window (`0x080000C8`). The
+destination appears in one instruction with no other register change, so it is a
+PC-relative literal load from cartridge data rather than a computed RAM pointer.
+
+A ROM-only cartridge cannot be written; a flash cartridge would need a command
+engine that this prototype does not model. `RomWritePolicy::Strict` therefore
+stays the default and reports `RomWrite`, while the explicit opt-in
+`--synthetic-rom-writes-ignored` models the documented no-effect store. It never
+writes cartridge bytes, models no flash engine and keeps the backup region an
+explicit `UnsupportedSave` error.
+
+With the three opt-ins the run advanced to the guest's backup-device probe
+(`0x0E005555`), which needs a save-type model that is out of scope.

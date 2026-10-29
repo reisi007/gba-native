@@ -1039,7 +1039,17 @@ link partner there are no SC edges, the start bit stays set, and the guest
 reaches its own timeout path. Multiplay and UART starts remain explicit errors.
 
 The run then stops at a guest store into the Game Pak ROM window
-(`0x080000C8`), which still has no model.
+(`0x080000C8`). That destination appears in a single instruction with no other
+register change, so it is a PC-relative literal load from cartridge data.
+
+`RomWritePolicy` adds the same explicit opt-in for ROM-only cartridge stores
+(`--synthetic-rom-writes-ignored`); the default stays fail-closed, no cartridge
+byte is written, no flash engine is modelled, and the backup region keeps
+`UnsupportedSave`. With all three opt-ins the run advances to instruction
+896,755 and stops at the guest's backup-device probe (`0x0E005555`).
+
+`crates/core/tests/mask_rom_and_serial.rs` now also covers the ROM-only write
+policy (5 tests). Inventory pins: 408 listed / 404 selected.
 
 `DISPCNT` was `0x0080` (forced blank) at every stop, so no start screen, frame or
 compatibility result was observed and none is claimed. The Game Pak window keeps
