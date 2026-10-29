@@ -474,11 +474,11 @@ cargo test --offline --locked -p gba-native --test cli_aot_build
   `scripts/full.sh` are unchanged.
 - The job requires an arm64 `macos-latest` runner. Where the label resolves to an
   Intel host, the host check fails instead of recording a macOS ARM result.
-- Status: configured but not yet observed. No CI run of this job is recorded
-  here. The same two targets were re-run locally on the current arm64 macOS host
-  (`aarch64-apple-darwin`) with Rust 1.99.1 and the CI-pinned Rust 1.98.0:
-  `aot_target_build` 4 passed and `cli_aot_build` 2 passed on each toolchain.
-  That is local host evidence, not the CI result.
+- CI evidence: run `40791284482` completed successfully on 2026-10-29. The
+  `macos-arm-native-aot` job passed the host guard and both test commands; the
+  Linux `gates` job also passed. The same targets passed locally on the current
+  arm64 macOS host (`aarch64-apple-darwin`) with Rust 1.99.1 and CI-pinned Rust
+  1.98.0: `aot_target_build` 4 passed and `cli_aot_build` 2 passed on each.
 
 ### ROM-bound WASM module build (2026-10-27, local)
 
