@@ -330,10 +330,10 @@ open pending independent verification and CI; local tests alone do not close it.
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
-  SVC frame, six-service HLE dispatch and full CPSR return. VBlank IRQ dispatch
-  uses the documented six-word IRQ frame, ARM handler pointer and bounded
-  exception return without fetching BIOS code; BIOS boot and timing are not
-  implemented.
+  SVC frame, six-service HLE dispatch and full CPSR return. VBlank and
+  timer-overflow IRQ dispatch uses the documented six-word IRQ frame, ARM
+  handler pointer and bounded exception return without fetching BIOS code; BIOS
+  boot and timing are not implemented.
 - Thumb: register ALU operations including `MUL`, shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
@@ -350,9 +350,12 @@ open pending independent verification and CI; local tests alone do not close it.
   (Design policy).
 - Memory/I/O: EWRAM and IWRAM mirrors, documented palette/VRAM/OAM regions plus
   explicit prototype palette/VRAM/OAM alias policies, three ROM windows, selected
-  display/input/WAITCNT/DMA/IRQ/sound/timer registers. Unused
-  I/O writes are ignored and recorded; unmodelled reads remain errors. There is
-  no open bus, save support, cycle timing, audio generation or ticking timer.
+  display/input/WAITCNT/DMA/IRQ/sound/timer registers. Timers advance from the
+  same nominal three-cycle-per-instruction mapping as `VCOUNT`, including
+  prescaler, cascade, reload and overflow-IRQ support; this is not cycle-accurate
+  timing. Unused I/O writes are ignored and recorded; unmodelled reads remain
+  errors. There is no open bus, save support, cycle timing, audio generation or
+  timer-driven sound/DMA request.
 - Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.
   Tiles, sprites, windows, blending and affine transforms are unsupported.
 - AOT: only immutable ROM blocks; unknown targets use the reference interpreter;

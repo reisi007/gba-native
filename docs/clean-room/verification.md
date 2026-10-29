@@ -157,17 +157,24 @@ lockfiles.
   internal source-cursor advancement with visible latches preserved, invalid
   configurations before source access, bounded FIFO wrap/capacity, reset bits,
   and group-7 DMA disarming.
-- `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the frame boundary
-  raises VBlank/IF, IRQ gating requires IME/IE/pending, and timer registers retain
-  storage-only behavior. Sound FIFO state is bounded and host-driven; no audio,
-  timer-triggered sample consumption or automatic FIFO DMA is generated.
+- `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the instruction-count
+  frame model raises VBlank/IF once when its 228-line `VCOUNT` progression enters
+  line 160, IRQ gating requires IME/IE/pending, and timers follow the
+  instruction-budget counter model. Sound FIFO state is bounded and host-driven;
+  no audio, timer-triggered sample consumption or automatic FIFO DMA is
+  generated.
   `VCOUNT` is readable as its modelled halfword and, since the byte-lane round,
-  through exactly the two byte lanes at `0x04000006`/`0x04000007`. That new path
-  handles only `VCOUNT`: the pre-existing byte-addressed sound-register reads
-  are unchanged, every other address keeps the existing register-specific I/O
-  dispatch, and otherwise-unmodelled reads remain explicit unsupported-width
-  errors, including the neighbouring `DISPSTAT` lanes and the byte above
-  `VCOUNT`.
+  through exactly the two byte lanes at `0x04000006`/`0x04000007`. The halfword
+  walks all documented lines `0..=227` and wraps to 0; the retained 93632
+  instruction frame budget is split into 410 instructions per line plus one for
+  each of the 152 spread remainder instructions, so the line budgets still sum
+  to the frame budget. The DISPSTAT VBlank flag covers lines `160..=226` and is
+  clear on line 227. This is an instruction-count approximation, not hardware
+  scanline or cycle timing; the byte path handles only `VCOUNT`: the
+  pre-existing byte-addressed sound-register reads are unchanged, every other
+  address keeps the existing register-specific I/O dispatch, and
+  otherwise-unmodelled reads remain explicit unsupported-width errors, including
+  the neighbouring `DISPSTAT` lanes and the byte above `VCOUNT`.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
@@ -564,7 +571,8 @@ zero-address failure and stopped at `unsupported 8-bit I/O read at 0x04000006`.
 This records only progress past the earlier failure; no recognizable screen,
 boot, gameplay, automatic audio request or compatibility result was established.
 
-The VCOUNT byte-lane change supersedes that stop. It widens exactly one existing
+The following historical two-phase description was superseded by the 2026-10-29
+line-progression round below. The VCOUNT byte-lane change superseded that stop. It widens exactly one existing
 modelled register: `0x04000006` and `0x04000007` now return the low and high byte
 of the modelled `VCOUNT` halfword (`0` in the active phase, `160` in the modelled
 VBlank phase, so the high byte is always `0`). The new path handles only
@@ -573,7 +581,8 @@ every other I/O address keeps the existing register-specific dispatch, and
 otherwise-unmodelled reads remain explicit unsupported-width errors, including
 the `DISPSTAT` lanes and the byte immediately above `VCOUNT`. The synthetic
 regression is
-`crates/core/src/bus/irq.rs::bus::irq::tests::vcount_byte_lanes_track_phase_and_reject_selected_other_reads`;
+the then-named `vcount_byte_lanes_track_phase_and_reject_selected_other_reads`
+(now replaced by `vcount_byte_lanes_track_every_modelled_line`);
 it checks both phases, both lanes, the unchanged 16-bit `VCOUNT` value and that
 the `DISPSTAT` lanes and the byte above `VCOUNT` still error. This adds no
 scanline counter, HBlank, IRQ scheduling, open-bus behavior or frame timing, and
@@ -903,3 +912,95 @@ playability claim; BIOS execution remains blocked and Issue #10 stays open.
 - No Emerald ROM was available in this round, so no Emerald run or pass is
   claimed. The IRQ evidence is limited to the synthetic behavior-only contract;
   it does not establish BIOS boot, hardware timing, or retail compatibility.
+
+## Instruction-count VCOUNT progression round (2026-10-29)
+
+- `VCOUNT` no longer reports only `0`/`160`. `crates/core/src/bus/irq.rs` spreads
+  the retained 93,632-instruction frame budget over the documented 228 lines:
+  410 instructions per line plus one for each of the 152 remainder instructions,
+  distributed evenly through `bus::line_instructions` and
+  `bus::instructions_until_line`. The 228 line budgets sum to 93,632, a fresh bus
+  starts on line 0, the counter wraps from 227 to 0, and `Bus::tick_frames(n)`
+  produces the same state as `n` single `Bus::tick_frame` calls.
+- The DISPSTAT VBlank flag is derived from lines `160..=226`; line 227 is the
+  final hidden line with the flag cleared. The VBlank IRQ request latches once when line 160 is
+  entered, which is instruction 65,706 of the frame. This replaces the earlier
+  undocumented one-tenth placeholder boundary at instruction 84,269; the
+  behavior-only dispatcher frame, handler pointer/return and IME/IE/IF gating are
+  unchanged.
+- `cargo test --offline -p gba-native-core --lib bus::irq`: 7 passed (line-budget
+  sum and remainder distribution, full `0..=227` walk with wrap, pre-boundary/
+  160/226/227 flag and request behavior, batch/single-tick equivalence, `VCOUNT`
+  byte lanes, DISPSTAT writable bits).
+- `cargo test --offline -p gba-native-core --test irq_dispatch -p gba-native-aot
+  --test aot_irq --test aot_fallback`: 6 core IRQ tests, 1 full IRQ AOT parity
+  test and 2 fallback tests passed. The new core assertion checks that line 159
+  raises no VBlank request or delivery and that line 160 makes the request
+  deliverable.
+- `cargo test --offline` (whole workspace): every suite passed; the pinned
+  inventory is 379 selected package tests / 383 total workspace tests (core lib
+  41 -> 44, `irq_dispatch` 5 -> 6).
+- `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings` and
+  the 500-line hard counter (0 oversized files, 144 maintained Rust files) are
+  clean.
+- `./scripts/full.sh` completed with `==> full gate passed`: hard size gate,
+  Ratchet fast, format, Clippy, debug and release test suites, demo, synthetic
+  native proof (`native_vs_reference=match`, `proof=ok`) and Ratchet slow tier.
+- Limits: line boundaries are instruction-count slices, not hardware scanlines or
+  cycles. One instruction is not three cycles, drawing/HBlank periods are not
+  modelled, the 152 remainder instructions are spread evenly, no instruction
+  observes a mid-line split, and HBlank, VCOUNT-match IRQs, per-line interrupt
+  scheduling, DMA synchronization, BIOS execution and BIOS boot remain
+  unsupported. GBATEK labels lines 160..227 as hidden scanlines but clears the
+  DISPSTAT VBlank flag on 227, which this model follows. No ROM or BIOS file was
+  read, executed, copied or modified in this round.
+
+## Instruction-budget timer progression round (2026-10-29)
+
+- `crates/core/src/bus/timer.rs` now advances `TM0..TM3` from the same nominal
+  `INSTRUCTION_CYCLES = 3` mapping as the frame model. It implements the
+  documented `F/1`, `F/64`, `F/256` and `F/1024` prescalers, `TMxCNT_L`
+  reload-versus-counter behavior, reload on overflow and on the `0 -> 1` start
+  edge, stop freezing, count-up cascading (including chained overflows), and
+  timer overflow requests on `IF` bits 3..6. Timer 0's documented unused
+  count-up bit is accepted and ignored, reading back as zero; reserved control
+  bits read as zero. RegisterRamReset group 7 still clears the timer state.
+- `crates/core/tests/timer_model.rs`: 16 boundary tests cover stopped versus
+  running reads, a simultaneous 32-bit reload-plus-start write, every prescaler
+  immediately below and across its first increment, overflow reload/request and
+  write-one-to-clear acknowledgement, IME/IE gating, count-up prescaler
+  independence, chained cascades, cascaded-timer IRQ requests, a disabled
+  previous timer, Timer 0's ignored unused control bit with standard 32-bit
+  write composition, running prescaler/count-up changes discarding partial
+  phase, reserved bits, batch/single-tick equivalence, group-7 reset and
+  nominal frame-cycle arithmetic. One test also delivers a timer overflow
+  through the existing behavior-only IRQ dispatcher.
+- `crates/core/tests/timer_guest.rs`: 2 synthetic guests (ARM and Thumb) start
+  Timer 0, poll it into a register and spin; both observe `3` immediately after
+  the enable instruction and `45` after the 20-instruction budget.
+- `crates/aot/tests/aot_timer.rs`: the same ARM and Thumb fixtures are discovered,
+  emitted, compiled and executed natively. Both reports match the independently
+  run reference interpreter on PC, registers, CPU/bus digests and image; the
+  test asserts `report.fallbacks == 0`.
+- Commands and observed results:
+  - `cargo test -p gba-native-core --test timer_model --test timer_guest`:
+    16 and 2 passed.
+  - `cargo test -p gba-native-aot --test aot_timer`: 2 passed.
+  - `cargo test` and `cargo test --release`: every suite passed; the pinned
+    inventory is 403 listed workspace tests / 399 selected package tests (core
+    lib remains 44; new targets `timer_model` 16, `timer_guest` 2 and
+    `aot_timer` 2).
+  - `cargo fmt --check`, `cargo clippy --offline --all-targets -- -D warnings`
+    and the 500-line hard counter (0 oversized files, 147 maintained Rust files)
+    are clean.
+  - `./scripts/full.sh` completed with `==> full gate passed`: hard size gate,
+    Ratchet fast, format, Clippy, debug and release suites, demo, synthetic
+    native proof (`native_vs_reference=match`, `proof=ok`) and Ratchet slow tier.
+- Limits: timers are driven by instruction counts, not hardware cycles. Reads
+  observe only completed instruction ticks; instruction lengths, waitstates,
+  bus arbitration and mid-instruction reads are absent. Timers do not consume
+  Sound FIFO samples, select or start Sound DMA, request FIFO refills, drive
+  `VCOUNT`, HBlank or video capture, and `SOUNDCNT_H` timer-select bits remain
+  storage-only. Timer 0's documented unused count-up bit is ignored and reads
+  zero rather than being treated as a timing mode. No ROM or BIOS file was read,
+  executed, copied or modified in this round.

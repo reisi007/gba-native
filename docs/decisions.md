@@ -475,3 +475,67 @@ outside the model. Entry consumes no guest instruction budget; handler steps and
 the behavior-only return each consume one modeled guest step. Synthetic core
 and AOT tests establish only this bounded prototype contract, not hardware or
 retail-game compatibility.
+
+## D28 — Instruction-count `VCOUNT` progression across 228 lines
+
+Approved by the owner on 2026-10-29. The two-value `VCOUNT` placeholder (`0` in
+the active phase, `160` during VBlank) is replaced by a read-only line counter
+over the documented 228 lines. The existing frame budget
+`FRAME_INSTRUCTIONS = 280896 / 3 = 93632` guest instructions is retained and
+divided without a lost remainder: every line owns `93632 / 228 = 410`
+instructions, and the 152-instruction remainder is distributed one instruction
+at a time across the frame (`bus::line_instructions`,
+`bus::instructions_until_line`). The 228 line budgets therefore sum to exactly
+93632. A fresh bus starts on line 0 with that line's full budget ahead, the
+counter wraps from 227 to 0, and `Bus::tick_frames(n)` produces the same state
+as `n` single `Bus::tick_frame` calls.
+
+The old model's VBlank phase was an undocumented placeholder of one tenth of the
+frame. GBATEK `#lcd-dimensions-and-timings` gives 228 equally long lines of 1232
+cycles (228 × 1232 = 280896), so equal per-line instruction slices are the
+closest instruction-count approximation of the documented proportions. The
+VBlank request is therefore raised when the model enters line 160, and the
+DISPSTAT VBlank flag follows the documented DISPSTAT wording
+(`#lcd-io-interrupts-and-status`): set on lines `160..=226`, clear on line 227.
+This moves the request from the previous 84269-instruction placeholder boundary
+to 65706 instructions, which is the justified correction produced by replacing
+the arbitrary tenth with the documented hidden-line period. The behavior-only
+IRQ dispatcher contract itself is unchanged.
+
+This is explicitly **not** scanline or cycle timing: one guest instruction is not
+three cycles, line slices model neither drawing nor HBlank periods, the
+remainder instructions are spread evenly rather than at their exact cycle
+positions, and no instruction observes a mid-line split. HBlank IRQs,
+VCOUNT-match IRQs, per-line interrupt scheduling, DMA/HBlank synchronization and
+BIOS execution remain unsupported. Synthetic tests establish only this bounded
+prototype contract.
+
+## D29 — Instruction-budget timer progression
+
+Approved by the owner on 2026-10-29. `TM0..TM3` leave the earlier storage-only
+state and become counter models driven by the same nominal clock as D28: every
+retired guest instruction contributes `INSTRUCTION_CYCLES = 3` cycles. Prescaler
+selection is `F/1`, `F/64`, `F/256` or `F/1024`; count-up timers ignore their
+prescaler and increment once per previous-timer overflow, including chained
+cascades. Overflow copies the reload latch and can raise the matching `IF` bit
+when the timer IRQ-enable bit is set, including overflow of a count-up timer.
+The existing `IME`/`IE` gate and behavior-only dispatcher handle delivery; no new
+exception path is introduced.
+
+The documented reload/current-counter split is retained: `TMxCNT_L` writes only
+the reload latch, reads return the current or frozen counter, and the reload is
+copied on overflow or a `0 -> 1` start edge. A 32-bit reload-plus-control write is
+composed low halfword first, so the written reload is used by the edge. Stop
+freezes the counter; a prescaler or count-up change on a running timer keeps the
+counter but drops the partial phase. Timer 0's documented unused count-up bit is
+accepted and ignored, reading back as zero, while Timer 1..3 use it for
+count-up. Reserved control bits are masked to zero. A 32-bit reload-plus-control
+write remains two ordinary halfword writes.
+
+This is **not** cycle-accurate timing. Instruction lengths, waitstates, bus
+arbitration and mid-instruction reads are absent, so a counter poll sees only
+completed instruction ticks. Timers never consume Sound FIFO samples, start or
+select Sound DMA, request FIFO refills, drive `VCOUNT`/HBlank/video capture or
+any other peripheral; `SOUNDCNT_H` timer-select bits stay storage-only. Synthetic
+ARM, Thumb and native-AOT parity tests establish only this bounded prototype
+contract.

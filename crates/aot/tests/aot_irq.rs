@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::Bus;
+use gba_native::bus::{Bus, VBLANK_FIRST_LINE, instructions_until_line};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, IRQ_STACK, Mode};
 use gba_native::interpret;
@@ -15,7 +15,7 @@ const ENTRY: u32 = 0x0800_0000;
 const WAIT_LOOP: u32 = 0x0800_0030;
 const HANDLER: u32 = 0x0800_0100;
 const IRQ_SP: u32 = IRQ_STACK - 24;
-const ACTIVE_INSTRUCTIONS: u64 = (280_896 / 3) - (280_896 / 3) / 10;
+const ACTIVE_INSTRUCTIONS: u64 = instructions_until_line(VBLANK_FIRST_LINE);
 const HANDLER_INSTRUCTIONS: u64 = 9;
 
 struct TempDir(PathBuf);
@@ -149,6 +149,11 @@ fn native_irq_dispatch_and_return_match_reference_with_exact_fallbacks() {
         bus.read16(0x0400_0202),
         Ok(0),
         "handler acknowledged VBlank"
+    );
+    assert_eq!(
+        bus.read16(0x0400_0006),
+        Ok(160),
+        "the modeled dispatcher runs on VBlank line 160"
     );
     let observed_frame = std::array::from_fn(|word| {
         bus.read32(IRQ_SP + word as u32 * 4)

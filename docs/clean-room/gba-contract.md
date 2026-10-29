@@ -73,16 +73,20 @@ interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
 it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
 runs the service in SYSTEM mode and returns through full CPSR restoration.
 Other exception classes and BIOS instruction fetch remain unsupported. The
-bounded behavior-only VBlank IRQ dispatcher and return are described below;
-they do not execute or reconstruct BIOS code. BIOS data reads are governed by
-the policy below.
+bounded behavior-only VBlank/timer-overflow IRQ dispatcher and return are
+described below; they do not execute or reconstruct BIOS code. BIOS data reads
+are governed by the policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
 - RAM is executable but is **never AOT-translated**, so self-modifying RAM code
   is decoded freshly by the interpreter on every execution.
-- The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
-  timing or frame completion concept.
+- The CPU is instruction-budgeted. There is no scheduler, cycle count, HBlank
+  or drawing-period timing, or rendered-frame concept. The host-driven model
+  derives a read-only `VCOUNT` line from a fixed per-line instruction budget and
+  advances timer counters from the same nominal three-cycle instruction mapping
+  (below); those mappings are approximations, not hardware scanline or cycle
+  timing.
 
 ## Synthetic BIOS data policy (Design)
 
@@ -161,12 +165,14 @@ bus failure after exception entry is terminal and is not rolled back.
 
 ### Bounded IRQ dispatcher and return (partial; Design)
 
-The host-driven instruction-count frame model raises the VBlank request. Between
-guest instructions, the runner enters a handler only when IRQs are unmasked,
-IME and a matching IE/IF bit are set, and the nonzero handler pointer at
-`0x03007FFC` is present. The pointer must be word-aligned and executable ARM
-memory; invalid pointers fail explicitly before CPU or bus mutation. A six-word
-full-descending frame must fit in aligned EWRAM or IWRAM before entry begins.
+The host-driven instruction-count frame model raises the VBlank request once when
+line 160 of its 228-line `VCOUNT` progression is entered (see the `VCOUNT` model
+under Bus). Between guest instructions, the runner enters a handler only when
+IRQs are unmasked, IME and a matching IE/IF bit are set, and the nonzero handler
+pointer at `0x03007FFC` is present. The pointer must be word-aligned and
+executable ARM memory; invalid pointers fail explicitly before CPU or bus
+mutation. A six-word full-descending frame must fit in aligned EWRAM or IWRAM
+before entry begins.
 
 The behavior-only dispatcher saves ascending-address words `{r0,r1,r2,r3,r12,
 LR_irq}` at `SP_irq-24`, where the saved IRQ link is the interrupted PC + 4. It
@@ -181,10 +187,12 @@ Entry consumes no guest instruction budget; guest-handler instructions and the
 modeled epilogue each consume one.
 
 This behavior-only model follows the public BIOS interrupt-handling contract;
-it is not BIOS execution or a claim to reproduce BIOS bytes. Only the VBlank
-request is generated. The `0x03007FF8` interrupt-check flag, IRQ nesting, FIQ,
-other IRQ sources, scanline/cycle timing and BIOS boot remain unsupported. Do
-not interpret this as general GBA interrupt compatibility.
+it is not BIOS execution or a claim to reproduce BIOS bytes. Only two request
+sources are generated: the VBlank request once per frame at the modelled
+line-160 transition, and modelled timer overflow requests on `IF` bits 3..6.
+The `0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
+HBlank/VCOUNT-match IRQs, cycle timing and BIOS boot remain unsupported. Do not
+interpret this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -244,22 +252,81 @@ Implemented regions and widths:
   set of silently-dropped addresses small, inspectable and out of the digest.
   Mutable display-register and dynamic KEYINPUT state are included in
   `Bus::state_digest`. Sound registers remain storage-only apart from bounded
-  Sound A/B FIFO queues; timer registers are storage-only. There is no serial or
-  save-register state, and no BG affine parameter state.
-- `VCOUNT` byte lanes: the host-driven frame model already exposes a read-only
-  `VCOUNT` halfword at `0x04000006`. This change adds an 8-bit read path for
+  Sound A/B FIFO queues; timer counters, reload latches, controls and prescaler
+  phases are part of the instruction-budget timer model (below). There is no
+  serial or save-register state, and no BG affine parameter state.
+- `VCOUNT` and the instruction-count line model: the host-driven frame model
+  exposes a read-only `VCOUNT` halfword at `0x04000006` with an 8-bit path for
   exactly that register: `0x04000006` returns its low byte and `0x04000007` its
-  high byte. The model reports `0` in the active phase and `160` in the modelled
-  VBlank phase, so the high byte is always `0` and the halfword value is
-  unchanged by the byte path. The pre-existing byte-addressed sound-register
-  reads are unchanged, and every other I/O address keeps the existing
-  register-specific dispatch. Otherwise-unmodelled reads remain explicit
-  `UnsupportedIoRead { width: 8 }` errors, including the neighbouring `DISPSTAT`
-  lanes and the byte above `VCOUNT`. This follows GBATEK `#gba-io-map` and
-  `#lcd-io-interrupts-and-status` for the documented 8/16/32-bit I/O access and
-  the `VCOUNT` bit layout, but it is not scanline timing: the model has no 228
-  scanlines, HBlank or per-line counter. Byte writes to `VCOUNT` remain
-  ignored-and-recorded like any other unmodelled I/O write.
+  high byte. `VCOUNT` progresses through all 228 documented lines `0..=227` and
+  wraps from 227 to 0 once per frame, so the high byte is always `0` and the
+  halfword value is unchanged by the byte path. The total frame budget stays
+  `FRAME_INSTRUCTIONS` = 93,632 guest instructions (280,896 documented cycles at
+  a nominal three cycles per instruction). GBATEK `#lcd-dimensions-and-timings`
+  gives 228 equally long lines of 1232 cycles, so the budget is spread evenly:
+  each line owns `93632 / 228 = 410` instructions, and the 152-instruction
+  remainder is distributed one instruction at a time across the frame
+  (`bus::line_instructions`, `bus::instructions_until_line`). The 228 line
+  budgets therefore sum to exactly 93,632 with no lost remainder. A fresh bus
+  starts on line 0 with that line's full budget ahead; `Bus::tick_frame`
+  advances one guest instruction and `Bus::tick_frames` produces exactly the
+  same sequence as repeated single ticks. The DISPSTAT VBlank flag (bit 0) is
+  set on lines `160..=226` and clear on line 227, matching GBATEK
+  `#lcd-io-interrupts-and-status` ("set in line 160..226; not 227"); the VBlank
+  IRQ request latches once when line 160 is entered. This replaces the earlier
+  two-value `0`/`160` placeholder and its undocumented one-tenth VBlank phase.
+  **Design approximation, not a timing claim:** a line is an instruction-count
+  slice, not hardware timing. One guest instruction is not three cycles, lines
+  do not model drawing or HBlank periods, the 152 remainder instructions are
+  spread evenly instead of at their exact cycle positions, and no instruction
+  observes a mid-line split. There is no HBlank, VCOUNT-match IRQ, per-line
+  interrupt scheduling, wait-state/cycle accounting or scanline renderer. The
+  pre-existing byte-addressed sound-register reads are unchanged, every other
+  I/O address keeps the existing register-specific dispatch, and
+  otherwise-unmodelled reads remain explicit `UnsupportedIoRead { width: 8 }`
+  errors, including the neighbouring `DISPSTAT` lanes and the byte above
+  `VCOUNT`. Byte writes to `VCOUNT` remain ignored-and-recorded like any other
+  unmodelled I/O write, and the DISPSTAT V-Count setting (bits 8..15), its match
+  flag (bit 2) and the V-Counter IRQ remain unmodelled.
+
+### Timers
+
+`TM0..TM3` expose the documented 16-bit counter/reload halfword and control
+halfword at `0x04000100 + 4*n`. Each retired guest instruction contributes
+`bus::INSTRUCTION_CYCLES` = 3 nominal cycles to every **enabled** timer. A normal
+timer increments whenever its selected prescaler (`F/1`, `F/64`, `F/256`,
+`F/1024`) accumulates that many cycles; a cascaded Timer 1..3 ignores its own
+prescaler and increments once for each previous-timer overflow. Cascades are
+evaluated in timer order, so an overflow can propagate through consecutive
+timers in one nominal cycle. Disabled timers do not advance.
+
+The documented latch behavior is implemented. Writing `TMxCNT_L` changes only
+the reload value and never the current counter. Reading `TMxCNT_L` returns the
+current counter, or the frozen counter after disable. The reload value is copied
+to the counter on overflow and on a `0 -> 1` start edge in `TMxCNT_H`. A 32-bit
+I/O write is composed low halfword first, so a simultaneously written reload is
+the value used by the start edge. A stop freezes the counter; a later start
+reloads it. Changing only the prescaler or count-up selection on a running timer
+keeps the counter but discards the partial prescaler phase.
+
+Prescaler bits `0..1`, the count-up bit `2`, the overflow-IRQ bit `6` and the
+start bit `7` are modelled. Reserved control bits are stored as zero. Timer 0's
+count-up bit is documented as not used: it is accepted, ignored and reads back
+as zero, while Timer 1..3 use it for count-up. With the IRQ-enable bit set, an
+overflow latches the matching `IF` bit (3..6); the existing `IME`/`IE` gate and
+dispatcher decide delivery. Without that bit the overflow still reloads and
+still drives a cascade, but raises no request.
+
+**Design approximation, not a timing claim:** instruction lengths, waitstates,
+bus arbitration and mid-instruction reads are absent. A poll observes only
+completed instruction ticks. Timers do not consume Sound FIFO samples, select or
+start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video capture or
+any other peripheral. `SOUNDCNT_H` timer-select bits remain storage-only, and the
+documented `VCOUNT`-related timing sections are not used to derive prescaler
+phase. RegisterRamReset group 7 returns all four timers to their stopped, zeroed
+default state. Timer access stays halfword-oriented: an 8-bit timer read remains
+the existing explicit `UnsupportedIoRead { width: 8 }`, and an 8-bit timer write
+follows the bus-wide ignored-and-recorded policy for unmodelled byte I/O.
 
 ### DMA channels
 
@@ -496,10 +563,12 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
 - **Boundary:** the documented SWI-to-HLE path performs exception entry, a
-  bounded saved SVC frame and its SWI return. The behavior-only VBlank IRQ model
-  above saves the documented IRQ frame and models the handler return without
-  BIOS execution. ARM data-processing `S=1, Rd=PC` can restore an already
-  existing valid SPSR but performs no exception entry. Other exception
+  bounded saved SVC frame and its SWI return. The behavior-only VBlank and
+  timer-overflow IRQ model above saves the documented IRQ frame and models the
+  handler return without
+  BIOS execution, covering the modelled VBlank and timer-overflow requests.
+  ARM data-processing `S=1, Rd=PC` can restore an already existing valid SPSR
+  but performs no exception entry. Other exception
   classes/vectoring and BIOS execution remain unsupported.
 
 Pipeline offsets are documented. ARM operands reading R15 use

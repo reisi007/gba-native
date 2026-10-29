@@ -2,7 +2,7 @@
 //!
 //! Implements mirrored EWRAM/IWRAM, palette, VRAM, OAM, three ROM windows,
 //! selected I/O register blocks, bounded DMA/Sound FIFO behavior, and a
-//! host-driven frame/IRQ model.
+//! host-driven instruction-count line/frame/IRQ model (`VCOUNT` `0..=227`).
 //! Unmodelled I/O reads and open-bus behavior remain explicit errors; unused
 //! I/O writes are ignored and recorded. This is not a cycle-accurate bus.
 
@@ -17,6 +17,10 @@ mod timer;
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
+};
+pub use irq::{
+    FRAME_INSTRUCTIONS, FRAME_LINES, VBLANK_FIRST_LINE, VBLANK_LAST_LINE, instructions_until_line,
+    line_instructions,
 };
 pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
@@ -44,6 +48,13 @@ pub const BG0VOFS_ADDR: u32 = 0x0400_0012;
 pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
+
+/// Nominal hardware cycles attributed to one retired guest instruction.
+///
+/// The instruction-count frame and timer models share this mapping. It is a
+/// deterministic approximation, not measured CPU timing: instruction lengths,
+/// waitstates and bus arbitration are not modelled.
+pub const INSTRUCTION_CYCLES: u32 = 3;
 
 /// Host-selected policy for **data** reads from the 16 KiB BIOS region.
 ///

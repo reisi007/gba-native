@@ -1,6 +1,6 @@
 //! Synthetic coverage for the documented GBA IRQ dispatcher frame and return.
 
-use gba_native_core::bus::Bus;
+use gba_native_core::bus::{Bus, VBLANK_FIRST_LINE, instructions_until_line};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::{Cpu, FLAG_F, FLAG_I, FLAG_V, IRQ_STACK, Mode};
 use gba_native_core::error::Error;
@@ -10,6 +10,7 @@ use gba_native_core::ir::{PSR_FIELD_C, Psr};
 const ENTRY: u32 = 0x0800_0000;
 const HANDLER: u32 = 0x0800_0100;
 const HANDLER_POINTER: u32 = 0x0300_7FFC;
+const VCOUNT_ADDR: u32 = 0x0400_0006;
 const IE_ADDR: u32 = 0x0400_0200;
 const IF_ADDR: u32 = 0x0400_0202;
 const IME_ADDR: u32 = 0x0400_0208;
@@ -49,10 +50,33 @@ fn pending_bus(handler: Option<u32>) -> Bus {
     }
     bus.write16(IE_ADDR, 1).expect("enable VBlank IRQ");
     bus.write16(IME_ADDR, 1).expect("enable IRQ master switch");
-    let active = 280_896 / 3 - (280_896 / 3) / 10;
+    let active = instructions_until_line(VBLANK_FIRST_LINE);
     bus.tick_frames(active);
+    assert_eq!(bus.read16(VCOUNT_ADDR).expect("vcount"), 160);
     assert_eq!(bus.read16(IF_ADDR).expect("IF"), 1);
     bus
+}
+
+#[test]
+fn vblank_request_waits_for_the_documented_line_160() {
+    let mut bus = Bus::new(irq_rom());
+    bus.write16(IE_ADDR, 1).expect("enable VBlank IRQ");
+    bus.write16(IME_ADDR, 1).expect("enable IRQ master switch");
+    let boundary = instructions_until_line(VBLANK_FIRST_LINE);
+
+    bus.tick_frames(boundary - 1);
+    assert_eq!(bus.read16(VCOUNT_ADDR).expect("vcount"), 159);
+    assert_eq!(
+        bus.read16(IF_ADDR).expect("IF"),
+        0,
+        "no request on line 159"
+    );
+    assert!(!bus.irq_pending(), "nothing to deliver before line 160");
+
+    bus.tick_frame();
+    assert_eq!(bus.read16(VCOUNT_ADDR).expect("vcount"), 160);
+    assert_eq!(bus.read16(IF_ADDR).expect("IF"), 1);
+    assert!(bus.irq_pending(), "the line-160 request is deliverable");
 }
 
 fn interrupted_thumb_cpu() -> Cpu {

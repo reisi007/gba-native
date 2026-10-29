@@ -50,6 +50,17 @@ Relevant anchors actually consulted for this milestone:
   reference does not establish a fixed DMA1/A and DMA2/B pairing.
 - `#4000082h---soundcnt-h---dma-sound-control-mixing`: Direct Sound control and
   the FIFO A/B reset bits.
+- `#gba-timers`, `#4000100h---tm0cnt_l---timer-0-counterreload-rw` and
+  `#4000102h---tm0cnt_h---timer-0-control-rw`: the four incrementing 16-bit
+  timers, `F/1`/`F/64`/`F/256`/`F/1024` prescaler selection, count-up cascading
+  (not used for Timer 0), overflow IRQ enable, start/stop, the reload/current
+  counter distinction, reload on overflow and on the `0 -> 1` start edge, and
+  the 32-bit reload-plus-start note. The implementation advances these counters
+  only from the nominal three-cycle instruction mapping; no hardware cycle,
+  prescaler phase or sound/DMA synchronization is inferred from the reference.
+  These anchors were consulted on 2026-10-29 in the same upstream GBATEK text at
+  <https://problemkaputt.de/gbatek.htm>; that retrieval was not separately
+  retained or hashed.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC
@@ -112,11 +123,23 @@ Relevant anchors actually consulted for this milestone:
   register with the current scanline in bits 0..7 and zeros in bits 8..15, the
   LCD status/interrupt field layout, and the document's notes on register-width
   and byte-lane behavior. Only the `VCOUNT` byte lanes at `0x04000006`/
-  `0x04000007` are added from this group; the pre-existing byte-addressed
-  sound-register reads are unchanged, every other I/O address keeps the existing
-  register-specific dispatch, and otherwise-unmodelled reads remain explicit
-  unsupported-width errors. These anchors were consulted on
-  2026-10-28 in the upstream GBATEK document at
+  `0x04000007` are added from this group; the bounded synthetic line
+  progression remains an instruction-count model, not hardware line timing.
+  The pre-existing byte-addressed sound-register reads are unchanged, every
+  other I/O address keeps the existing register-specific dispatch, and
+  otherwise-unmodelled reads remain explicit unsupported-width errors. These
+  anchors were consulted on 2026-10-28 in the upstream GBATEK document at
+  <https://problemkaputt.de/gbatek.htm>, which is the same reference text as S1;
+  that retrieval was not separately retained or hashed.
+- `#lcd-io-interrupts-and-status` and `#lcd-dimensions-and-timings`: `VCOUNT`
+  (`0x04000006`) as the current scanline in `0..=227`, the DISPSTAT VBlank flag
+  wording ("set in line 160..226; not 227"), the 160 drawing lines plus 68
+  hidden VBlank lines, and the 228-line/280896-cycle frame at 1232 cycles per
+  line. Only a deterministic instruction-count approximation is implemented:
+  the retained 93632-instruction budget is spread over the 228 lines and the
+  VBlank request follows the modelled line-160 transition. No scanline, HBlank,
+  VCOUNT-match or cycle timing is taken from these sections. These anchors were
+  consulted on 2026-10-29 in the same upstream GBATEK text at
   <https://problemkaputt.de/gbatek.htm>, which is the same reference text as S1;
   that retrieval was not separately retained or hashed.
 

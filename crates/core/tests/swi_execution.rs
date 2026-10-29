@@ -256,6 +256,7 @@ fn all_six_documented_services_are_guest_reachable() {
                 cpu.set_reg(0, EWRAM_BASE);
                 cpu.set_reg(1, EWRAM_BASE + 0x20);
                 cpu.set_reg(2, (1 << 26) | 1);
+                cpu.set_reg(3, 0xA5A5_5A5A);
                 bus.write32(EWRAM_BASE, 0x1234_5678).expect("source");
             }
             0x0C => {
@@ -284,7 +285,15 @@ fn all_six_documented_services_are_guest_reachable() {
                 assert_eq!(cpu.reg(3), 123);
             }
             0x08 => assert_eq!(cpu.reg(0), 9),
-            0x0B => assert_eq!(bus.read32(EWRAM_BASE + 0x20).expect("copy"), 0x1234_5678),
+            0x0B => {
+                assert_eq!(bus.read32(EWRAM_BASE + 0x20).expect("copy"), 0x1234_5678);
+                // This is the prototype's preserved-register policy, not a
+                // claim about undocumented real BIOS register side effects.
+                assert_eq!(cpu.reg(0), EWRAM_BASE);
+                assert_eq!(cpu.reg(1), EWRAM_BASE + 0x20);
+                assert_eq!(cpu.reg(2), (1 << 26) | 1);
+                assert_eq!(cpu.reg(3), 0xA5A5_5A5A);
+            }
             0x0C => assert_eq!(
                 bus.read32(EWRAM_BASE + 0x9C).expect("rounded end"),
                 0xA500_0007
@@ -315,6 +324,24 @@ fn invalid_memory_service_request_fails_before_svc_frame() {
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
         Err(Error::Bios(BiosError::UnsupportedDestination { .. }))
+    ));
+    assert_eq!((cpu.state_digest(), bus.state_digest()), before);
+
+    // A nonzero Thumb CpuSet copy to the BIOS address range must likewise
+    // fail before exception entry; no BIOS bytes are supplied or fetched.
+    let mut bus = thumb_fixture(0xDF0B);
+    let mut cpu = prepared_cpu();
+    cpu.set_thumb(true);
+    cpu.set_reg(0, EWRAM_BASE + 0x100);
+    cpu.set_reg(1, 0);
+    cpu.set_reg(2, 28);
+    let before = (cpu.state_digest(), bus.state_digest());
+    assert!(matches!(
+        interpret::step(&mut cpu, &mut bus),
+        Err(Error::Bios(BiosError::UnsupportedDestination {
+            service: 0x0B,
+            addr: 0,
+        }))
     ));
     assert_eq!((cpu.state_digest(), bus.state_digest()), before);
 }

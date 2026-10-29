@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, EWRAM_BASE};
+use gba_native::bus::{Bus, EWRAM_BASE, VBLANK_FIRST_LINE, instructions_until_line};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::display;
@@ -122,12 +122,11 @@ fn native_unknown_target_ticks_guest_instructions_like_the_reference() {
     assert_eq!(artifact.stats.instructions, 6);
     assert_eq!(artifact.stats.blocks, 1);
 
-    // Reach the active-to-VBlank boundary. Six instructions are translated;
+    // Reach the VBlank line boundary. Six instructions are translated;
     // every later instruction executes through the interpreter fallback.
-    // Bus design: 280,896 cycles / 3 nominal cycles per instruction, with
-    // VBlank occupying one tenth of the frame (integer truncation).
-    let frame_instructions = 280_896 / 3;
-    let budget = frame_instructions - frame_instructions / 10;
+    // Bus design: 280,896 cycles / 3 nominal cycles per instruction, spread
+    // over the 228 documented lines without a lost remainder.
+    let budget = instructions_until_line(VBLANK_FIRST_LINE);
     let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit fallback fixture");
     let temp = TempDir::new();
     let rom_path = temp.0.join("fixture.gba");
@@ -169,9 +168,7 @@ fn translated_aot_delivers_pending_irq_before_fallback_handler_step() {
     let cart = irq_fixture();
     let artifact = aot::discover(&cart, 0x0800_0000, false, aot::Limits::default())
         .expect("discover IRQ fixture");
-    let frame_instructions = 280_896 / 3;
-    let active_instructions = frame_instructions - frame_instructions / 10;
-    let budget = active_instructions + 1;
+    let budget = instructions_until_line(VBLANK_FIRST_LINE) + 1;
     let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit IRQ fixture");
     let temp = TempDir::new();
     let rom_path = temp.0.join("fixture.gba");

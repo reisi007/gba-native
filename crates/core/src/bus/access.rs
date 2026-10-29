@@ -338,7 +338,7 @@ impl Bus {
             if self.sound_write16(addr, value) {
                 return Ok(());
             }
-            if self.timer_write16(addr, value) {
+            if self.timer_write16(addr, value).is_some() {
                 return Ok(());
             }
             if let Some(result) = self.io.write16(addr, value) {
