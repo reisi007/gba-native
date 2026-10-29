@@ -1,4 +1,7 @@
-use crate::cpu::{Cpu, FLAG_I, FLAG_T, IRQ_STACK, MODE_MASK, Mode, SVC_STACK, USER_STACK};
+use crate::cpu::{
+    Cpu, FLAG_I, FLAG_T, IRQ_DISPATCH_CONTINUATION, IRQ_STACK, MODE_MASK, Mode, SVC_STACK,
+    USER_STACK,
+};
 use crate::error::{Error, Result};
 use crate::semantics;
 
@@ -24,17 +27,36 @@ impl Cpu {
         self.cpsr & FLAG_I != 0
     }
 
-    /// ARM7TDMI IRQ entry. `LR_irq` receives the return address that the
-    /// documented `SUBS PC,LR,#4` epilogue rewinds by one instruction, and the
-    /// handler address is the pointer the guest wrote to `0x03007FFC`.
-    pub(crate) fn enter_irq(&mut self, handler: u32) -> u32 {
+    /// The documented dispatcher saves these IRQ-visible values in
+    /// full-descending order before calling the guest handler.
+    pub(crate) fn irq_frame_values(&self) -> [u32; 6] {
+        [
+            self.low[0],
+            self.low[1],
+            self.low[2],
+            self.low[3],
+            // R12 is shared outside FIQ. The handler sees this bank even when
+            // an IRQ interrupted FIQ mode.
+            self.high[4],
+            self.pc.wrapping_add(4),
+        ]
+    }
+
+    pub(crate) fn irq_stack_pointer(&self) -> u32 {
+        self.sp[Mode::Irq.bank()]
+    }
+
+    /// Enter the behavior-only BIOS-dispatch model after the documented frame
+    /// has been validated and written. The guest handler is always ARM code;
+    /// LR_irq identifies the modeled BIOS continuation, not executable bytes.
+    pub(crate) fn enter_irq(&mut self, handler: u32, frame_sp: u32) {
         let old_cpsr = self.cpsr;
         self.spsr[Mode::Irq.bank()] = Some(old_cpsr);
-        self.lr[Mode::Irq.bank()] = self.pc.wrapping_add(4);
+        self.sp[Mode::Irq.bank()] = frame_sp;
+        self.lr[Mode::Irq.bank()] = IRQ_DISPATCH_CONTINUATION;
         // IRQ entry switches to ARM state with IRQs masked and FIQ unchanged.
         self.cpsr = (old_cpsr & !(MODE_MASK | FLAG_T)) | Mode::Irq.bits() | FLAG_I;
-        self.pc = handler & !3;
-        old_cpsr
+        self.pc = handler;
     }
 
     /// ARM7TDMI SWI entry. The caller has already validated the service and
@@ -101,6 +123,18 @@ impl Cpu {
     /// fabricating a status register. The caller must not apply the ordinary
     /// `S=1` NZCV result afterwards: the restored CPSR replaces it.
     pub fn return_from_exception(&mut self, computed_pc: u32) -> Result<()> {
+        let status = self.exception_return_status()?;
+        self.cpsr = status;
+        // The restored T bit decides the alignment of the computed target.
+        self.pc = semantics::aligned_pc(computed_pc, status & FLAG_T != 0);
+        Ok(())
+    }
+
+    pub(crate) fn validate_exception_return(&self) -> Result<()> {
+        self.exception_return_status().map(|_| ())
+    }
+
+    fn exception_return_status(&self) -> Result<u32> {
         let status = self.spsr[self.mode().bank()].ok_or(Error::Psr(
             "S=1 with Rd=PC requires an SPSR restore from the current mode, \
              but USER/SYSTEM has no SPSR",
@@ -110,9 +144,6 @@ impl Cpu {
                 "SPSR used by an S=1 with Rd=PC exception return holds an invalid mode",
             ));
         }
-        self.cpsr = status;
-        // The restored T bit decides the alignment of the computed target.
-        self.pc = semantics::aligned_pc(computed_pc, status & FLAG_T != 0);
-        Ok(())
+        Ok(status)
     }
 }

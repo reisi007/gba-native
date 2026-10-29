@@ -46,7 +46,7 @@ pub(super) fn emit_block(out: &mut String, block: &AotBlock) -> Result<()> {
 fn emit_instruction(out: &mut String, instruction: &IrInstr) -> Result<()> {
     writeln!(
         out,
-        "    if gba_native::interpret::deliver_pending_irq(cpu, bus) {{ return Ok(Next::Continue); }}"
+        "    if gba_native::interpret::deliver_pending_irq(cpu, bus)? {{ return Ok(Next::Continue); }}"
     )
     .unwrap();
     match instruction.op {

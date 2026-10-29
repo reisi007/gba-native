@@ -456,3 +456,22 @@ The existing palette access-width rules apply through the alias. Core bus
 vectors and a generated-native synthetic fixture cover alias reads/writes. This
 is a test-driven design extension, not a hardware-map or retail-compatibility
 claim; no other unmapped region is relaxed by this decision.
+
+## D27 — Behavior-only GBA IRQ dispatcher and return
+
+Approved by the owner on 2026-10-29 after the recorded VBlank IRQ path stopped
+at an unaligned ARM PC. Implement the public GBATEK BIOS interrupt-handling
+contract as behavior only: save the documented six IRQ-frame values in their
+documented full-descending order, call the word-aligned ARM handler through
+`0x03007FFC`, and recognize the documented handler return at the BIOS
+continuation `0x00000138` only in ARM IRQ mode. Restore the frame and perform the
+documented interrupted-state return without fetching BIOS memory or creating
+BIOS instruction bytes. Validate the complete frame range and executable
+handler target before changing CPU or guest memory.
+
+This does not reproduce or claim to execute the GBA BIOS. `0x03007FF8`, IRQ
+nesting, FIQ, other IRQ sources, BIOS boot and all scanline/cycle timing remain
+outside the model. Entry consumes no guest instruction budget; handler steps and
+the behavior-only return each consume one modeled guest step. Synthetic core
+and AOT tests establish only this bounded prototype contract, not hardware or
+retail-game compatibility.

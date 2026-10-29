@@ -101,7 +101,11 @@ Relevant anchors actually consulted for this milestone:
   `#arm-cpu-exceptions`, `#gba-bios-ram-usage` and
   `#bios-interrupt-handling`: SWI comment extraction, the four documented
   handler-save values and SYSTEM-mode switch, exception entry/return flags and
-  vector, GBA stack tops, and the boundary that IRQ nesting is not modeled.
+  vector, GBA stack tops, and the behavior-only IRQ dispatcher contract: the
+  six saved register values and order, ARM-state handler handoff, continuation
+  return contract, and the boundaries around `0x03007FF8`, nesting and other
+  interrupt sources. No BIOS bytes, disassembly or BIOS instruction fetch were
+  used.
 - `#gba-memory-map`, `#gba-io-map`, `#lcd-io-interrupts-and-status` and
   `#gba-unpredictable-things`: the I/O block address range, the documented
   8/16/32-bit I/O access widths, `VCOUNT` at `0x04000006` as a readable 16-bit

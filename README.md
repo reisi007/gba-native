@@ -330,9 +330,10 @@ open pending independent verification and CI; local tests alone do not close it.
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
-  SVC frame, six-service HLE dispatch and full CPSR return. IRQ delivery uses
-  the host-driven frame model and the documented IWRAM handler pointer; BIOS
-  boot is not implemented.
+  SVC frame, six-service HLE dispatch and full CPSR return. VBlank IRQ dispatch
+  uses the documented six-word IRQ frame, ARM handler pointer and bounded
+  exception return without fetching BIOS code; BIOS boot and timing are not
+  implemented.
 - Thumb: register ALU operations including `MUL`, shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low

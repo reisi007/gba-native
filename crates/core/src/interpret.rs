@@ -2,7 +2,10 @@
 //! the runtime fallback for the native-AOT prototype.
 
 use crate::bus::Bus;
-use crate::cpu::{Cpu, adc_flags, add_flags, condition_holds, sbc_flags, sub_flags};
+use crate::cpu::{
+    Cpu, IRQ_DISPATCH_CONTINUATION, IRQ_FRAME_BYTES, IRQ_FRAME_WORDS, Mode, adc_flags, add_flags,
+    condition_holds, sbc_flags, sub_flags,
+};
 use crate::decode::{decode_arm, decode_thumb};
 use crate::error::Result;
 use crate::ir::{AluOpcode, IrInstr, Op, PsrSrc, Src};
@@ -18,27 +21,104 @@ pub fn decode_at(bus: &Bus, addr: u32, thumb: bool) -> Result<IrInstr> {
     }
 }
 
-/// Execute exactly one instruction (or one conditional no-op).
+/// Execute one guest instruction, conditional no-op or modeled IRQ return step.
 pub fn step(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
+    if cpu.mode() == Mode::Irq && !cpu.thumb() && cpu.pc() == IRQ_DISPATCH_CONTINUATION {
+        return return_from_irq_dispatch(cpu, bus);
+    }
     let addr = cpu.pc();
     let thumb = cpu.thumb();
     let instr = decode_at(bus, addr, thumb)?;
     execute(cpu, bus, instr)
 }
 
-/// Deliver a pending enabled IRQ before the next guest instruction, when the
-/// guest has installed a handler pointer. Returns true if exception entry ran.
-/// Shared by the reference budget runner and generated native dispatch.
-pub fn deliver_pending_irq(cpu: &mut Cpu, bus: &Bus) -> bool {
-    if !cpu.irq_masked()
-        && bus.irq_pending()
-        && let Some(handler) = bus.irq_handler()
-    {
-        cpu.enter_irq(handler);
-        true
-    } else {
-        false
+/// Deliver a pending enabled IRQ before the next guest instruction when the
+/// handler and six-word IRQ frame are valid. This models the documented BIOS
+/// dispatcher behavior without fetching BIOS code. Entry consumes no guest
+/// instruction budget. Shared by the reference runner and generated AOT code.
+pub fn deliver_pending_irq(cpu: &mut Cpu, bus: &mut Bus) -> Result<bool> {
+    if cpu.irq_masked() || cpu.mode() == Mode::Irq || !bus.irq_pending() {
+        return Ok(false);
     }
+    let Some(handler) = bus.irq_handler() else {
+        return Ok(false);
+    };
+    if handler & 3 != 0 {
+        return Err(crate::error::Error::IrqHandler {
+            addr: handler,
+            reason: "handler pointer is not word-aligned ARM code",
+        });
+    }
+    bus.fetch32(handler)
+        .map_err(|_| crate::error::Error::IrqHandler {
+            addr: handler,
+            reason: "handler pointer does not reference executable memory",
+        })?;
+
+    let sp = cpu.irq_stack_pointer();
+    if sp & 3 != 0 {
+        return Err(crate::error::Error::IrqStack {
+            sp,
+            reason: "stack pointer is not word-aligned",
+        });
+    }
+    let frame_sp = sp
+        .checked_sub(IRQ_FRAME_BYTES)
+        .ok_or(crate::error::Error::IrqStack {
+            sp,
+            reason: "six-word frame underflows the address space",
+        })?;
+    if !Bus::is_work_ram_range(frame_sp, IRQ_FRAME_BYTES as usize) {
+        return Err(crate::error::Error::IrqStack {
+            sp,
+            reason: "six-word frame must fit wholly in EWRAM or IWRAM",
+        });
+    }
+
+    let frame = cpu.irq_frame_values();
+    for (index, value) in frame.into_iter().enumerate() {
+        bus.write32(frame_sp + index as u32 * 4, value)?;
+    }
+    cpu.enter_irq(handler, frame_sp);
+    Ok(true)
+}
+
+fn return_from_irq_dispatch(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
+    let frame_sp = cpu.reg(13);
+    if frame_sp & 3 != 0 {
+        return Err(crate::error::Error::IrqStack {
+            sp: frame_sp,
+            reason: "dispatcher frame pointer is not word-aligned",
+        });
+    }
+    if !Bus::is_work_ram_range(frame_sp, IRQ_FRAME_BYTES as usize) {
+        return Err(crate::error::Error::IrqStack {
+            sp: frame_sp,
+            reason: "dispatcher frame must fit wholly in EWRAM or IWRAM",
+        });
+    }
+    let restored_sp =
+        frame_sp
+            .checked_add(IRQ_FRAME_BYTES)
+            .ok_or(crate::error::Error::IrqStack {
+                sp: frame_sp,
+                reason: "restored stack pointer overflows the address space",
+            })?;
+    let mut frame = [0; IRQ_FRAME_WORDS];
+    for (index, value) in frame.iter_mut().enumerate() {
+        *value = bus.read32(frame_sp + index as u32 * 4)?;
+    }
+    cpu.validate_exception_return()?;
+
+    // The BIOS dispatcher restores the saved user registers and IRQ LR before
+    // applying SUBS-PC/LR/#4 semantics. No guest BIOS instruction is fetched.
+    for (index, value) in frame[..4].iter().copied().enumerate() {
+        cpu.set_reg(index as u8, value);
+    }
+    cpu.set_reg(12, frame[4]);
+    cpu.set_reg(14, frame[5]);
+    cpu.set_reg(13, restored_sp);
+    cpu.return_from_exception(frame[5].wrapping_sub(4))
 }
 
 fn read_rn(cpu: &Cpu, instr: IrInstr, rn: u8, rhs: Src) -> u32 {
@@ -313,7 +393,7 @@ pub fn run_budget(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<u64> {
         // Deliver a pending interrupt between instructions. Without a handler
         // pointer at 0x03007FFC there is nowhere to dispatch, so the request
         // stays latched instead of being dropped.
-        deliver_pending_irq(cpu, bus);
+        deliver_pending_irq(cpu, bus)?;
         step(cpu, bus)?;
         bus.tick_frame();
         used += 1;

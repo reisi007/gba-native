@@ -318,7 +318,14 @@ expectations, not from the decoder/interpreter:
   fixture arms VBlank IRQs, installs a guest handler and unmasks IRQs; translated
   instructions detect the pending request and the handler executes through a
   fresh fallback, matching reference CPU, bus and budget. This covers IRQ entry
-  parity only; it does not claim the BIOS dispatcher frame or handler return.
+  parity for that fixture; the full bounded behavior-only frame/return contract
+  is covered separately by `crates/aot/tests/aot_irq.rs`.
+- `crates/core/tests/irq_dispatch.rs` and `crates/aot/tests/aot_irq.rs`: synthetic
+  full-descending IRQ frame order, ARM handler entry, IF acknowledgement,
+  `BX LR` to the IRQ-only `0x138` continuation, frame/register restore, Thumb
+  resume and native/reference parity. Invalid handler targets and IRQ stacks
+  fail before CPU or bus mutation; absent handlers, masked requests and attempted
+  nesting keep the request pending. The tests do not execute BIOS instructions.
 - `crates/aot/tests/aot_block_unaligned.rs`: native ARM STMIA/LDMDA and Thumb
   STMIA/LDMIA with unaligned bases; hand-expected aligned transfer words and
   original-base writeback compared against the reference interpreter.
@@ -820,12 +827,12 @@ not initial HEAD sizes, and are not used as historical evidence.
 
 No complete hardware conformance ROM suite has passed, and no real GBA hardware
 was used. No retail game is supported or known playable. No BIOS boots; only the
-bounded synthetic SWI entry/return path, partial VBlank IRQ request/entry, and
-the documented CPU-only ALU SPSR return are tested. The BIOS IRQ dispatcher
-frame/handler return and other exception entry/vectoring, save persistence,
-audio output, input interaction, DMA arbitration and automatic event timing,
-cycle timing, other BG modes/layers, OBJ/sprite rendering or a playable frontend
-are not verified. The static Mode 0 BG0 snapshot is
+bounded synthetic SWI path, behavior-only VBlank IRQ dispatcher frame/return,
+and documented CPU-only ALU SPSR return have synthetic-test coverage. IRQ
+nesting, FIQ, other interrupt sources, other exception entry/vectoring, save
+persistence, audio output, input interaction, DMA arbitration and automatic
+event timing, cycle timing, other BG modes/layers, OBJ/sprite rendering or a
+playable frontend are not verified. The static Mode 0 BG0 snapshot is
 only a synthetic, documentation-driven capability slice; it is not evidence
 that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
 optional synthetic `apps/desktop` frontend presents
@@ -880,3 +887,19 @@ Artifacts and snapshots are local ignored output only. Vendored ROMs remain
 read-only, are not part of `cargo test` or CI, and were neither copied into the
 generated artifacts nor embedded. This run is not a hardware-conformance or
 playability claim; BIOS execution remains blocked and Issue #10 stays open.
+
+## Behavior-only IRQ dispatcher round (2026-10-29)
+
+- `cargo test --offline -p gba-native-core --test irq_dispatch -p gba-native-aot
+  --test aot_irq --test aot_fallback`: 5 core IRQ tests, 1 full IRQ AOT parity
+  test and 2 fallback tests passed. The tests use generated synthetic fixtures;
+  none reads a retail ROM or BIOS artifact.
+- `cargo test --offline --test workspace_contract`: 3 passed with the pinned
+  inventory updated to 375 selected package tests / 379 total workspace tests.
+- A fresh-target `./scripts/full.sh` completed with `==> full gate passed`:
+  hard 500-line gate, Ratchet fast, format, Clippy, debug and release tests,
+  demo, synthetic native proof (`native_vs_reference=match`, `proof=ok`) and
+  Ratchet slow tier all passed.
+- No Emerald ROM was available in this round, so no Emerald run or pass is
+  claimed. The IRQ evidence is limited to the synthetic behavior-only contract;
+  it does not establish BIOS boot, hardware timing, or retail compatibility.

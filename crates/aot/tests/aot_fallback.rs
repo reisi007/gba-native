@@ -75,16 +75,16 @@ fn fixture() -> Cartridge {
 }
 
 fn irq_fixture() -> Cartridge {
-    const HANDLER: u32 = 0x0800_0080;
+    const HANDLER: u32 = 0x0800_0100;
     let mut rom = vec![0u8; 0x200];
     let words = [
-        ldr_literal(0, 0x00, 0x60), // r0 = IRQ handler pointer
-        ldr_literal(1, 0x04, 0x64), // r1 = handler
+        ldr_literal(0, 0x00, 0xC0), // r0 = IRQ handler pointer
+        ldr_literal(1, 0x04, 0xC4), // r1 = handler
         0xE580_1000,                // STR r1,[r0]
-        ldr_literal(0, 0x0C, 0x68), // r0 = IE
+        ldr_literal(0, 0x0C, 0xC8), // r0 = IE
         0xE3A0_1001,                // MOV r1,#1 (VBlank)
         0xE1C0_10B0,                // STRH r1,[r0]
-        ldr_literal(0, 0x18, 0x6C), // r0 = IME
+        ldr_literal(0, 0x18, 0xCC), // r0 = IME
         0xE1C0_10B0,                // STRH r1,[r0]
         0xE321_F05F,                // MSR CPSR_c,#0x5F (unmask IRQ)
         0xEAFF_FFFE,                // B . until the modeled VBlank IRQ
@@ -97,11 +97,11 @@ fn irq_fixture() -> Cartridge {
         .iter()
         .enumerate()
     {
-        let offset = 0x60 + index * 4;
+        let offset = 0xC0 + index * 4;
         rom[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
     }
-    rom[0x80..0x84].copy_from_slice(&0xE282_2001u32.to_le_bytes()); // ADD r2,r2,#1
-    rom[0x84..0x88].copy_from_slice(&0xEAFF_FFFEu32.to_le_bytes()); // B .
+    rom[0x100..0x104].copy_from_slice(&0xE282_2001u32.to_le_bytes()); // ADD r2,r2,#1
+    rom[0x104..0x108].copy_from_slice(&0xEAFF_FFFEu32.to_le_bytes()); // B .
     rom[0xA0..0xAC].fill(0);
     rom[0xA0..0xA8].copy_from_slice(b"GBA-IRQ\0");
     rom[0xAC..0xB0].copy_from_slice(b"GBAD");
@@ -165,7 +165,7 @@ fn native_unknown_target_ticks_guest_instructions_like_the_reference() {
 
 #[test]
 fn translated_aot_delivers_pending_irq_before_fallback_handler_step() {
-    const HANDLER: u32 = 0x0800_0080;
+    const HANDLER: u32 = 0x0800_0100;
     let cart = irq_fixture();
     let artifact = aot::discover(&cart, 0x0800_0000, false, aot::Limits::default())
         .expect("discover IRQ fixture");
@@ -192,8 +192,8 @@ fn translated_aot_delivers_pending_irq_before_fallback_handler_step() {
     assert_eq!(cpu.cpsr() & 0xFF, 0xD2, "IRQ mode, ARM, I set, F preserved");
     assert_eq!(
         cpu.reg(14),
-        0x0800_0028,
-        "banked IRQ LR is interrupted PC + 4"
+        0x0000_0138,
+        "LR_irq identifies the behavior-only dispatcher continuation"
     );
     assert_eq!(
         cpu.read_psr(Psr::Spsr).expect("IRQ SPSR exists"),

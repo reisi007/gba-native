@@ -73,9 +73,9 @@ interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
 it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
 runs the service in SYSTEM mode and returns through full CPSR restoration.
 Other exception classes and BIOS instruction fetch remain unsupported. The
-bounded IRQ request/entry design is described below; it does not implement the
-GBA BIOS dispatcher frame or handler return. BIOS data reads are governed by the
-policy below.
+bounded behavior-only VBlank IRQ dispatcher and return are described below;
+they do not execute or reconstruct BIOS code. BIOS data reads are governed by
+the policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -159,21 +159,32 @@ these stack tops; synthetic direct-entry tests remain unchanged unless they opt
 in. HLE handler internals have no cycle, scheduler or wait-state accounting. A
 bus failure after exception entry is terminal and is not rolled back.
 
-### Bounded IRQ delivery (partial; Design)
+### Bounded IRQ dispatcher and return (partial; Design)
 
 The host-driven instruction-count frame model raises the VBlank request. Between
 guest instructions, the runner enters a handler only when IRQs are unmasked,
 IME and a matching IE/IF bit are set, and the nonzero handler pointer at
-`0x03007FFC` is present. The current bounded entry saves the old CPSR in
-`SPSR_irq`, sets `LR_irq` to the interrupted PC + 4, enters ARM IRQ mode with I
-set and F preserved, and dispatches to the word-aligned handler pointer. Entry
-itself consumes no guest instruction budget; handler instructions do.
+`0x03007FFC` is present. The pointer must be word-aligned and executable ARM
+memory; invalid pointers fail explicitly before CPU or bus mutation. A six-word
+full-descending frame must fit in aligned EWRAM or IWRAM before entry begins.
 
-This is a partial prototype dispatch policy, not a model of the GBA BIOS
-dispatcher: its documented IRQ stack frame and handler-return path are not yet
-implemented. Only the VBlank request is generated; IRQ nesting, other IRQ
-sources, FIQ, scanline timing and BIOS code fetch remain unsupported. Do not
-interpret this as general GBA interrupt compatibility.
+The behavior-only dispatcher saves ascending-address words `{r0,r1,r2,r3,r12,
+LR_irq}` at `SP_irq-24`, where the saved IRQ link is the interrupted PC + 4. It
+saves the old CPSR in `SPSR_irq`, enters ARM IRQ mode with I set and F preserved,
+sets the IRQ stack pointer to the frame and calls the handler with `LR_irq` set
+to the modeled continuation `0x00000138`. A guest handler acknowledges IF and
+returns with `BX LR`. Only IRQ-mode ARM execution at `0x00000138` is recognized
+as the dispatcher epilogue: it restores the six saved values and IRQ SP, then
+restores the interrupted CPSR and resumes at saved `LR_irq-4`. It performs this
+as one modeled runtime step and never fetches or synthesizes BIOS instructions.
+Entry consumes no guest instruction budget; guest-handler instructions and the
+modeled epilogue each consume one.
+
+This behavior-only model follows the public BIOS interrupt-handling contract;
+it is not BIOS execution or a claim to reproduce BIOS bytes. Only the VBlank
+request is generated. The `0x03007FF8` interrupt-check flag, IRQ nesting, FIQ,
+other IRQ sources, scanline/cycle timing and BIOS boot remain unsupported. Do
+not interpret this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -485,11 +496,11 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
 - **Boundary:** the documented SWI-to-HLE path performs exception entry, a
-  bounded saved SVC frame and its SWI return. The separate partial VBlank IRQ
-  entry policy above does not model the BIOS dispatcher frame or return. ARM
-  data-processing `S=1, Rd=PC` can restore an already existing valid SPSR but
-  performs no exception entry. Other exception classes/vectoring and BIOS
-  execution remain unsupported.
+  bounded saved SVC frame and its SWI return. The behavior-only VBlank IRQ model
+  above saves the documented IRQ frame and models the handler return without
+  BIOS execution. ARM data-processing `S=1, Rd=PC` can restore an already
+  existing valid SPSR but performs no exception entry. Other exception
+  classes/vectoring and BIOS execution remain unsupported.
 
 Pipeline offsets are documented. ARM operands reading R15 use
 `instruction address + 8`, or `+12` when the instruction uses a

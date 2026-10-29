@@ -107,7 +107,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
     writeln!(out, "            _ => {{").unwrap();
     writeln!(
         out,
-        "                interpret::deliver_pending_irq(cpu, bus);"
+        "                interpret::deliver_pending_irq(cpu, bus)?;"
     )
     .unwrap();
     writeln!(out, "                interpret::step(cpu, bus)?;").unwrap();

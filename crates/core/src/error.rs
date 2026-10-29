@@ -72,6 +72,14 @@ pub enum Error {
         sp: u32,
         reason: &'static str,
     },
+    IrqHandler {
+        addr: u32,
+        reason: &'static str,
+    },
+    IrqStack {
+        sp: u32,
+        reason: &'static str,
+    },
     /// An explicit BIOS HLE service failure. Unsupported, waiting and invalid
     /// requests are never reported as a successful no-op.
     Bios(crate::bios::BiosError),
@@ -183,6 +191,18 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     "SWI exception: invalid SVC stack pointer 0x{sp:08X}: {reason}"
+                )
+            }
+            Error::IrqHandler { addr, reason } => {
+                write!(
+                    f,
+                    "IRQ exception: invalid handler address 0x{addr:08X}: {reason}"
+                )
+            }
+            Error::IrqStack { sp, reason } => {
+                write!(
+                    f,
+                    "IRQ exception: invalid IRQ stack pointer 0x{sp:08X}: {reason}"
                 )
             }
             Error::Bios(source) => write!(f, "BIOS HLE: {source}"),
