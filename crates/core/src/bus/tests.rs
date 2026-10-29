@@ -32,14 +32,15 @@ fn rejects_unsupported_and_out_of_bounds() {
         bus.read8(0x0000_0010),
         Err(Error::BiosAccess { .. })
     ));
-    // BG1CNT stays unimplemented; DISPSTAT/VCOUNT are now modelled.
+    // An unused I/O address stays unimplemented; BG1-BG3CNT and DISPSTAT/VCOUNT
+    // are now modelled.
     assert!(matches!(
-        bus.read16(0x0400_000A),
+        bus.read16(0x0400_0056),
         Err(Error::UnsupportedIoRead { .. })
     ));
     // Unmodelled I/O writes are ignored and recorded, not rejected.
-    assert_eq!(bus.write16(0x0400_000A, 0), Ok(()));
-    assert_eq!(bus.ignored_io_writes(), &[0x0400_000A]);
+    assert_eq!(bus.write16(0x0400_0056, 0), Ok(()));
+    assert_eq!(bus.ignored_io_writes(), &[0x0400_0056]);
     assert!(matches!(
         bus.write8(0x0800_0000, 0),
         Err(Error::RomWrite { .. })

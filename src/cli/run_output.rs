@@ -55,10 +55,10 @@ pub(super) fn write_snapshot(
     };
     let affine_note = match bus.affine_policy() {
         AffinePolicy::Strict => {
-            "fail-closed; SWI 0Fh ObjAffineSet is an explicit unsupported-service error"
+            "fail-closed; SWI 0Eh/0Fh affine services are explicit unsupported-service errors"
         }
         AffinePolicy::Documented => {
-            "experimental documented ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
+            "experimental documented BgAffineSet/ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
         }
     };
     let report = format!(
@@ -85,7 +85,10 @@ pub(super) fn write_snapshot(
          display_mode={}\n\
          display_forced_blank={}\n\
          display_bg0_enabled={}\n\
+         display_bg1_enabled={}\n\
          display_bg2_enabled={}\n\
+         display_bg3_enabled={}\n\
+         display_obj_enabled={}\n\
          display_backdrop_rgb555=0x{:04X}\n\
          image_file={}\n\
          image_width={}\n\
@@ -115,7 +118,10 @@ pub(super) fn write_snapshot(
         mode,
         u8::from(dispcnt & 0x0080 != 0),
         u8::from(dispcnt & 0x0100 != 0),
+        u8::from(dispcnt & 0x0200 != 0),
         u8::from(dispcnt & 0x0400 != 0),
+        u8::from(dispcnt & 0x0800 != 0),
+        u8::from(dispcnt & 0x1000 != 0),
         backdrop,
         IMAGE_FILE,
         image.width,

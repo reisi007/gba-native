@@ -1,7 +1,9 @@
 # gba-native
 
 **Experimental, documentation-driven hybrid GBA-to-native prototype.** This is
-not a playable emulator. It does not boot a BIOS or retail cartridges and has no
+not a playable emulator. It does not boot a BIOS; with the explicit synthetic
+device/HLE opt-ins it can reach an observed retail title screen, but it makes no
+general retail-game or gameplay compatibility claim and has no
 vendor upscaling integration. Optional, separate desktop and browser packages
 present the static synthetic bitmap through Pixels/WGPU and WASM/WebGPU/WebGL2;
 neither is a playable or per-ROM frontend. There is no successful REA
@@ -37,18 +39,18 @@ the root workspace lockfile contains only these three internal path packages.
 | Area | State |
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
-| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA, Thumb MUL and the `S=1, Rd=PC` SPSR exception return |
+| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA, UMULL/UMLAL/SMULL/SMLAL, Thumb MUL and the `S=1, Rd=PC` SPSR exception return |
 | ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches, the framed SWI path and documented ALU exception return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
 | ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases align only the transfer address down while writeback uses the original base (Design) |
 | ARM `SWP`/`SWPB` | Implemented for documented ARMv4T forms; `Rd=Rm` is valid and unpredictable aliases are rejected; independent interpreter/AOT vectors |
-| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing. Explicit experimental `--synthetic-bios-decompress` adds documented LZ77/RL/diff SWIs (not BitUnPack or Huffman); `--synthetic-bios-affine` adds documented `ObjAffineSet` (`0Fh`). The default stays fail-closed |
+| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing. Explicit experimental `--synthetic-bios-decompress` adds documented LZ77/RL/diff SWIs (not BitUnPack or Huffman); `--synthetic-bios-affine` adds documented `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`). The default stays fail-closed |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
-| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No flash command engine, save type or persistence is modelled; the backup window is governed by its own policy below |
-| Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model a volatile, erased 32/64 KiB SRAM with no flash engine and no persistence. Wider accesses and the window beyond the selected capacity stay explicit errors |
+| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No save type or persistence is modelled by this store policy; the backup window is governed by its own device policy below |
+| Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model volatile 32/64 KiB SRAM, and `--synthetic-backup-flash128k` models a volatile 128 KiB flash with the documented autoselect/bank/program/erase subset. No persistence; wider accesses stay explicit errors |
 | Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
-| Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
+| Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT alpha/brightness; bitmap modes 3/4/5. No scanline timing, Mode 2, 2D OBJ mapping, double-size affine OBJ, OBJ/BG mosaic or window 1 |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
 | Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI or save claim |
@@ -67,7 +69,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -96,11 +98,15 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   keeps the whole decompression family explicit unsupported-service errors.
   BitUnPack (`10h`) and Huffman (`13h`) remain unsupported under either policy.
   `--synthetic-bios-affine` is an explicit experimental opt-in for the
-  documented `ObjAffineSet` (`0Fh`); it is reported as
-  `affine_policy=documented`. The default is `strict`, which keeps `0Fh` an
-  explicit unsupported-service error. `BgAffineSet` (`0Eh`) remains unsupported.
+  documented `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`); it is reported as
+  `affine_policy=documented`. The default is `strict`, which keeps both SWIs
+  explicit unsupported-service errors.
   `--synthetic-backup-sram64k` selects the documented 64 KiB SRAM window
   maximum; the 32 KiB flag and the default remain unchanged.
+  `--synthetic-backup-flash128k` selects the volatile two-bank 128 KiB flash
+  model with the documented autoselect/bank/program/erase subset. It is the
+  model that lets the unmodified Emerald probe set the boot flag and reach the
+  title sequence. None of the backup models persists data.
   Without `--out`, it creates no files. With `--out`, after both
   execution and the static bitmap snapshot succeed, it creates a fresh directory
   containing `screen.ppm` and `report.txt`. The report records the ROM and image
@@ -348,7 +354,7 @@ open pending independent verification and CI; local tests alone do not close it.
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
   SVC frame, six default-service HLE dispatch (with opt-in decompression and
-  ObjAffineSet) and full CPSR return. VBlank and
+  BgAffineSet/ObjAffineSet) and full CPSR return. VBlank and
   timer-overflow IRQ dispatch uses the documented six-word IRQ frame, ARM
   handler pointer and bounded exception return without fetching BIOS code; BIOS
   boot and timing are not implemented.
@@ -361,7 +367,7 @@ open pending independent verification and CI; local tests alone do not close it.
   transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
   register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
   unconditional `B`, and typed SWI to the six default documented HLE services
-  (with the explicit decompression and ObjAffineSet opt-ins). The
+  (with the explicit decompression and BgAffineSet/ObjAffineSet opt-ins). The
   ARMv5 `BLX` second half and register form are rejected; the ARMv4 empty-list
   `LDMIA`/`STMIA` R15/`+0x40` quirk is implemented while empty stack lists remain
   explicit errors. An unaligned SP/base aligns
@@ -375,8 +381,11 @@ open pending independent verification and CI; local tests alone do not close it.
   timing. Unused I/O writes are ignored and recorded; unmodelled reads remain
   errors. There is no open bus, save support, cycle timing, audio generation or
   timer-driven sound/DMA request.
-- Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.
-  Tiles, sprites, windows, blending and affine transforms are unsupported.
+- Display: 240x160 static snapshot. Mode 0 BG0-BG3 text + OBJ, Mode 1
+  BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT
+  alpha/brightness blending; modes 3-5 retain the bitmap paths. 2D OBJ tile
+  mapping, semi-transparent OBJ mode, double-size affine OBJ, OBJ/BG mosaic,
+  window 1, Mode 2 and scanline effects are unsupported.
 - AOT: only immutable ROM blocks; unknown targets use the reference interpreter;
   RAM is always interpreted freshly.
 

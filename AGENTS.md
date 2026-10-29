@@ -166,8 +166,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - Do not silently turn unsupported instructions, I/O, PPU features or vendor
   backends into successful no-ops or nearest-neighbor fallbacks.
 - Guest SWI support is limited to the six documented HLE services by default.
-  The documented LZ77/RL/diff decompression SWIs and `ObjAffineSet` (`0Fh`) are
-  explicit, host-selected opt-ins (`DecompressionPolicy::DocumentedFormats`,
+  The documented LZ77/RL/diff decompression SWIs and
+  `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`) are explicit, host-selected
+  opt-ins (`DecompressionPolicy::DocumentedFormats`,
   `AffinePolicy::Documented`); do not enable them by default or add further
   services without a reviewed contract change. Preserve
   explicit errors for unsupported services and SVC-origin nested SWIs; do not
@@ -190,21 +191,22 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 
 ## Source layout
 
-- `crates/core/src/cart.rs`, `bus.rs`, `cpu.rs`, `cpu/exception.rs`: header,
-  explicit memory map, state, documented stack initialization and framed SWI
-  exception entry/return.
+- `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `cpu.rs`,
+  `cpu/exception.rs`: header, explicit memory map, SRAM/flash device policies,
+  state, documented stack initialization and framed SWI exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure
   address/width/sign-extension helpers.
-- `crates/core/src/display.rs`, `render.rs`: bitmap snapshot,
-  nearest/letterbox, PPM.
+- `crates/core/src/display.rs`, `display/` (`text.rs`, `affine.rs`, `obj.rs`,
+  `window.rs`, `blend.rs`, `layer.rs`), `render.rs`: static Mode 0/1 and bitmap
+  snapshot compositor, nearest/letterbox, PPM.
 - `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
 - `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
   `arithmetic.rs`, `memory.rs`), the opt-in documented decompression formats
-  (`decompress.rs`) and `ObjAffineSet` (`affine.rs`, `affine/`), the shared
-  destination classifier (`target.rs`), and typed guest SWI framing/dispatch
-  (`swi.rs`).
+  (`decompress.rs`) and `BgAffineSet`/`ObjAffineSet` (`affine.rs`, `affine/`),
+  the shared destination classifier (`target.rs`), and typed guest SWI
+  framing/dispatch (`swi.rs`).
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
   `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),

@@ -196,7 +196,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 455, "full workspace test inventory changed");
+    assert_eq!(total, 481, "full workspace test inventory changed");
     // Pins Mode 0 BG0, WASM, CLI, host I/O/DMA/VCOUNT, BIOS/IRQ, mask-ROM/serial and ARMv4 suites.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
@@ -206,6 +206,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("arm_control", 10),
         ("arm_halfword", 5),
         ("arm_halfword_extended", 8),
+        ("arm_multiply_long", 6),
         ("arm_memory", 8),
         ("arm_shift", 4),
         ("arm_block", 10),
@@ -218,11 +219,12 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("bios_memory_copy", 14),
         ("bios_reset", 7),
         ("bus", 18),
-        ("mask_rom_and_serial", 7),
+        ("mask_rom_and_serial", 12),
         ("cartridge", 6),
         ("cpu", 14),
         ("demo", 3),
         ("display", 5),
+        ("display_layers", 8),
         ("display_mode0", 8),
         ("isa_golden", 4),
         ("irq_dispatch", 6),
@@ -248,6 +250,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("aot_control", 4),
         ("aot_halfword", 1),
         ("aot_memory", 3),
+        ("aot_multiply_long", 1),
         ("aot_native", 5),
         ("aot_exception_return", 2),
         ("aot_psr", 3),
@@ -265,7 +268,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("cli_aot_build", 2),
         ("cli_output", 5),
         ("cli_run", 9),
-        ("cli_run_options", 3),
+        ("cli_run_options", 4),
         ("frontend_gates", 4),
         ("quality_counter", 10),
         ("scripts", 5),
@@ -274,7 +277,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 80);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 85);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 25);
     baseline += assert_target_count(
         &root,
@@ -285,7 +288,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 451, "selected package test inventory changed");
+    assert_eq!(baseline, 477, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,
@@ -457,7 +460,6 @@ fn assert_target_count(
     );
     count
 }
-
 #[test]
 fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     let root = repo_root();
@@ -480,7 +482,6 @@ fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     assert!(lock.contains("name = \"pixels\"\nversion = \"0.17.2\""));
     assert!(lock.contains("name = \"winit\"\nversion = \"0.30.13\""));
     assert!(lock.contains("name = \"wgpu\"\nversion = \"29.0.4\""));
-
     let web_manifest =
         std::fs::read_to_string(root.join("apps/web/Cargo.toml")).expect("browser manifest");
     assert!(web_manifest.contains("name = \"gba-native-web\""));
@@ -491,7 +492,6 @@ fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     );
     assert!(!web_manifest.contains("gba-native-aot"));
     assert!(!web_manifest.contains("package = \"gba-native\""));
-
     let web_lock = std::fs::read_to_string(root.join("apps/web/Cargo.lock")).expect("browser lock");
     assert!(web_lock.contains("name = \"gba-native-core\""));
     assert!(web_lock.contains("name = \"gba-native-web\""));

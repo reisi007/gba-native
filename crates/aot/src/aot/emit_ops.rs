@@ -104,6 +104,48 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
                 writeln!(out, "    cpu.set_logic_flags(value, None);").unwrap();
             }
         }
+        Op::MultiplyLong {
+            signed,
+            accumulate,
+            set_flags,
+            rd_hi,
+            rd_lo,
+            rs,
+            rm,
+        } => {
+            if signed {
+                writeln!(
+                    out,
+                    "    let mut value = (cpu.reg({rm}) as i32 as i64).wrapping_mul(cpu.reg({rs}) as i32 as i64) as u64;"
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    out,
+                    "    let mut value = (cpu.reg({rm}) as u64).wrapping_mul(cpu.reg({rs}) as u64);"
+                )
+                .unwrap();
+            }
+            if accumulate {
+                writeln!(
+                    out,
+                    "    value = value.wrapping_add(((cpu.reg({rd_hi}) as u64) << 32) | cpu.reg({rd_lo}) as u64);"
+                )
+                .unwrap();
+            }
+            writeln!(out, "    let low = value as u32;").unwrap();
+            writeln!(out, "    let high = (value >> 32) as u32;").unwrap();
+            writeln!(out, "    cpu.set_reg({rd_lo}, low);").unwrap();
+            writeln!(out, "    cpu.set_reg({rd_hi}, high);").unwrap();
+            if set_flags {
+                writeln!(out, "    let (_, _, carry, overflow) = cpu.flags();").unwrap();
+                writeln!(
+                    out,
+                    "    cpu.set_nzcv(high & 0x8000_0000 != 0, low == 0 && high == 0, carry, overflow);"
+                )
+                .unwrap();
+            }
+        }
         Op::Swap { rd, rm, rn, byte } => {
             writeln!(out, "    let address = cpu.reg({rn});").unwrap();
             writeln!(out, "    let source = cpu.reg({rm});").unwrap();

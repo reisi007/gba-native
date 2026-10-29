@@ -72,9 +72,9 @@ fn decode_arm_swap(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
     })
 }
 
-/// ARM `MUL{cond}{S}` (bits 24-21 = 0000) and `MLA{cond}{S}` (0001). Every
-/// other opcode in this encoding space (UMAAL, the long multiplies and the
-/// halfword multiplies) stays an explicit unsupported encoding. Documented
+/// ARM `MUL{cond}{S}` (bits 24-21 = 0000), `MLA{cond}{S}` (0001) and the
+/// multiply-long family `UMULL`/`UMLAL`/`SMULL`/`SMLAL` (0100..0111). UMAAL
+/// and the halfword multiplies stay explicit unsupported encodings. Documented
 /// restrictions from GBATEK `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`:
 /// R15 may not appear and MUL's unused `Rn` field must be zero. The documented
 /// unpredictable `MUL`/`MLA Rd=Rm` aliases use an explicit prototype design
@@ -86,12 +86,39 @@ fn decode_arm_multiply(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
     let rn = ((raw >> 12) & 0xF) as u8;
     let rs = ((raw >> 8) & 0xF) as u8;
     let rm = (raw & 0xF) as u8;
+    if matches!(opcode, 0b0100..=0b0111) {
+        let signed = opcode & 0b0010 != 0;
+        let accumulate = opcode & 0b0001 != 0;
+        if rd == 15 || rn == 15 || rs == 15 || rm == 15 || rd == rn {
+            return Err(unsupported(
+                addr,
+                false,
+                raw,
+                "ARM multiply-long with R15 or RdHi=RdLo is not a valid encoding",
+            ));
+        }
+        return Ok(IrInstr {
+            addr,
+            thumb: false,
+            raw,
+            cond,
+            op: Op::MultiplyLong {
+                signed,
+                accumulate,
+                set_flags,
+                rd_hi: rd,
+                rd_lo: rn,
+                rs,
+                rm,
+            },
+        });
+    }
     if !matches!(opcode, 0b0000 | 0b0001) {
         return Err(unsupported(
             addr,
             false,
             raw,
-            "ARM multiply/swap, multiply-long or halfword-multiply encodings are not implemented",
+            "ARM UMAAL and halfword-multiply encodings are not implemented",
         ));
     }
     if rd == 15 || rn == 15 || rs == 15 || rm == 15 {

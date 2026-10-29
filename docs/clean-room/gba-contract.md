@@ -29,8 +29,8 @@ not a roadmap promise and not a retail-game compatibility statement.
   subset. Typed ARM/Thumb SWI reaches the six default documented BIOS HLE
   services, plus explicit decompression and affine opt-ins, via explicit SVC
   entry, a saved handler frame, SYSTEM-mode service execution and architectural
-  SWI return. Other exception classes, multiply-long and
-  halfword-multiply instructions, and BIOS boot remain absent.
+  SWI return. Other exception classes, halfword-multiply instructions and BIOS
+  boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
   `apps/desktop` and `apps/web` packages present the same static synthetic
   snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
@@ -119,26 +119,30 @@ that opt-in.
 A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
 The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
 documented no-effect store of a ROM-only cartridge. It never writes cartridge
-bytes and models no flash command engine. The backup window is governed by its
-own policy, not by this one.
+bytes and does not itself model a flash command engine. The backup window is
+governed by its own device policy, not by this one.
 
 A fourth policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
 (`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access there
-as `UnsupportedSave`. The explicit `Sram32KVolatile` (`run
---synthetic-backup-sram`) and `Sram64KVolatile` (`run
---synthetic-backup-sram64k`) opt-ins model a byte-wide, volatile 32 KiB or
-64 KiB SRAM (the documented window maximum) that starts erased (`0xFF`), is lost
-when the process ends and has no flash command engine and no persistence. Wider
-accesses and the window beyond the selected capacity stay explicit
-`UnsupportedSave` errors. This is a device model for bounded progress
-experiments, not a save feature; the SRAM contents are guest state included in
-`Bus::state_digest`, while the selected policy is host configuration and is not
-hashed. Selecting both capacity flags is an argument error.
+as `UnsupportedSave`. Three explicit opt-ins model documented devices: the
+byte-wide, volatile 32 KiB or 64 KiB SRAM (`run --synthetic-backup-sram`,
+`run --synthetic-backup-sram64k`) and a volatile 128 KiB flash
+(`run --synthetic-backup-flash128k`) with two 64 KiB banks and the documented
+autoselect (`0x90`), bank-switch (`0xB0`), program (`0xA0`), sector-erase
+(`0x30`) and chip-erase (`0x10`) subset. Autoselect returns the Sanyo 128K ID
+`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. All three start erased, are lost when the process ends, and
+have no persistence. Wider accesses and the window beyond the selected device
+capacity stay explicit `UnsupportedSave` errors. This is a device model for
+bounded progress experiments, not a save feature; the storage bytes and flash
+command/bank state are guest state included in `Bus::state_digest`, while the
+selected policy is host configuration and is not hashed. Selecting more than one
+backup-device flag is an argument error.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
 `run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`,
-`run --synthetic-bios-decompress` and `run --synthetic-bios-affine` (all default
+`run --synthetic-backup-flash128k`, `run --synthetic-bios-decompress` and
+`run --synthetic-bios-affine` (all default
 to strict). Successful output prints all six policy values
 (`bios_data_policy`, `bios_write_policy`, `rom_write_policy`, `backup_policy`,
 `decompression_policy`, `affine_policy`) plus an explicit non-authentic
@@ -184,14 +188,17 @@ but before any destination store. `10h` BitUnPack and `13h` Huffman remain unsup
 error.
 
 A second documented-service opt-in, `AffinePolicy::Documented`
-(`run --synthetic-bios-affine`), adds SWI `0Fh` `ObjAffineSet`. It reads the
-documented six-byte source entries (s16 scale X, s16 scale Y, u16 angle), writes
-PA/PB/PC/PD at the documented `offset` stride (the next calculation starts
-`4*offset` bytes later), uses the upper 8 angle bits and a 256-entry Q12 sine
-table generated from the mathematical definition. Source/destination ranges,
-2-byte alignment and an even offset of at least 2 are validated before the
-first store. `BgAffineSet` (`0Eh`) remains unsupported, and the default
-`AffinePolicy::Strict` keeps `0Fh` an explicit `UnsupportedService`. The sine
+(`run --synthetic-bios-affine`), adds SWI `0Eh` `BgAffineSet` and SWI `0Fh`
+`ObjAffineSet`. `ObjAffineSet` reads the documented six-byte source entries
+(s16 scale X, s16 scale Y, u16 angle), writes PA/PB/PC/PD at the documented
+`offset` stride (the next calculation starts `4*offset` bytes later), uses the
+upper 8 angle bits and a 256-entry Q12 sine table generated from the
+mathematical definition. `BgAffineSet` reads the 20-byte source
+(origin X/Y, display X/Y, scale X/Y, angle) and writes the 16-byte
+PA/PB/PC/PD/start-X/start-Y entry. Source/destination ranges, alignment and
+the even Object offset of at least 2 are validated before the first store. The
+default `AffinePolicy::Strict` keeps both SWIs explicit
+`UnsupportedService` values. The sine
 table is not copied from a BIOS image and the HLE does not claim bit-identical
 results to a particular BIOS table or rounding.
 
@@ -303,11 +310,15 @@ Implemented regions and widths:
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
   require 4-byte alignment. I/O uses register-specific 8/16-bit access, and a
   32-bit access composes two halfword accesses (including across register pairs).
-- Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
-  halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
-  writes; KEYINPUT halfword read (`0x04000130`); WAITCNT (`0x04000204`) halfword
-  read/write, retaining only documented bits 0..13; and the four DMA channels
-  `0x040000B0..0x040000DF` (see below). The host injects a `u16`
+- Implemented I/O: DISPCNT halfword read/write; BG0-BG3CNT (`0x04000008`/
+  `0x0A`/`0x0C`/`0x0E`) halfword read/write; BG0-BG3HOFS/VOFS halfword writes;
+  BG2/BG3 affine `PA`..`PD` halfword read/write and `X`/`Y` 32-bit read/write;
+  `WIN0H`/`WIN1H`/`WIN0V`/`WIN1V`/`WININ`/`WINOUT`/`MOSAIC` and
+  `BLDCNT`/`BLDALPHA`/`BLDY` halfword read/write; KEYINPUT halfword read
+  (`0x04000130`); WAITCNT (`0x04000204`) halfword read/write, retaining only
+  documented bits 0..13; and the four DMA channels `0x040000B0..0x040000DF`
+  (see below). BG scroll registers are write-only; guest reads remain
+  `UnsupportedIoRead`. The host injects a `u16`
   pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
@@ -518,9 +529,9 @@ nesting are explicit errors.
 | Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
 | Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression and affine opt-ins) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
-| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, halfword multiplies |
+| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; `UMULL`/`UMLAL`/`SMULL`/`SMLAL` with a 64-bit result/accumulator and `S`-driven 64-bit N/Z; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `RdHi=RdLo`, halfword multiplies |
 | Swap | ARM `SWP`/`SWPB`; `Rd=Rm` is allowed; unaligned word SWP rotates the loaded value by `8 * address[1:0]` but stores the source unrotated; SWPB zero-extends the loaded byte; destination and PC update only after both bus accesses succeed | R15 operands, `Rn=Rd` or `Rn=Rm` (UNPREDICTABLE), nonzero SBZ bits [11:8] |
-| Everything else | none | multiply-long/halfword multiply, coprocessor, unconditional/newer space |
+| Everything else | none | halfword multiply, coprocessor, unconditional/newer space |
 
 `MUL`/`MLA` set N/Z from the result and leave V unaffected. GBATEK documents C
 as "destroyed" on ARMv4, which has no defined value; this prototype preserves
@@ -746,38 +757,55 @@ Native image is 240x160, converted from RGB555 to RGB888 by bit replication
 (`(v << 3) | (v >> 2)` per channel). This is a static state snapshot, not a
 scanline PPU, frame renderer or timing claim.
 
-- Mode 0 implements BG0 text-background snapshots only. After unsupported-layer
-  validation, BG0 disabled yields the backdrop (BG palette entry 0); forced
-  blank (DISPCNT bit 7) yields white. Other enabled BG layers, OBJ, windows and
-  CGB mode return `UnsupportedPpuFeature`. Otherwise nonblank Modes 1 and 2
-  remain `UnsupportedDisplayMode`.
-- BG0CNT priority is read and ignored because only one layer is composed.
-  Character base (bits 2..3) selects a 16 KiB unit, color depth (bit 7) selects
-  4bpp/8bpp, screen base (bits 8..12) selects a 2 KiB unit, and size (bits
-  14..15) selects 256x256, 512x256, 256x512 or 512x512 pixels. Mosaic (bit 6)
-  returns `UnsupportedBgControl`; reserved bits 4..5 and 13 also fail explicitly
-  when enabled BG0 is rendered.
-- Text maps use 32x32-entry (2 KiB) screen blocks. Larger sizes select SC0..SC3
-  in row-major screen-block order at base +0, +2 KiB, +4 KiB and +6 KiB. BG0
-  scroll uses the low nine bits of each write-only offset register and wraps at
-  the selected background dimensions. Map entries select a tile, horizontal
-  and vertical flip, and (in 4bpp mode) one of 16 palette banks.
-- 4bpp tiles use 32 bytes and low-nibble-first left pixels; 8bpp tiles use 64
-  bytes and one palette index per pixel. Palette index 0 is transparent in
-  either depth and reveals the backdrop, which is BG palette entry 0. Nonzero
-  indices read the selected BG palette entries and convert RGB555 to RGB888.
-- Mode 0 BG maps and tile data are restricted to the first 64 KiB of VRAM.
-  Selecting a map/tile byte outside that documented BG allocation returns
-  `BgVramOutOfRange`; it does not read the separate OBJ allocation or wrap.
+- Mode 0 composes BG0-BG3 text backgrounds and OBJ sprites. Mode 1 composes
+  BG0/BG1 text backgrounds, the BG2 affine background and OBJ sprites. Both
+  modes implement window 0, the OBJ window and BLDCNT alpha/brightness
+  blending. Mode 2 remains `UnsupportedDisplayMode`; Modes 3-5 retain the
+  bitmap paths below.
+- Layer priority is the documented low-number-wins rule; equal priorities are
+  ordered OBJ > BG0 > BG1 > BG2 > BG3. Disabled layers and transparent pixels
+  reveal the next layer or the backdrop (BG palette entry 0).
+- BGxCNT priority, character base (bits 2..3, 16 KiB units), color depth
+  (bit 7), screen base (bits 8..12, 2 KiB units) and size (bits 14..15) are
+  decoded per layer. Text maps use 32x32-entry screen blocks; larger sizes
+  select SC0..SC3 in row-major order. Text scroll uses the low nine bits and
+  wraps at the selected dimensions. Map entries select a tile, both flips and
+  (4bpp) a palette bank. 4bpp tiles are 32 bytes, 8bpp tiles 64 bytes; palette
+  index 0 is transparent. Mosaic (bit 6), reserved bits and a 4bpp affine BG
+  fail explicitly.
+- The BG2 affine layer is 8bpp only. Its 8-bit map and 8bpp tiles use the
+  documented character/screen bases; size selects 128, 256, 512 or 1024 pixels
+  per axis; bit 13 enables wrapping. `BG2PA`..`BG2PD` and `BG2X`/`BG2Y` are
+  8.8 fixed point and sample the map for the current static state.
+- OBJ supports normal and affine sprites with 1D tile mapping, 4/8bpp tiles,
+  horizontal/vertical flips (normal sprites), affine matrix groups and
+  per-sprite priority/transparency. 2D tile mapping, OBJ mosaic and double-size
+  affine sprites are explicit errors. OBJ mode 2 sprites form the OBJ-window
+  mask and are not displayed, as documented.
+- Window 0 uses `WIN0H`/`WIN0V` with the documented garbage-clamping rules and
+  selects BG/OBJ visibility from `WININ`; outside pixels use `WINOUT`. The OBJ
+  window uses the upper `WINOUT` bits. Window 1 is not implemented and is an
+  explicit error.
+- `BLDCNT` mode 1 alpha-blends the first target only when the immediately next
+  lower non-transparent layer is a second target; if the next lower layer is
+  not a second target, only the top pixel is displayed. With no lower layer,
+  the backdrop participates only when its second-target bit is set. `BLDALPHA`
+  EVA/EVB values 17..31 clamp to 16/16. Modes 2/3 apply `BLDY` brightness-up/
+  down to the first target. The arithmetic operates on the final 8-bit
+  channels as a stated **Design** approximation of the 5-bit hardware channels
+  and clamps at 255.
+- Mode 0/1 BG maps and tile data are restricted to the first 64 KiB of VRAM;
+  OBJ data uses the documented `0x06010000` 1D allocation and is bounds-checked
+  against the 96 KiB VRAM size. Out-of-range reads return `BgVramOutOfRange`.
 - Modes 3, 4 and 5 retain the existing bitmap paths: Mode 3 is 240x160 direct
   RGB555 at VRAM offset 0; Mode 4 is 240x160 palette indices with frame 0 at 0
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
-  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop. Bits 5/6
-  remain accepted because they do not affect these implemented snapshots.
-- OBJ rendering, other BG layers, OAM, windows, blending, BG0 mosaic,
-  nonidentity affine transforms and scanline effects remain absent. Unsupported
-  registers still fail through the I/O bus rather than being treated as no-ops.
+  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
+- Mosaic, 2D OBJ tile mapping, OBJ double-size affine sprites, window 1,
+  nonidentity bitmap/affine combinations and scanline effects remain absent.
+  Unsupported registers or layers fail explicitly rather than being treated as
+  no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output

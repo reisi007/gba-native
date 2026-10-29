@@ -40,7 +40,7 @@ fn identity_scale_and_zero_angle_write_the_documented_order() {
     let mut bus = fixture(&[(0x0100, 0x0100, 0x0000)], AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         read_parameters(&bus, DESTINATION),
         [0x0100, 0x0000, 0x0000, 0x0100]
@@ -52,7 +52,7 @@ fn quarter_turn_maps_to_the_documented_parameter_signs() {
     let mut bus = fixture(&[(0x0100, 0x0200, 0x4000)], AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         read_parameters(&bus, DESTINATION),
         [0x0000, 0xFF00, 0x0200, 0x0000]
@@ -64,7 +64,7 @@ fn half_turn_negates_both_diagonal_parameters() {
     let mut bus = fixture(&[(0x0100, 0x0100, 0x8000)], AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         read_parameters(&bus, DESTINATION),
         [0xFF00, 0x0000, 0x0000, 0xFF00]
@@ -77,8 +77,8 @@ fn only_the_upper_angle_byte_is_used() {
     let mut plain = fixture(&[(0x0100, 0x0100, 0x4000)], AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 2);
-    call(&mut cpu, &mut low).expect("affine");
-    call(&mut cpu, &mut plain).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut low).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut plain).expect("affine");
     assert_eq!(
         read_parameters(&low, DESTINATION),
         read_parameters(&plain, DESTINATION)
@@ -90,7 +90,7 @@ fn negative_scale_flips_the_off_diagonal_sign() {
     let mut bus = fixture(&[(-0x0100, 0x0100, 0x4000)], AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         read_parameters(&bus, DESTINATION),
         [0x0000, 0x0100, 0x0100, 0x0000]
@@ -103,7 +103,7 @@ fn offset_eight_places_one_parameter_per_oam_slot() {
     let mut bus = fixture(&entries, AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 2, 8);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         [
             bus.read16(DESTINATION).expect("entry0 PA"),
@@ -131,7 +131,7 @@ fn offset_two_stores_the_four_parameters_contiguously() {
     let mut bus = fixture(&entries, AffinePolicy::Documented);
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 2, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(
         read_parameters(&bus, DESTINATION),
         [0x0100, 0x0000, 0x0000, 0x0100]
@@ -148,7 +148,7 @@ fn zero_count_writes_nothing() {
     bus.write16(DESTINATION, 0xBEEF).expect("seed");
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 0, 2);
-    call(&mut cpu, &mut bus).expect("affine");
+    call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus).expect("affine");
     assert_eq!(bus.read16(DESTINATION), Ok(0xBEEF));
 }
 
@@ -158,20 +158,20 @@ fn odd_offset_and_misaligned_addresses_are_explicit() {
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 1, 3);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::UnsupportedParameter { .. }))
     ));
     // The offset is validated even when no calculation would be performed.
     configure(&mut cpu, 0, 3);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::UnsupportedParameter { .. }))
     ));
 
     configure(&mut cpu, 1, 2);
     cpu.set_reg(1, DESTINATION + 1);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::Misaligned {
             service: SERVICE_OBJ_AFFINE_SET,
             align: 2,
@@ -182,7 +182,7 @@ fn odd_offset_and_misaligned_addresses_are_explicit() {
     cpu.set_reg(1, DESTINATION);
     cpu.set_reg(0, ROM_BASE + SOURCE_OFFSET as u32 + 1);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::Misaligned { .. }))
     ));
 }
@@ -193,7 +193,7 @@ fn oversized_destination_span_is_an_explicit_range_overflow() {
     let mut cpu = Cpu::direct_entry();
     configure(&mut cpu, 2, 0x8000_0000);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::RangeOverflow { .. }))
     ));
 }
@@ -205,7 +205,7 @@ fn rom_destination_and_overrunning_source_are_explicit() {
     configure(&mut cpu, 1, 2);
     cpu.set_reg(1, ROM_BASE);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::UnsupportedDestination { .. }))
     ));
 
@@ -213,7 +213,7 @@ fn rom_destination_and_overrunning_source_are_explicit() {
     cpu.set_reg(0, ROM_BASE + 0x3FC);
     cpu.set_reg(2, 2);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::RangeOutsideRegion { .. }))
     ));
 }
@@ -225,7 +225,7 @@ fn destination_region_cannot_be_crossed() {
     configure(&mut cpu, 1, 2);
     cpu.set_reg(1, OAM_BASE + 0x400 - 4);
     assert!(matches!(
-        call(&mut cpu, &mut bus),
+        call(SERVICE_OBJ_AFFINE_SET, &mut cpu, &mut bus),
         Err(Error::Bios(BiosError::RangeOutsideRegion { .. }))
     ));
 }
@@ -266,4 +266,145 @@ fn affine_policy_is_excluded_from_state_digest() {
     let strict = fixture(&[(0x0100, 0x0100, 0x0000)], AffinePolicy::Strict);
     let documented = fixture(&[(0x0100, 0x0100, 0x0000)], AffinePolicy::Documented);
     assert_eq!(strict.state_digest(), documented.state_digest());
+}
+
+fn bg_fixture(entries: &[(i32, i32, i16, i16, i16, i16, u16)], policy: AffinePolicy) -> Bus {
+    let mut rom = vec![0u8; 0x400];
+    for (index, (origin_x, origin_y, display_x, display_y, scale_x, scale_y, angle)) in
+        entries.iter().enumerate()
+    {
+        let base = SOURCE_OFFSET + index * 20;
+        rom[base..base + 4].copy_from_slice(&origin_x.to_le_bytes());
+        rom[base + 4..base + 8].copy_from_slice(&origin_y.to_le_bytes());
+        rom[base + 8..base + 10].copy_from_slice(&display_x.to_le_bytes());
+        rom[base + 10..base + 12].copy_from_slice(&display_y.to_le_bytes());
+        rom[base + 12..base + 14].copy_from_slice(&scale_x.to_le_bytes());
+        rom[base + 14..base + 16].copy_from_slice(&scale_y.to_le_bytes());
+        rom[base + 16..base + 18].copy_from_slice(&angle.to_le_bytes());
+    }
+    Bus::new(Cartridge::from_bytes(rom).expect("synthetic cart")).with_affine_policy(policy)
+}
+
+fn configure_bg(cpu: &mut Cpu, count: u32) {
+    cpu.set_reg(0, ROM_BASE + SOURCE_OFFSET as u32);
+    cpu.set_reg(1, DESTINATION);
+    cpu.set_reg(2, count);
+}
+
+fn read_bg_parameters(bus: &Bus, address: u32) -> ([u16; 4], [u32; 2]) {
+    (
+        [
+            bus.read16(address).expect("PA"),
+            bus.read16(address + 2).expect("PB"),
+            bus.read16(address + 4).expect("PC"),
+            bus.read16(address + 6).expect("PD"),
+        ],
+        [
+            bus.read32(address + 8).expect("start X"),
+            bus.read32(address + 12).expect("start Y"),
+        ],
+    )
+}
+
+#[test]
+fn bg_affine_zero_scale_is_the_observed_hide_parameters() {
+    let mut bus = bg_fixture(
+        &[(0x0000_8000, 0x0000_8000, 120, 80, 0, 0, 0)],
+        AffinePolicy::Documented,
+    );
+    let mut cpu = Cpu::direct_entry();
+    configure_bg(&mut cpu, 1);
+    call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus).expect("bg affine");
+    assert_eq!(
+        read_bg_parameters(&bus, DESTINATION),
+        ([0, 0, 0, 0], [0x0000_8000, 0x0000_8000])
+    );
+}
+
+#[test]
+fn bg_affine_identity_centres_the_display_field() {
+    let mut bus = bg_fixture(
+        &[(0x0000_8000, 0x0000_8000, 120, 80, 0x0100, 0x0100, 0)],
+        AffinePolicy::Documented,
+    );
+    let mut cpu = Cpu::direct_entry();
+    configure_bg(&mut cpu, 1);
+    call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus).expect("bg affine");
+    assert_eq!(
+        read_bg_parameters(&bus, DESTINATION),
+        ([0x0100, 0, 0, 0x0100], [0x0000_0800, 0x0000_3000])
+    );
+}
+
+#[test]
+fn bg_affine_quarter_turn_uses_the_documented_signs() {
+    let mut bus = bg_fixture(
+        &[(0x0000_8000, 0x0000_8000, 120, 80, 0x0100, 0x0100, 0x4000)],
+        AffinePolicy::Documented,
+    );
+    let mut cpu = Cpu::direct_entry();
+    configure_bg(&mut cpu, 1);
+    call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus).expect("bg affine");
+    assert_eq!(
+        read_bg_parameters(&bus, DESTINATION),
+        ([0x0000, 0xFF00, 0x0100, 0x0000], [0x0000_D000, 0x0000_0800])
+    );
+}
+
+#[test]
+fn bg_affine_writes_multiple_sixteen_byte_entries() {
+    let entries = [
+        (0x0000_8000, 0x0000_8000, 120, 80, 0x0100, 0x0100, 0),
+        (0x0000_4000, 0x0000_4000, 60, 40, 0x0080, 0x0080, 0x8000),
+    ];
+    let mut bus = bg_fixture(&entries, AffinePolicy::Documented);
+    let mut cpu = Cpu::direct_entry();
+    configure_bg(&mut cpu, 2);
+    call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus).expect("bg affine");
+    assert_eq!(
+        read_bg_parameters(&bus, DESTINATION),
+        ([0x0100, 0, 0, 0x0100], [0x0000_0800, 0x0000_3000])
+    );
+    assert_eq!(
+        read_bg_parameters(&bus, DESTINATION + 16),
+        ([0xFF80, 0, 0, 0xFF80], [0x0000_5E00, 0x0000_5400])
+    );
+}
+
+#[test]
+fn bg_affine_strict_policy_and_bad_ranges_fail_closed() {
+    let mut bus = bg_fixture(
+        &[(0x0000_8000, 0x0000_8000, 120, 80, 0x0100, 0x0100, 0)],
+        AffinePolicy::Strict,
+    );
+    let mut cpu = Cpu::direct_entry();
+    configure_bg(&mut cpu, 1);
+    assert_eq!(
+        crate::bios::call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus),
+        Err(Error::Bios(BiosError::UnsupportedService(
+            SERVICE_BG_AFFINE_SET
+        )))
+    );
+
+    let mut bus = bg_fixture(
+        &[(0x0000_8000, 0x0000_8000, 120, 80, 0x0100, 0x0100, 0)],
+        AffinePolicy::Documented,
+    );
+    configure_bg(&mut cpu, 1);
+    cpu.set_reg(1, DESTINATION + 2);
+    assert!(matches!(
+        call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus),
+        Err(Error::Bios(BiosError::Misaligned {
+            service: SERVICE_BG_AFFINE_SET,
+            align: 4,
+            ..
+        }))
+    ));
+
+    cpu.set_reg(1, DESTINATION);
+    cpu.set_reg(0, ROM_BASE + SOURCE_OFFSET as u32 + 1);
+    assert!(matches!(
+        call(SERVICE_BG_AFFINE_SET, &mut cpu, &mut bus),
+        Err(Error::Bios(BiosError::Misaligned { .. }))
+    ));
 }

@@ -259,6 +259,36 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
                 cpu.set_logic_flags(value, None);
             }
         }
+        Op::MultiplyLong {
+            signed,
+            accumulate,
+            set_flags,
+            rd_hi,
+            rd_lo,
+            rs,
+            rm,
+        } => {
+            let mut value = if signed {
+                let rhs = i64::from(cpu.reg(rm) as i32);
+                let lhs = i64::from(cpu.reg(rs) as i32);
+                rhs.wrapping_mul(lhs) as u64
+            } else {
+                u64::from(cpu.reg(rm)).wrapping_mul(u64::from(cpu.reg(rs)))
+            };
+            if accumulate {
+                let accumulator = (u64::from(cpu.reg(rd_hi)) << 32) | u64::from(cpu.reg(rd_lo));
+                value = value.wrapping_add(accumulator);
+            }
+            let low = value as u32;
+            let high = (value >> 32) as u32;
+            cpu.set_reg(rd_lo, low);
+            cpu.set_reg(rd_hi, high);
+            if set_flags {
+                let (_, _, carry, overflow) = cpu.flags();
+                cpu.set_nzcv(high & 0x8000_0000 != 0, value == 0, carry, overflow);
+            }
+            cpu.set_pc(instr.next_addr());
+        }
         Op::Swap { rd, rm, rn, byte } => {
             memory::execute_swap(cpu, bus, instr, rd, rm, rn, byte)?;
         }

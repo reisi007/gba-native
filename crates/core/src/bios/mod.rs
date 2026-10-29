@@ -198,7 +198,9 @@ pub fn call(service: u8, cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         SERVICE_SQRT => arithmetic::sqrt(cpu),
         SERVICE_CPU_SET => memory::cpu_set(cpu, bus),
         SERVICE_CPU_FAST_SET => memory::cpu_fast_set(cpu, bus),
-        affine::SERVICE_OBJ_AFFINE_SET => affine::call(cpu, bus),
+        affine::SERVICE_BG_AFFINE_SET | affine::SERVICE_OBJ_AFFINE_SET => {
+            affine::call(service, cpu, bus)
+        }
         decompress::SERVICE_LZ77_8
         | decompress::SERVICE_LZ77_16
         | decompress::SERVICE_RL_8
@@ -218,7 +220,9 @@ pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
         SERVICE_REGISTER_RAM_RESET | SERVICE_CPU_SET | SERVICE_CPU_FAST_SET => {
             memory::validate_call(service, cpu, bus)
         }
-        affine::SERVICE_OBJ_AFFINE_SET => affine::validate_call(cpu, bus),
+        affine::SERVICE_BG_AFFINE_SET | affine::SERVICE_OBJ_AFFINE_SET => {
+            affine::validate_call(service, cpu, bus)
+        }
         decompress::SERVICE_LZ77_8
         | decompress::SERVICE_LZ77_16
         | decompress::SERVICE_RL_8
@@ -247,8 +251,8 @@ mod tests {
         cpu.set_reg(1, 0x9ABC_DEF0);
         let before = (cpu.state_digest(), bus.state_digest());
         for service in [
-            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-            0x18, 0xFF,
+            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
+            0x17, 0x18, 0xFF,
         ] {
             assert_eq!(
                 call(service, &mut cpu, &mut bus),

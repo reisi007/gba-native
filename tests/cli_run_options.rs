@@ -148,3 +148,41 @@ fn run_synthetic_bios_affine_is_explicit_and_reported_once() {
     assert!(report.contains("affine_policy=documented"), "{report}");
     assert!(report.contains("affine_note="), "{report}");
 }
+
+#[test]
+fn run_synthetic_backup_flash128k_is_explicit_and_reported_once() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    synthetic_rom(&cwd.join("plain.gba"), &[(0, 0xE3A0_0000)]);
+
+    let output = cli(
+        &cwd,
+        &[
+            "run",
+            "plain.gba",
+            "--budget",
+            "1",
+            "--synthetic-backup-flash128k",
+            "--out",
+            "output/flash",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("backup_policy=flash-128k-volatile"),
+        "stdout is missing the selected flash policy"
+    );
+    assert_eq!(
+        stdout.matches("backup_assumption=").count(),
+        1,
+        "the backup assumption must be printed exactly once"
+    );
+    assert!(stdout.contains("128 KiB"), "{stdout}");
+    let report = std::fs::read_to_string(cwd.join("output/flash/report.txt")).expect("report");
+    assert!(
+        report.contains("backup_policy=flash-128k-volatile"),
+        "{report}"
+    );
+}

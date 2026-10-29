@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -150,6 +150,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut rom_writes = false;
     let mut backup_sram = false;
     let mut backup_sram64k = false;
+    let mut backup_flash = false;
     let mut bios_decompress = false;
     let mut bios_affine = false;
     while let Some(argument) = args.next() {
@@ -159,6 +160,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             "--synthetic-rom-writes-ignored" => rom_writes = true,
             "--synthetic-backup-sram" => backup_sram = true,
             "--synthetic-backup-sram64k" => backup_sram64k = true,
+            "--synthetic-backup-flash128k" => backup_flash = true,
             "--synthetic-bios-decompress" => bios_decompress = true,
             "--synthetic-bios-affine" => bios_affine = true,
             "--budget" => {
@@ -178,9 +180,9 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             _ => return Err(Error::Args(format!("unknown run option {argument}"))),
         }
     }
-    if backup_sram && backup_sram64k {
+    if u8::from(backup_sram) + u8::from(backup_sram64k) + u8::from(backup_flash) > 1 {
         return Err(Error::Args(
-            "choose only one of --synthetic-backup-sram and --synthetic-backup-sram64k".to_string(),
+            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k or --synthetic-backup-flash128k".to_string(),
         ));
     }
     let cart = Cartridge::from_path(Path::new(&path))?;
@@ -197,7 +199,9 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if rom_writes {
         bus = bus.with_rom_write_policy(gba_native::bus::RomWritePolicy::Dropped);
     }
-    if backup_sram64k {
+    if backup_flash {
+        bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Flash128KVolatile);
+    } else if backup_sram64k {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram64KVolatile);
     } else if backup_sram {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram32KVolatile);
@@ -246,6 +250,11 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             "backup_assumption=experimental volatile {capacity} KiB SRAM; no flash engine and no persistence"
         );
     }
+    if backup_flash {
+        println!(
+            "backup_assumption=experimental volatile 128 KiB flash with documented autoselect/bank/program/erase subset; no persistence"
+        );
+    }
     if bios_decompress {
         println!(
             "decompression_assumption=experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code; not a general BIOS implementation"
@@ -253,12 +262,12 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     }
     if bios_affine {
         println!(
-            "affine_assumption=experimental documented ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
+            "affine_assumption=experimental documented BgAffineSet/ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
         );
     }
     if rom_writes {
         println!(
-            "rom_write_assumption=experimental ROM-only cartridge no-effect stores; flash command engines are not modelled"
+            "rom_write_assumption=experimental ROM-only cartridge no-effect stores; the backup window is governed by its own device policy"
         );
     }
     if synthetic_bios_zero_fill {

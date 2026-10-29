@@ -173,7 +173,8 @@ Relevant anchors actually consulted for this milestone:
   `#rluncompreadnormalwrite16bit-vram---swi-15h-gba`,
   `#diff8bitunfilterwrite8bit-wram---swi-16h-gbands9dsi9`,
   `#diff8bitunfilterwrite16bit-vram---swi-17h-gba` and
-  `#diff16bitunfilter---swi-18h-gbands9dsi9`: the 32-bit header layout (reserved
+  `#diff16bitunfilter---swi-18h-gbands9dsi9`, `#swi-0eh-gba---bgaffineset`: the
+  32-bit header layout (reserved
   nibble, compressed type, 24-bit decompressed size), the LZ77 flag-byte and
   back-reference encoding, the run-length flag/length encoding, the 8/16-bit
   diff accumulation, the Wram/Vram write-unit split and the documented
@@ -191,6 +192,19 @@ Relevant anchors actually consulted for this milestone:
   image, and no bit-identical BIOS-table or rounding claim is made. Consulted
   on 2026-10-29 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>;
   that retrieval was not separately retained or hashed.
+
+- `#lcd-io-display-control`, `#lcd-io-bg-control`, `#lcd-io-bg-rotationscaling`,
+  `#lcd-obj---overview`, `#lcd-obj---oam-attributes`,
+  `#lcd-obj---oam-rotationscaling-parameters`,
+  `#lcd-obj---vram-character-tile-mapping`, `#lcd-io-window-feature` and
+  `#lcd-io-color-special-effects`: Mode 0/1 layer enable and priority, text and
+  affine BG control/scroll, BG2/BG3 affine matrix/reference registers, OAM
+  normal/affine attributes, 1D OBJ tile mapping, window ranges/masks and
+  BLDCNT/BLDALPHA/BLDY blending modes. Only the static snapshot subset described
+  in `gba-contract.md` is implemented; 2D OBJ mapping, double-size affine OBJ,
+  OBJ mosaic and window 1 remain absent. These anchors were consulted on
+  2026-10-29 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>; that
+  retrieval was not separately retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.

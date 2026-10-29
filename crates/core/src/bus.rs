@@ -15,7 +15,10 @@ mod io;
 mod irq;
 mod sound;
 mod timer;
-pub use backup::{BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_LEN_64K, SAVE_WINDOW_LEN};
+mod video;
+pub use backup::{
+    BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_LEN_64K, SAVE_LEN_FLASH, SAVE_WINDOW_LEN,
+};
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
@@ -46,8 +49,39 @@ pub const OAM_BASE: u32 = 0x0700_0000;
 pub const OAM_LEN: usize = 1024;
 pub const DISPCNT_ADDR: u32 = 0x0400_0000;
 pub const BG0CNT_ADDR: u32 = 0x0400_0008;
+pub const BG1CNT_ADDR: u32 = 0x0400_000A;
+pub const BG2CNT_ADDR: u32 = 0x0400_000C;
+pub const BG3CNT_ADDR: u32 = 0x0400_000E;
 pub const BG0HOFS_ADDR: u32 = 0x0400_0010;
 pub const BG0VOFS_ADDR: u32 = 0x0400_0012;
+pub const BG1HOFS_ADDR: u32 = 0x0400_0014;
+pub const BG1VOFS_ADDR: u32 = 0x0400_0016;
+pub const BG2HOFS_ADDR: u32 = 0x0400_0018;
+pub const BG2VOFS_ADDR: u32 = 0x0400_001A;
+pub const BG3HOFS_ADDR: u32 = 0x0400_001C;
+pub const BG3VOFS_ADDR: u32 = 0x0400_001E;
+pub const BG2PA_ADDR: u32 = 0x0400_0020;
+pub const BG2PB_ADDR: u32 = 0x0400_0022;
+pub const BG2PC_ADDR: u32 = 0x0400_0024;
+pub const BG2PD_ADDR: u32 = 0x0400_0026;
+pub const BG2X_ADDR: u32 = 0x0400_0028;
+pub const BG2Y_ADDR: u32 = 0x0400_002C;
+pub const BG3PA_ADDR: u32 = 0x0400_0030;
+pub const BG3PB_ADDR: u32 = 0x0400_0032;
+pub const BG3PC_ADDR: u32 = 0x0400_0034;
+pub const BG3PD_ADDR: u32 = 0x0400_0036;
+pub const BG3X_ADDR: u32 = 0x0400_0038;
+pub const BG3Y_ADDR: u32 = 0x0400_003C;
+pub const WIN0H_ADDR: u32 = 0x0400_0040;
+pub const WIN1H_ADDR: u32 = 0x0400_0042;
+pub const WIN0V_ADDR: u32 = 0x0400_0044;
+pub const WIN1V_ADDR: u32 = 0x0400_0046;
+pub const WININ_ADDR: u32 = 0x0400_0048;
+pub const WINOUT_ADDR: u32 = 0x0400_004A;
+pub const MOSAIC_ADDR: u32 = 0x0400_004C;
+pub const BLDCNT_ADDR: u32 = 0x0400_0050;
+pub const BLDALPHA_ADDR: u32 = 0x0400_0052;
+pub const BLDY_ADDR: u32 = 0x0400_0054;
 pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
@@ -166,6 +200,7 @@ pub struct Bus {
     decompression_policy: DecompressionPolicy,
     affine_policy: AffinePolicy,
     backup: Vec<u8>,
+    flash: backup::FlashState,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -205,9 +240,10 @@ impl Bus {
             backup_policy: BackupPolicy::Strict,
             decompression_policy: DecompressionPolicy::Strict,
             affine_policy: AffinePolicy::Strict,
-            // Fixed 64 KiB erased image: the selected policy only gates the
+            // Fixed 128 KiB erased image: the selected policy only gates the
             // accessible capacity, so the guest-state digest is policy-independent.
-            backup: vec![0xFF; SAVE_LEN_64K],
+            backup: vec![0xFF; SAVE_LEN_FLASH],
+            flash: backup::FlashState::default(),
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -254,9 +290,11 @@ impl Bus {
     /// Under [`BackupPolicy::Sram32KVolatile`] the backup window is backed by
     /// 32 KiB of erased SRAM that lives only in memory; under
     /// [`BackupPolicy::Sram64KVolatile`] it is backed by the full 64 KiB
-    /// documented window. No file is written and no flash command engine
-    /// exists. The backing store stays the fixed 64 KiB erased image; the
-    /// policy only gates the accessible capacity.
+    /// documented window; [`BackupPolicy::Flash128KVolatile`] models a
+    /// two-bank 128 KiB flash with the documented autoselect/bank/program/
+    /// erase subset. No file is written and nothing persists. The backing
+    /// store stays the fixed 128 KiB erased image; the policy selects the
+    /// device model.
     #[must_use]
     pub fn with_backup_policy(mut self, policy: BackupPolicy) -> Self {
         self.backup_policy = policy;
@@ -316,14 +354,6 @@ impl Bus {
 
     pub fn dispcnt(&self) -> u16 {
         self.io.dispcnt()
-    }
-
-    pub(crate) fn bg0cnt(&self) -> u16 {
-        self.io.bg0cnt()
-    }
-
-    pub(crate) fn bg0_scroll(&self) -> (u16, u16) {
-        self.io.bg0_scroll()
     }
 
     /// Instruction fetch. Only ROM and work RAM are executable by design.
@@ -387,10 +417,12 @@ impl Bus {
         bytes.extend_from_slice(&self.vram);
         bytes.extend_from_slice(&self.oam);
         self.io.append_digest(&mut bytes);
-        // The backup bytes are guest state only under the SRAM opt-in; under
-        // the strict default they are the constant erased image. Hashing them
-        // unconditionally keeps the digest independent of the host policy.
+        // The backup bytes are guest state only under a selected device model;
+        // under strict they are the constant erased image. Hashing the fixed
+        // image and flash command state keeps the digest policy-independent.
         bytes.extend_from_slice(&self.backup);
+        bytes.push(self.flash.command as u8);
+        bytes.push(self.flash.bank);
         bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
         sha256::digest(&bytes)
     }

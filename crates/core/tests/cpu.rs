@@ -256,12 +256,12 @@ fn arm_mul_and_mla_rd_eq_rm_use_pre_instruction_values_as_a_design_policy() {
 
 #[test]
 fn unsupported_encodings_are_rejected_without_state_progress() {
-    let (mut cpu, mut bus) = arm(&[0xE080_0091]); // UMULL
+    let (mut cpu, mut bus) = arm(&[0xE040_0091]); // UMAAL
     let error = interpret::step(&mut cpu, &mut bus).expect_err("multiply rejected");
     assert!(matches!(
         error,
         Error::UnsupportedInstruction {
-            raw: 0xE080_0091,
+            raw: 0xE040_0091,
             thumb: false,
             ..
         }

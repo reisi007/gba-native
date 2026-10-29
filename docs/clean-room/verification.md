@@ -1212,3 +1212,53 @@ encoding at `0x082F4D90`, which remains outside the implemented ARMv4T subset. I
 only Mode 0 BG0, not BG1-BG3 or OBJ. No image, frame or start screen is
 claimed. The next blocking capabilities are therefore the ARM multiply-long
 instructions and the PPU layers/sprites, not the approved HLE boundaries.
+
+## Round: native title screen through multiply-long, flash and Mode 0/1 PPU (2026-10-29)
+
+The external run stopped at step 19,075,202 on `UMULL r3,r2,r1,r0` at
+`0x082F4D90`. The ARMv4 multiply-long family (`UMULL`, `UMLAL`, `SMULL`,
+`SMLAL`) is now implemented in the decoder, interpreter and AOT emitter with
+raw-encoding vectors, 64-bit N/Z flags, invalid-alias rejection and a native
+AOT reference-equality test.
+
+After that, the run reached SWI `0Fh` and then SWI `0Eh`; `BgAffineSet` is now
+part of the same `AffinePolicy::Documented` opt-in as `ObjAffineSet`. It writes
+the documented 16-byte PA/PB/PC/PD/start-X/start-Y entry from the 20-byte
+source and includes zero-scale, identity, quarter-turn and multi-entry vectors.
+
+The boot flag was then diagnosed. Without a flash device the cartridge probe
+writes `0` to `0x03005D88`, and the boot check clears callback2. A throwaway
+observation that returned the documented flash autoselect ID (`0x62`/`0x13`)
+made the probe store `1` **without any counterfactual patch** and start the
+intro. `BackupPolicy::Flash128KVolatile` therefore models a volatile 128 KiB
+two-bank flash with autoselect, bank switch, program, sector erase and chip
+erase. The strict default and both SRAM models are unchanged; the model has no
+persistence and makes no flash-compatibility claim. Flash tests cover the ID,
+banking, chip erase, byte-only access and strict fail-closed behavior.
+
+The PPU snapshot renderer now composes Mode 0 BG0-BG3 text + OBJ and Mode 1
+BG0/BG1 text + BG2 affine + OBJ, with window 0, the OBJ window and
+`BLDCNT` alpha/brightness blending. The new synthetic tests cover BG1 text,
+Mode 1 BG2 affine, normal and affine OBJ, window clipping and alpha/brightness
+mixing. Inventory pins: 481 listed / 477 selected, `--lib` 85, `cli_run` 9,
+`cli_run_options` 4, `arm_multiply_long` 6, `display_layers` 8,
+`mask_rom_and_serial` 12, `bios_affine` 2, `aot_multiply_long` 1.
+
+The cross-compiled x86_64 CLI was run against the read-only ROM with the
+explicit opt-ins `--synthetic-bios-zero-fill`, `--synthetic-bios-rom-writes`,
+`--synthetic-rom-writes-ignored`, `--synthetic-backup-flash128k`,
+`--synthetic-bios-decompress` and `--synthetic-bios-affine` at a
+455,000,000-instruction budget. It completed the budget and wrote a static
+snapshot to `output/emerald-native-start-title-20261029/`. The report records
+`DISPCNT=0x1741`, `display_forced_blank=0` and
+`image_sha256=1f2febbccf5c507fdac2ad8c6bebab3597147d8fffac426299ba90190265af67`.
+The PNG visibly shows the `SMARAGD EDITION` logo and `DRÜCKE START` with the
+2005 Game Freak notice. This is the observed title/start screen, not gameplay,
+input, timing, boot-ROM or general compatibility evidence.
+
+The renderer is still a static subset: 2D OBJ tile mapping, OBJ double-size
+affine sprites, OBJ/BG mosaic, window 1, Mode 2 and scanline effects remain
+explicit errors or absent. Alpha/brightness arithmetic uses 8-bit channels as a
+stated approximation of the 5-bit hardware channels. The CLI run's success
+depends on the explicit synthetic device/HLE opt-ins; the ROM itself was never
+modified.

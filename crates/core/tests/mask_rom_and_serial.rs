@@ -211,8 +211,10 @@ fn backup_policy_is_explicit_and_volatile() {
     let strict = Bus::new(cart(0x200));
     let small = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
     let large = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram64KVolatile);
+    let flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
     assert_eq!(strict.state_digest(), small.state_digest());
     assert_eq!(small.state_digest(), large.state_digest());
+    assert_eq!(large.state_digest(), flash.state_digest());
 }
 
 #[test]
@@ -237,4 +239,94 @@ fn backup_policy_64k_reaches_the_documented_window_end() {
         sram.write8(0x0E01_0000, 1),
         Err(Error::Unmapped { .. })
     ));
+}
+
+#[test]
+fn flash_autoselect_returns_the_documented_id_and_resets() {
+    let mut flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
+    for (addr, value) in [
+        (0x0E00_5555, 0xAA),
+        (0x0E00_2AAA, 0x55),
+        (0x0E00_5555, 0x90),
+    ] {
+        flash.write8(addr, value).expect("flash command");
+    }
+    assert_eq!(flash.read8(0x0E00_0000), Ok(0x62));
+    assert_eq!(flash.read8(0x0E00_0001), Ok(0x13));
+    flash.write8(0x0E00_0000, 0xF0).expect("autoselect reset");
+    assert_eq!(flash.read8(0x0E00_0000), Ok(0xFF));
+}
+
+#[test]
+fn flash_bank_switch_programs_and_reads_two_banks() {
+    let mut flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
+    let command = |flash: &mut Bus, command: u8| {
+        flash.write8(0x0E00_5555, 0xAA).expect("unlock 1");
+        flash.write8(0x0E00_2AAA, 0x55).expect("unlock 2");
+        flash.write8(0x0E00_5555, command).expect("command");
+    };
+    command(&mut flash, 0xA0);
+    flash.write8(0x0E00_0010, 0x5A).expect("program bank 0");
+    command(&mut flash, 0xB0);
+    flash.write8(0x0E00_0000, 1).expect("switch bank 1");
+    assert_eq!(flash.read8(0x0E00_0010), Ok(0xFF));
+    command(&mut flash, 0xA0);
+    flash.write8(0x0E00_0010, 0xA5).expect("program bank 1");
+    command(&mut flash, 0xB0);
+    flash.write8(0x0E00_0000, 0).expect("switch bank 0");
+    assert_eq!(flash.read8(0x0E00_0010), Ok(0x5A));
+}
+
+#[test]
+fn flash_chip_erase_clears_both_banks() {
+    let mut flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
+    let command = |flash: &mut Bus, command: u8| {
+        flash.write8(0x0E00_5555, 0xAA).expect("unlock 1");
+        flash.write8(0x0E00_2AAA, 0x55).expect("unlock 2");
+        flash.write8(0x0E00_5555, command).expect("command");
+    };
+    command(&mut flash, 0xA0);
+    flash.write8(0x0E00_0020, 0x12).expect("program");
+    command(&mut flash, 0x80);
+    flash.write8(0x0E00_5555, 0xAA).expect("erase unlock 1");
+    flash.write8(0x0E00_2AAA, 0x55).expect("erase unlock 2");
+    flash.write8(0x0E00_5555, 0x10).expect("chip erase");
+    assert_eq!(flash.read8(0x0E00_0020), Ok(0xFF));
+}
+
+#[test]
+fn flash_sector_erase_clears_only_the_selected_4k_sector() {
+    let mut flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
+    let command = |flash: &mut Bus, command: u8| {
+        flash.write8(0x0E00_5555, 0xAA).expect("unlock 1");
+        flash.write8(0x0E00_2AAA, 0x55).expect("unlock 2");
+        flash.write8(0x0E00_5555, command).expect("command");
+    };
+    command(&mut flash, 0xA0);
+    flash.write8(0x0E00_1234, 0x77).expect("program sector 1");
+    command(&mut flash, 0xA0);
+    flash.write8(0x0E00_2000, 0x88).expect("program sector 2");
+    command(&mut flash, 0x80);
+    flash.write8(0x0E00_5555, 0xAA).expect("erase unlock 1");
+    flash.write8(0x0E00_2AAA, 0x55).expect("erase unlock 2");
+    flash.write8(0x0E00_1234, 0x30).expect("sector erase");
+    assert_eq!(flash.read8(0x0E00_1234), Ok(0xFF));
+    assert_eq!(flash.read8(0x0E00_2000), Ok(0x88));
+}
+
+#[test]
+fn flash_requires_byte_access_and_the_strict_default_stays_fail_closed() {
+    let strict = Bus::new(cart(0x200));
+    assert!(matches!(
+        strict.read8(0x0E00_0000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    let mut flash = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Flash128KVolatile);
+    assert!(matches!(
+        flash.read16(0x0E00_0000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    // A random array-mode write is not storage on flash.
+    flash.write8(0x0E00_0040, 0x99).expect("non-command write");
+    assert_eq!(flash.read8(0x0E00_0040), Ok(0xFF));
 }

@@ -705,4 +705,69 @@ rounding. Products use `i32` and the final store keeps the low 16 bits, matching
 a hardware `STRH`. Source/destination ranges, 2-byte alignment and the even
 offset precondition are validated before the first store; strict policy keeps
 `0Fh` an explicit unsupported service. `BgAffineSet` (`0Eh`) and every other
-service remain unimplemented.
+service remain unimplemented at this decision; D38 later extends the same
+`AffinePolicy::Documented` opt-in to `BgAffineSet`.
+
+## D36 — ARM multiply-long instructions
+
+The external run stopped at `0x082F4D90` on `UMULL r3,r2,r1,r0` (opcode 4,
+unsigned non-accumulating long multiply) after the affine HLE had advanced it
+to step 19,075,202. The multiply-long family is a documented ARMv4 instruction
+group, not a new HLE boundary, so it is implemented in the decoder,
+interpreter and AOT emitter:
+
+- `UMULL`/`UMLAL` use an unsigned 64-bit product/accumulator.
+- `SMULL`/`SMLAL` sign-extend both operands and use a signed 64-bit
+  product/accumulator.
+- `RdLo` receives the low half and `RdHi` the high half; `RdHi == RdLo` and R15
+  operands are rejected as invalid/unpredictable.
+- With `S=1`, N is bit 63 and Z covers the full 64-bit result. C remains the
+  existing documented-design preservation choice and V is unaffected, matching
+  the 32-bit `Mul` policy.
+
+The external run then continued past the former stop to the title sequence.
+Synthetic raw-encoding vectors cover all four instructions, flags, the invalid
+aliases and native-AOT reference equality.
+
+## D37 — Volatile 128 KiB flash device model
+
+Without a flash device the cartridge probe writes `0` to `0x03005D88`; the
+boot check at `0x08000408` then clears callback2 and the game idles. A
+throwaway observation that returned the documented flash autoselect ID
+(`0x62`/`0x13`) made the probe store `1` and boot the intro **without any
+counterfactual flag patch**. The missing capability was therefore the flash
+device, not a cartridge-specific flag.
+
+`BackupPolicy::Flash128KVolatile` (`run --synthetic-backup-flash128k`) models a
+volatile 128 KiB flash with two 64 KiB banks and the documented command subset:
+unlock `0xAA`/`0x55`, autoselect `0x90` (manufacturer `0x62`, device `0x13`),
+bank switch `0xB0`, program `0xA0`, sector erase `0x30` and chip erase `0x10`.
+Reads outside autoselect use the selected bank. The model persists nothing,
+implements no other flash commands and is not a save-file or flash-compatibility
+claim. The storage and command/bank state are guest state in
+`Bus::state_digest`; the policy is host configuration. The strict default and
+both SRAM opt-ins are unchanged.
+
+## D38 — Mode 0/1 PPU and the observed start screen
+
+After the multiply-long and flash work the unmodified ROM reaches the title
+sequence. The static renderer now composes the documented Mode 0 layers
+(BG0-BG3 text + OBJ) and Mode 1 layers (BG0/BG1 text + BG2 affine + OBJ), with
+window 0, the OBJ window and `BLDCNT` alpha/brightness blending. BG2/BG3 affine
+matrix/reference registers and BG0-BG3 scroll/control registers are modelled;
+OBJ normal and affine sprites use 1D mapping with 4/8bpp tiles.
+
+The counterfactual-free cross-compiled x86_64 CLI, run with the explicit
+`synthetic-bios-zero-fill`, `synthetic-bios-rom-writes`,
+`synthetic-rom-writes-ignored`, `synthetic-backup-flash128k`,
+`synthetic-bios-decompress` and `synthetic-bios-affine` flags at a
+455,000,000-instruction budget, produces the title screen:
+`DISPCNT=0x1741`, `image_sha256=1f2febbccf5c507fdac2ad8c6bebab3597147d8fffac426299ba90190265af67`,
+visibly showing the `SMARAGD EDITION` logo and `DRÜCKE START` with the 2005 Game Freak
+notice. This is a static snapshot of the observed title state, not a gameplay,
+input, timing or compatibility claim.
+
+The renderer remains a deliberate subset: 2D OBJ tile mapping, OBJ double-size
+affine sprites, OBJ/BG mosaic, window 1, Mode 2 and scanline effects are
+explicit errors or absent. Alpha/brightness math uses the final 8-bit channels
+as a stated approximation of the 5-bit hardware channels.

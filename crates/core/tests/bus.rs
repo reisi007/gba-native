@@ -3,10 +3,10 @@
 
 use gba_native_core::bus::BiosDataPolicy;
 use gba_native_core::bus::{
-    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE,
-    IWRAM_LEN, KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT,
-    KEY_START, KEY_UP, KEYINPUT_ADDR, KEYINPUT_RELEASED, OAM_BASE, OAM_LEN, PALETTE_BASE,
-    PALETTE_LEN, VRAM_BASE, VRAM_LEN,
+    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, BG1CNT_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN,
+    IWRAM_BASE, IWRAM_LEN, KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT,
+    KEY_SELECT, KEY_START, KEY_UP, KEYINPUT_ADDR, KEYINPUT_RELEASED, OAM_BASE, OAM_LEN,
+    PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::{Cartridge, ROM_BASE};
 use gba_native_core::error::Error;
@@ -325,9 +325,12 @@ fn bg0_register_widths_write_only_scroll_and_digest_are_explicit() {
         bus.read8(BG0CNT_ADDR),
         Err(Error::UnsupportedIoRead { width: 8, .. })
     ));
-    // A 32-bit I/O read is two halfword reads, so the second half fails first.
+    // BG1CNT is the adjacent register, so this 32-bit read composes both.
+    bus.write16(BG1CNT_ADDR, 0x4321).expect("BG1CNT write");
+    assert_eq!(bus.read32(BG0CNT_ADDR), Ok(0x4321_8123));
+    // A 32-bit scroll read still fails on the unsupported halfword register.
     assert!(matches!(
-        bus.read32(BG0CNT_ADDR),
+        bus.read32(BG0HOFS_ADDR),
         Err(Error::UnsupportedIoRead { width: 16, .. })
     ));
     assert_eq!(bus.write8(BG0CNT_ADDR, 0), Ok(()));

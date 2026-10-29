@@ -3,8 +3,8 @@
 Status: six documented Rust HLE primitives are callable directly and from typed
 ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. Two
 independent host-selected opt-ins add the documented LZ77, run-length and
-diff-filter decompression SWIs and `ObjAffineSet`; without the relevant opt-in
-they stay unsupported. No BIOS is fetched or
+diff-filter decompression SWIs and the `BgAffineSet`/`ObjAffineSet` services;
+without the relevant opt-in they stay unsupported. No BIOS is fetched or
 booted; the implementation is not a general exception subsystem and does not
 establish playability. `README.md` and `gba-contract.md` state the same
 boundary.
@@ -270,11 +270,13 @@ is a bounded behavior model: it does not claim BIOS cycle timing, compressed
 data produced by a particular retail BIOS, or support for every possible
 compressed stream.
 
-## Opt-in ObjAffineSet
+## Opt-in affine services
 
-`AffinePolicy::Strict` keeps SWI `0Fh` an explicit
-`BiosError::UnsupportedService` value. `AffinePolicy::Documented`
-(`run --synthetic-bios-affine`) enables only the documented calculation:
+`AffinePolicy::Strict` keeps SWI `0Eh` and `0Fh` explicit
+`BiosError::UnsupportedService` values. `AffinePolicy::Documented`
+(`run --synthetic-bios-affine`) enables the two documented calculations.
+
+### ObjAffineSet (`0Fh`)
 
 | Input | Meaning |
 | --- | --- |
@@ -307,7 +309,20 @@ matching the documented OAM structure.
   offset and ranges) are rejected before the SVC frame. The calculation and
   stores happen after frame entry; a bus failure during the stores is not
   rolled back.
-- `BgAffineSet` (`0Eh`) remains unsupported.
+### BgAffineSet (`0Eh`)
+
+The source is a 20-byte entry: `s32` original centre X, `s32` original centre Y
+(both 8.8), `s16` display centre X, `s16` display centre Y, `s16` scale X,
+`s16` scale Y and `u16` angle (upper eight bits used). The destination is a
+16-byte entry: `s16 PA`, `PB`, `PC`, `PD`, `s32` start X and `s32` start Y. The
+HLE computes the same Q12 matrix as `ObjAffineSet` and derives
+`start_x = origin_x - (display_x*PA + display_y*PB)` and
+`start_y = origin_y - (display_x*PC + display_y*PD)` with wrapping 32-bit
+arithmetic, matching the documented field layout. The destination must be
+4-byte aligned and wholly inside one writable EWRAM/IWRAM/palette/VRAM/OAM
+region; the direct BG2PA I/O destination is not modelled because the I/O block
+has its own register path. Both services share the generated sine table and the
+same non-identity disclaimer.
 
 ## Deliberately unimplemented
 
@@ -318,12 +333,13 @@ or silent successes:
 - `02h` Halt, `04h` IntrWait and `05h` VBlankIntrWait: IRQ/frame state is
   modelled, but these wait-service semantics are not implemented.
 - `03h` Stop/Sleep and `27h` CustomHalt.
-- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, `0Eh` BgAffineSet and
-  every other service not listed above.
+- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum and every other service not
+  listed above.
 - `10h` BitUnPack and `13h` Huffman remain future work; no fake handlers are
   installed. The LZ77/RL/diff services are implemented only under
-  `DecompressionPolicy::DocumentedFormats` and `ObjAffineSet` only under
-  `AffinePolicy::Documented`; the default policy keeps each unsupported.
+  `DecompressionPolicy::DocumentedFormats` and `BgAffineSet`/`ObjAffineSet`
+  only under `AffinePolicy::Documented`; the default policy keeps each
+  unsupported.
 - BIOS bytes and BIOS boot remain absent. The runtime has a bounded,
   behavior-only VBlank IRQ dispatcher frame and handler return; it never fetches
   or reconstructs BIOS instructions. Other exception paths, IRQ nesting, FIQ,
@@ -367,13 +383,15 @@ uses IWRAM) and checks the
 resume address, CPSR restoration, register preservation and output bytes, plus
 the strict default's no-write failure.
 
-`crates/core/src/bios/affine/tests.rs` uses synthetic six-byte source entries
-and independently stated expectations: identity, quarter-turn and half-turn
-matrices, the upper-angle-byte rule, a negative scale, `offset=2` contiguous
-parameters, `offset=8` OAM-slot layout, zero count, odd offset and misaligned
-addresses, ROM destination and source overrun, a destination-region crossing,
-the strict-policy no-mutation boundary, policy-independent `state_digest`, and
-the generated sine table's cardinal values and quarter-wave symmetry.
+`crates/core/src/bios/affine/tests.rs` uses synthetic six- and twenty-byte
+source entries and independently stated expectations: identity, quarter-turn
+and half-turn matrices, the upper-angle-byte rule, a negative scale, `offset=2`
+contiguous parameters, `offset=8` OAM-slot layout, zero count, odd offset and
+misaligned addresses, ROM destination and source overrun, a destination-region
+crossing, the strict-policy no-mutation boundary, policy-independent
+`state_digest`, BgAffineSet zero-scale/identity/quarter-turn/multi-entry
+vectors, and the generated sine table's cardinal values and quarter-wave
+symmetry.
 `crates/core/tests/bios_affine.rs` runs a Thumb SWI `0Fh` through the real SVC
 frame and checks the resumed PC, CPSR, register preservation and parameter
 bytes, plus the strict default's no-write failure.

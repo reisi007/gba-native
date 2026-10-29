@@ -163,7 +163,7 @@ fn run_and_snapshot_errors_create_no_output_directory() {
     let cwd = temp.path().join("cwd");
     std::fs::create_dir(&cwd).expect("create cwd");
 
-    // This fixture completes its budget but sets unsupported display mode 1.
+    // This fixture completes its budget but sets unsupported display mode 2.
     synthetic_rom(
         &cwd.join("display-error.gba"),
         &[
@@ -171,7 +171,7 @@ fn run_and_snapshot_errors_create_no_output_directory() {
             (4, 0xE59F_1008), // LDR r1, [PC, #8] -> literal at 0x14
             (8, 0xE1C0_10B0), // STRH r1, [r0]
             (0x10, 0x0400_0000),
-            (0x14, 1),
+            (0x14, 2),
         ],
     );
     let display = cli(
@@ -190,7 +190,7 @@ fn run_and_snapshot_errors_create_no_output_directory() {
         "unsupported snapshot must remain an error"
     );
     assert!(
-        stderr(&display).contains("display mode 1"),
+        stderr(&display).contains("display mode 2"),
         "{}",
         stderr(&display)
     );
