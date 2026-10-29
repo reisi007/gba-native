@@ -271,10 +271,12 @@ Implemented regions and widths:
   The serial registers `SIOCNT`/`RCNT`/`SIODATA*` are documented storage only: a
   transfer started with no link partner finishes immediately with SI read as
   high and received bits all ones, because that is the documented state of a
-  disconnected port. Only a normal-mode start with the internal shift clock is
-  answered; multiplay, UART, general-purpose/JOY-BUS and external-clock starts
-  stay explicit `UnsupportedIoWrite` errors instead of fabricated transfers.
-  No serial IRQ is delivered.
+  disconnected port. A normal-mode start with the internal shift clock is
+  answered that way; an externally clocked start stays pending with the start
+  bit set, because no partner supplies SC edges. Multiplay and UART starts stay
+  explicit `UnsupportedIoWrite` errors instead of fabricated transfers, and
+  general-purpose/JOY-BUS mode treats `SIOCNT` as unused storage. No serial IRQ
+  is delivered.
 - `VCOUNT` and the instruction-count line model: the host-driven frame model
   exposes a read-only `VCOUNT` halfword at `0x04000006` with an 8-bit path for
   exactly that register: `0x04000006` returns its low byte and `0x04000007` its

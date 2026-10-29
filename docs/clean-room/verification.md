@@ -1032,13 +1032,14 @@ group-5 reset (4 tests). The workspace inventory pins are updated accordingly
 (407 listed / 403 selected).
 
 Observed after the change: the same external run advanced from instruction
-161,544 to 183,066. The `CpuSet` calls to a BIOS destination now complete with no
-effect, the run passes the serial register reads, and it stops at a `SIOCNT`
-start request in normal 32-bit mode with the **external** shift clock, which
-cannot complete without a link partner. An intermediate variant that completed
-every start immediately reached instruction 886,682 and stopped at a guest store
-into the Game Pak ROM window; that variant fabricated a transfer, so it was
-replaced by the restricted model.
+161,544 to 886,682. The `CpuSet` calls to a BIOS destination now complete with no
+effect, the serial register reads work, and a start request in normal mode with
+the **external** shift clock stays pending instead of being fabricated: with no
+link partner there are no SC edges, the start bit stays set, and the guest
+reaches its own timeout path. Multiplay and UART starts remain explicit errors.
+
+The run then stops at a guest store into the Game Pak ROM window
+(`0x080000C8`), which still has no model.
 
 `DISPCNT` was `0x0080` (forced blank) at every stop, so no start screen, frame or
 compatibility result was observed and none is claimed. The Game Pak window keeps

@@ -87,9 +87,9 @@ fn serial_transfer_without_a_partner_completes_with_received_ones() {
     assert_eq!(bus.read16(SIOCNT_ADDR), Ok(0x1007));
     assert_eq!(bus.read16(SIODATA32_L_ADDR), Ok(0xFFFF));
     assert_eq!(bus.read16(SIODATA32_H_ADDR), Ok(0xFFFF));
-    // UART, multiplay, GP/JOY and external-clock transfers stay explicit
-    // errors instead of fabricated completions.
-    for control in [0x3080, 0x2080, 0x1080] {
+    // UART and multiplay starts stay explicit errors instead of fabricated
+    // completions.
+    for control in [0x3080, 0x2080] {
         assert!(
             matches!(
                 bus.write16(SIOCNT_ADDR, control),
@@ -104,12 +104,20 @@ fn serial_transfer_without_a_partner_completes_with_received_ones() {
         .expect("general purpose mode");
     bus.write16(SIOCNT_ADDR, 0x0083).expect("unused in GP mode");
     assert_eq!(bus.read16(SIOCNT_ADDR), Ok(0x0087));
-    // A start with the external shift clock cannot complete without a clock.
+    // A start with the external shift clock never completes: no partner
+    // supplies SC edges, so the start bit stays set and the data is unchanged.
     bus.write16(RCNT_ADDR, 0).expect("normal mode");
-    assert!(matches!(
-        bus.write16(SIOCNT_ADDR, 0x0082),
-        Err(Error::UnsupportedIoWrite { .. })
-    ));
+    bus.write16(SIODATA8_ADDR, 0x005A).expect("outgoing data");
+    bus.write16(SIOCNT_ADDR, 0x0082)
+        .expect("externally clocked start is accepted as pending");
+    assert_eq!(bus.read16(SIOCNT_ADDR), Ok(0x0086), "start stays set");
+    assert_eq!(bus.read16(SIODATA8_ADDR), Ok(0x005A), "no received bits");
+    // The data registers are plain storage, so the transfer can be started
+    // again with the internal clock and then completes.
+    bus.write16(SIOCNT_ADDR, 0x0083)
+        .expect("internally clocked start");
+    assert_eq!(bus.read16(SIOCNT_ADDR), Ok(0x0007));
+    assert_eq!(bus.read16(SIODATA8_ADDR), Ok(0x00FF));
 }
 
 #[test]

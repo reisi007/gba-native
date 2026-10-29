@@ -560,10 +560,12 @@ Two explicit policies replace the previous blanket rejection:
 The serial registers `SIOCNT`, `RCNT`, `SIODATA32_L/H` and `SIODATA8` are
 documented R/W storage. Only a normal-mode transfer with the internal shift
 clock can be answered, and only because a disconnected port has a documented
-state (SI high, received bits one). Multiplay, UART, general-purpose/JOY-BUS and
-external-clock starts stay explicit `UnsupportedIoWrite` errors rather than
-fabricated completions; in general-purpose/JOY-BUS mode `SIOCNT` is documented
-as unused and is plain storage. `RegisterRamReset` group 5 clears that storage
+state (SI high, received bits one). An externally clocked start is accepted as
+*pending*: with no partner there are no SC edges, so the start bit stays set and
+the data registers keep their values, which lets the guest reach its own timeout
+path. Multiplay and UART starts stay explicit `UnsupportedIoWrite` errors rather
+than fabricated completions; in general-purpose/JOY-BUS mode `SIOCNT` is
+documented as unused and is plain storage. `RegisterRamReset` group 5 clears that storage
 and selects general-purpose mode.
 
 The Game Pak ROM window keeps its own fail-closed `RomWrite` error: writing

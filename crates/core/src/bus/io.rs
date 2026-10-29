@@ -37,11 +37,13 @@ const SIOCNT_INTERNAL_CLOCK: u16 = 0x0001;
 const SIOCNT_WRITABLE: u16 = 0x7F8B;
 
 impl IoState {
-    /// Completes a transfer with no connected partner.
+    /// Completes an internally clocked transfer with no connected partner.
     ///
     /// The documented disconnected-port state drives SI high, so every received
     /// bit is one. The prototype has no cycle timing: the transfer is finished
-    /// when the start bit is written, and the start bit reads back cleared.
+    /// when the start bit is written, and the start bit reads back cleared. An
+    /// externally clocked start is not completed, because no partner supplies SC
+    /// edges and the guest must observe a transfer that never ends.
     fn finish_unconnected_transfer(&mut self) {
         self.siocnt &= !SIOCNT_START;
         if self.siocnt & 0x1000 != 0 {
@@ -152,17 +154,20 @@ impl IoState {
                 // GBATEK: in general-purpose/JOY-BUS mode `SIOCNT` is not used
                 // for transfers, so the register is plain storage there.
                 let general_purpose = self.rcnt & 0x8000 != 0;
-                if starting && !general_purpose {
-                    let normal_mode = value & SIOCNT_MODE_MASK == 0;
-                    let internal_clock = value & SIOCNT_INTERNAL_CLOCK != 0;
-                    if !normal_mode || !internal_clock {
-                        return Some(Err(Error::UnsupportedIoWrite { addr, width: 16 }));
-                    }
+                let normal_mode = value & SIOCNT_MODE_MASK == 0;
+                let internal_clock = value & SIOCNT_INTERNAL_CLOCK != 0;
+                // Multiplay and UART need peer/baud behaviour this prototype
+                // does not model, so a start there stays an explicit error.
+                if starting && !general_purpose && !normal_mode {
+                    return Some(Err(Error::UnsupportedIoWrite { addr, width: 16 }));
                 }
                 self.siocnt = value & SIOCNT_WRITABLE;
-                if starting && !general_purpose {
+                if starting && !general_purpose && internal_clock {
                     self.finish_unconnected_transfer();
                 }
+                // With the external shift clock and no partner there are no SC
+                // edges, so the start bit stays set and the data registers keep
+                // their values. The guest observes a transfer that never ends.
                 Ok(())
             }
             _ => return None,
