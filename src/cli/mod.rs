@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram] [--synthetic-bios-decompress]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -149,14 +149,18 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut bios_rom_writes = false;
     let mut rom_writes = false;
     let mut backup_sram = false;
+    let mut backup_sram64k = false;
     let mut bios_decompress = false;
+    let mut bios_affine = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
             "--synthetic-bios-rom-writes" => bios_rom_writes = true,
             "--synthetic-rom-writes-ignored" => rom_writes = true,
             "--synthetic-backup-sram" => backup_sram = true,
+            "--synthetic-backup-sram64k" => backup_sram64k = true,
             "--synthetic-bios-decompress" => bios_decompress = true,
+            "--synthetic-bios-affine" => bios_affine = true,
             "--budget" => {
                 let value = args
                     .next()
@@ -174,6 +178,11 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             _ => return Err(Error::Args(format!("unknown run option {argument}"))),
         }
     }
+    if backup_sram && backup_sram64k {
+        return Err(Error::Args(
+            "choose only one of --synthetic-backup-sram and --synthetic-backup-sram64k".to_string(),
+        ));
+    }
     let cart = Cartridge::from_path(Path::new(&path))?;
     let mut cpu = Cpu::direct_entry();
     cpu.initialize_bios_stacks();
@@ -188,12 +197,17 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if rom_writes {
         bus = bus.with_rom_write_policy(gba_native::bus::RomWritePolicy::Dropped);
     }
-    if backup_sram {
+    if backup_sram64k {
+        bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram64KVolatile);
+    } else if backup_sram {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram32KVolatile);
     }
     if bios_decompress {
         bus =
             bus.with_decompression_policy(gba_native::bios::DecompressionPolicy::DocumentedFormats);
+    }
+    if bios_affine {
+        bus = bus.with_affine_policy(gba_native::bios::AffinePolicy::Documented);
     }
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     let output = if let Some(path) = snapshot_output {
@@ -220,19 +234,26 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("rom_write_policy={}", bus.rom_write_policy().name());
     println!("backup_policy={}", bus.backup_policy().name());
     println!("decompression_policy={}", bus.decompression_policy().name());
+    println!("affine_policy={}", bus.affine_policy().name());
     if bios_rom_writes {
         println!(
             "bios_write_assumption=experimental documented mask-ROM no-effect writes; not BIOS data, opcodes or a compatibility claim"
         );
     }
-    if backup_sram {
+    if backup_sram || backup_sram64k {
+        let capacity = if backup_sram64k { "64" } else { "32" };
         println!(
-            "backup_assumption=experimental volatile 32 KiB SRAM; no flash engine and no persistence"
+            "backup_assumption=experimental volatile {capacity} KiB SRAM; no flash engine and no persistence"
         );
     }
     if bios_decompress {
         println!(
             "decompression_assumption=experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code; not a general BIOS implementation"
+        );
+    }
+    if bios_affine {
+        println!(
+            "affine_assumption=experimental documented ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
         );
     }
     if rom_writes {

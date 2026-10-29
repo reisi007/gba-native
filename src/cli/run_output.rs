@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gba_native::bios::DecompressionPolicy;
+use gba_native::bios::{AffinePolicy, DecompressionPolicy};
 use gba_native::bus::{BiosDataPolicy, BiosWritePolicy, Bus, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
@@ -53,6 +53,14 @@ pub(super) fn write_snapshot(
             "experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code"
         }
     };
+    let affine_note = match bus.affine_policy() {
+        AffinePolicy::Strict => {
+            "fail-closed; SWI 0Fh ObjAffineSet is an explicit unsupported-service error"
+        }
+        AffinePolicy::Documented => {
+            "experimental documented ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
+        }
+    };
     let report = format!(
         "capture_kind=post_budget_bitmap_snapshot\n\
          rom_bytes={}\n\
@@ -65,6 +73,8 @@ pub(super) fn write_snapshot(
          backup_policy={}\n\
          decompression_policy={}\n\
          decompression_note={}\n\
+         affine_policy={}\n\
+         affine_note={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -93,6 +103,8 @@ pub(super) fn write_snapshot(
         bus.backup_policy().name(),
         bus.decompression_policy().name(),
         decompression_note,
+        bus.affine_policy().name(),
+        affine_note,
         requested_budget,
         used_budget,
         stop_reason,

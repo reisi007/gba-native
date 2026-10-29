@@ -1,9 +1,10 @@
 # Independently implemented BIOS HLE services and guest SWI path
 
 Status: six documented Rust HLE primitives are callable directly and from typed
-ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. An explicit,
-host-selected opt-in adds the documented LZ77, run-length and diff-filter
-decompression SWIs; without it they stay unsupported. No BIOS is fetched or
+ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. Two
+independent host-selected opt-ins add the documented LZ77, run-length and
+diff-filter decompression SWIs and `ObjAffineSet`; without the relevant opt-in
+they stay unsupported. No BIOS is fetched or
 booted; the implementation is not a general exception subsystem and does not
 establish playability. `README.md` and `gba-contract.md` state the same
 boundary.
@@ -34,6 +35,8 @@ interface reference, not an emulator implementation source.
     (`11h`/`12h`), `RLUnCompReadNormalWrite8bit/16bit` (`14h`/`15h`) and
     `Diff8bitUnFilterWrite8bit/16bit` / `Diff16bitUnFilter` (`16h`..`18h`)
     entries
+  - `#bios-rotationscaling-functions` and `#swi-0fh-gba---objaffineset`
+    (source/destination fields, angle range and `offset=2`/`offset=8` layout)
   - `#bios-reset-functions`
   - `#swi-01h-gba---registerramreset`
   - `#bios-halt-functions` (explicitly not implemented here)
@@ -267,6 +270,45 @@ is a bounded behavior model: it does not claim BIOS cycle timing, compressed
 data produced by a particular retail BIOS, or support for every possible
 compressed stream.
 
+## Opt-in ObjAffineSet
+
+`AffinePolicy::Strict` keeps SWI `0Fh` an explicit
+`BiosError::UnsupportedService` value. `AffinePolicy::Documented`
+(`run --synthetic-bios-affine`) enables only the documented calculation:
+
+| Input | Meaning |
+| --- | --- |
+| r0 | source pointer, six bytes per calculation |
+| r1 | destination pointer |
+| r2 | number of calculations |
+| r3 | destination stride in bytes between the four parameters |
+
+Source entry: `s16` scale X (8.8), `s16` scale Y (8.8), `u16` angle (only the
+upper eight bits are used). Destination: `PA`, `PB`, `PC`, `PD` at `dest + 0`,
+`dest + offset`, `dest + 2*offset`, `dest + 3*offset`; the next calculation
+starts `4*offset` bytes later. `offset=2` therefore stores the four parameters
+contiguously, while `offset=8` addresses one parameter per 8-byte OAM slot,
+matching the documented OAM structure.
+
+- The implementation is derived from the public interface and the standard
+  affine matrix. The 256-entry Q12 sine table is generated from the
+  mathematical sine at the documented 8-bit angle resolution; it is **not**
+  copied from a BIOS image. The HLE does not claim bit-identical results to a
+  particular BIOS sine table or rounding.
+- Products fit in `i32`; the final 16-bit store keeps the low halfword. An
+  extreme or negative scale therefore follows the same low-halfword store rule
+  as hardware. Each signed product uses an arithmetic right shift; this is a
+  stated rounding choice, not a BIOS-identity claim.
+- Source and destination must be 2-byte aligned. The source entries must lie
+  wholly in one readable region; the complete destination span must lie wholly
+  in one writable EWRAM/IWRAM/palette/VRAM/OAM region. ROM, BIOS, save, I/O and
+  unmapped destinations are explicit errors.
+- `offset` must be even and at least 2. Preconditions (policy, alignment,
+  offset and ranges) are rejected before the SVC frame. The calculation and
+  stores happen after frame entry; a bus failure during the stores is not
+  rolled back.
+- `BgAffineSet` (`0Eh`) remains unsupported.
+
 ## Deliberately unimplemented
 
 The following are explicit `BiosError::UnsupportedService` values, never spins
@@ -276,12 +318,12 @@ or silent successes:
 - `02h` Halt, `04h` IntrWait and `05h` VBlankIntrWait: IRQ/frame state is
   modelled, but these wait-service semantics are not implemented.
 - `03h` Stop/Sleep and `27h` CustomHalt.
-- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, affine setup and every
-  other service not listed above.
+- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, `0Eh` BgAffineSet and
+  every other service not listed above.
 - `10h` BitUnPack and `13h` Huffman remain future work; no fake handlers are
   installed. The LZ77/RL/diff services are implemented only under
-  `DecompressionPolicy::DocumentedFormats`; the default policy keeps them
-  unsupported.
+  `DecompressionPolicy::DocumentedFormats` and `ObjAffineSet` only under
+  `AffinePolicy::Documented`; the default policy keeps each unsupported.
 - BIOS bytes and BIOS boot remain absent. The runtime has a bounded,
   behavior-only VBlank IRQ dispatcher frame and handler return; it never fetches
   or reconstructs BIOS instructions. Other exception paths, IRQ nesting, FIQ,
@@ -324,6 +366,17 @@ runs a Thumb SWI `11h` through the real SVC frame into EWRAM (the frame itself
 uses IWRAM) and checks the
 resume address, CPSR restoration, register preservation and output bytes, plus
 the strict default's no-write failure.
+
+`crates/core/src/bios/affine/tests.rs` uses synthetic six-byte source entries
+and independently stated expectations: identity, quarter-turn and half-turn
+matrices, the upper-angle-byte rule, a negative scale, `offset=2` contiguous
+parameters, `offset=8` OAM-slot layout, zero count, odd offset and misaligned
+addresses, ROM destination and source overrun, a destination-region crossing,
+the strict-policy no-mutation boundary, policy-independent `state_digest`, and
+the generated sine table's cardinal values and quarter-wave symmetry.
+`crates/core/tests/bios_affine.rs` runs a Thumb SWI `0Fh` through the real SVC
+frame and checks the resumed PC, CPSR, register preservation and parameter
+bytes, plus the strict default's no-write failure.
 
 `crates/core/tests/swi_decode.rs` checks typed ARM/Thumb comments.
 `crates/core/tests/swi_execution.rs` checks full SVC entry/return, ARM and Thumb

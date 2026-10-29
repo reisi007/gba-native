@@ -19,6 +19,7 @@
 //! variant rejects `disp=0`: GBATEK states that the Vram function works only
 //! with `disp=001h..FFFh`, not `disp=000h`.
 
+use super::target::{Target, target_of};
 use crate::bus::Bus;
 use crate::cpu::Cpu;
 use crate::error::{Error, Result};
@@ -178,15 +179,6 @@ fn require_alignment(service: u8, addr: u32, align: u32) -> Result<()> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Target {
-    Ewram,
-    Iwram,
-    Palette,
-    Vram,
-    Oam,
-}
-
 fn validate_destination(service: u8, destination: u32, size: u32, unit: WriteUnit) -> Result<()> {
     if unit == WriteUnit::Halfword {
         require_alignment(service, destination, 2)?;
@@ -247,26 +239,6 @@ fn validate_destination(service: u8, destination: u32, size: u32, unit: WriteUni
         ));
     }
     Ok(())
-}
-
-fn target_of(addr: u32) -> Option<Target> {
-    // EWRAM and IWRAM are mirrored across their full 16 MiB CPU windows.
-    if (0x0200_0000..0x0300_0000).contains(&addr) {
-        return Some(Target::Ewram);
-    }
-    if (0x0300_0000..0x0400_0000).contains(&addr) {
-        return Some(Target::Iwram);
-    }
-    if (0x0500_0000..0x0500_0400).contains(&addr) {
-        return Some(Target::Palette);
-    }
-    if (0x0600_0000..0x0601_8000).contains(&addr) {
-        return Some(Target::Vram);
-    }
-    if (0x0700_0000..0x0700_0400).contains(&addr) {
-        return Some(Target::Oam);
-    }
-    None
 }
 
 struct Source<'a> {

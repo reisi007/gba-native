@@ -1178,3 +1178,37 @@ snapshot (`image_sha256=d8b44303...`) are observed. No frame, boot, gameplay or
 compatibility claim is made. The next capability decisions are the backup
 device size and `ObjAffineSet`, not a rendering defect. `10h`/`13h` also remain
 unimplemented in the decompression family.
+
+## Round: 64 KiB SRAM and opt-in ObjAffineSet (2026-10-29)
+
+With the decompression opt-in the counterfactual run stopped at the 32 KiB
+backup-model boundary `0x0E008000`. GBATEK documents the backup window as
+`0E000000-0E00FFFF Game Pak SRAM (max 64 KBytes)`. `BackupPolicy::Sram64KVolatile`
+(`run --synthetic-backup-sram64k`) now models the full documented window; the
+32 KiB policy, its flag and the strict default are unchanged. Selecting both
+capacity flags is an argument error.
+
+The same run then reached SWI `0Fh` (`ObjAffineSet`). The first call used source
+`0x03007DAC`, destination `0x03007DB4`, count 1, offset 2, scale `(512, 512)`
+and angle `0x0000`. `AffinePolicy::Documented` (`run --synthetic-bios-affine`)
+implements the documented six-byte source entries, the four destination
+parameters at the `offset` stride (`4*offset` between calculations), the upper
+eight angle bits and a 256-entry Q12 sine table generated from the mathematical
+sine definition. The service is tested by 14 synthetic lib vectors and 2
+SWI-frame tests; the 64 KiB policy by one additional mask-ROM/serial test and
+three CLI option tests (two for the backup capacity, one for affine). Inventory
+pins: 455 listed / 451 selected, `--lib` 80, `cli_run` 9, `cli_run_options` 3,
+`bios_affine` 2, `mask_rom_and_serial` 7.
+
+External evidence uses the same read-only ROM (SHA-256
+`7c599c56849efeebeb93bd71f714932ae4cdf980db51c9c1016b4431057f71d4`) and the
+same **counterfactual** boot-flag write; the observer is a throwaway under
+`target/`, not a repository artifact. With the 64 KiB SRAM and affine opt-ins
+the run executes repeated `ObjAffineSet` calls and advances to step 19,075,202.
+At step 19,000,000 `DISPCNT=0x1F40` (mode 0, BG0-BG3 and OBJ enabled) and the
+backdrop is `0x0000`. The run then stops on the unsigned, non-accumulating ARM multiply-long
+encoding at `0x082F4D90`, which remains outside the implemented ARMv4T subset. Independently, `display::snapshot` rejects the same state with
+`UnsupportedPpuFeature { dispcnt: 0x1F40 }` because the host renderer implements
+only Mode 0 BG0, not BG1-BG3 or OBJ. No image, frame or start screen is
+claimed. The next blocking capabilities are therefore the ARM multiply-long
+instructions and the PPU layers/sprites, not the approved HLE boundaries.

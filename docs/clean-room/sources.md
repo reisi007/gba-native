@@ -153,15 +153,17 @@ Relevant anchors actually consulted for this milestone:
   hashed.
 - `#gba-memory-map` and `#gba-cart-backup-sramfram`: the backup window entry
   (`0E000000-0E00FFFF Game Pak SRAM (max 64 KBytes) - 8bit Bus width`) and the
-  documented byte-wide SRAM/FRAM cartridge backup. Only the explicit
-  `Sram32KVolatile` opt-in models an erased, volatile, byte-wide 32 KiB SRAM
-  inside that window; no chip-size detection, no persistence and no flash
-  behaviour is implemented or claimed.
+  documented byte-wide SRAM/FRAM cartridge backup. The explicit
+  `Sram32KVolatile` and `Sram64KVolatile` opt-ins model an erased, volatile,
+  byte-wide 32 KiB or 64 KiB (documented window maximum) SRAM inside that
+  window; no chip-size detection, no persistence and no flash behaviour is
+  implemented or claimed.
 - `#gba-cart-backup-flash-rom` and `#gba-cart-backup-ids`: consulted only to
   confirm that flash needs the documented command/ID sequence ("Used to detect
   the type (and presence) of FLASH chips"), which this prototype deliberately
-  does **not** implement. Under `Sram32KVolatile` such writes are ordinary SRAM
-  bytes and reads return them; the model never claims a flash device is absent.
+  does **not** implement. Under either SRAM opt-in such writes are ordinary
+  SRAM bytes and reads return them; the model never claims a flash device is
+  absent.
   Both anchors were consulted on 2026-10-29 in the same upstream GBATEK text;
   that retrieval was not separately retained or hashed.
 - `#bios-decompression-functions`,
@@ -179,6 +181,15 @@ Relevant anchors actually consulted for this milestone:
   implements these descriptions; no BIOS bytes, code or disassembly were used.
   These anchors were consulted on 2026-10-29 in the S1 rendering at
   <https://mgba-emu.github.io/gbatek/>, which is the same reference text;
+  that retrieval was not separately retained or hashed.
+- `#bios-rotationscaling-functions` and `#swi-0fh-gba---objaffineset`: the
+  six-byte source structure (s16 scale X, s16 scale Y, u16 angle), the four
+  destination parameters (PA, PB, PC, PD), the upper-eight-bit angle use and
+  the `offset=2`/`offset=8` destination layout. Only the opt-in
+  `AffinePolicy::Documented` implements `ObjAffineSet`; the Q12 sine table is
+  generated from the mathematical sine definition, not copied from a BIOS
+  image, and no bit-identical BIOS-table or rounding claim is made. Consulted
+  on 2026-10-29 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>;
   that retrieval was not separately retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and

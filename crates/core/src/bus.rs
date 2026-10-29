@@ -15,7 +15,7 @@ mod io;
 mod irq;
 mod sound;
 mod timer;
-pub use backup::{BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_WINDOW_LEN};
+pub use backup::{BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_LEN_64K, SAVE_WINDOW_LEN};
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
@@ -26,7 +26,7 @@ pub use irq::{
 };
 pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
-use crate::bios::DecompressionPolicy;
+use crate::bios::{AffinePolicy, DecompressionPolicy};
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
 use crate::sha256;
@@ -164,6 +164,7 @@ pub struct Bus {
     rom_write_policy: RomWritePolicy,
     backup_policy: BackupPolicy,
     decompression_policy: DecompressionPolicy,
+    affine_policy: AffinePolicy,
     backup: Vec<u8>,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
@@ -203,7 +204,10 @@ impl Bus {
             rom_write_policy: RomWritePolicy::Strict,
             backup_policy: BackupPolicy::Strict,
             decompression_policy: DecompressionPolicy::Strict,
-            backup: vec![0xFF; SAVE_LEN],
+            affine_policy: AffinePolicy::Strict,
+            // Fixed 64 KiB erased image: the selected policy only gates the
+            // accessible capacity, so the guest-state digest is policy-independent.
+            backup: vec![0xFF; SAVE_LEN_64K],
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -248,8 +252,11 @@ impl Bus {
     /// Selects the explicit opt-in for a volatile backup device.
     ///
     /// Under [`BackupPolicy::Sram32KVolatile`] the backup window is backed by
-    /// 32 KiB of erased SRAM that lives only in memory. No file is written and
-    /// no flash command engine exists.
+    /// 32 KiB of erased SRAM that lives only in memory; under
+    /// [`BackupPolicy::Sram64KVolatile`] it is backed by the full 64 KiB
+    /// documented window. No file is written and no flash command engine
+    /// exists. The backing store stays the fixed 64 KiB erased image; the
+    /// policy only gates the accessible capacity.
     #[must_use]
     pub fn with_backup_policy(mut self, policy: BackupPolicy) -> Self {
         self.backup_policy = policy;
@@ -275,6 +282,23 @@ impl Bus {
 
     pub fn decompression_policy(&self) -> DecompressionPolicy {
         self.decompression_policy
+    }
+
+    /// Selects the explicit opt-in for the documented `ObjAffineSet` service.
+    ///
+    /// Under [`AffinePolicy::Documented`] SWI `0Fh` implements only the public
+    /// affine interface and calculation described in `bios::affine`. The
+    /// default [`AffinePolicy::Strict`] keeps `0Fh` an explicit
+    /// unsupported-service error. This is host configuration, not guest state,
+    /// and is excluded from [`Bus::state_digest`].
+    #[must_use]
+    pub fn with_affine_policy(mut self, policy: AffinePolicy) -> Self {
+        self.affine_policy = policy;
+        self
+    }
+
+    pub fn affine_policy(&self) -> AffinePolicy {
+        self.affine_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.

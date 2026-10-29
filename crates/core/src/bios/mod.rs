@@ -1,9 +1,10 @@
 //! Independently implemented, documentation-driven BIOS HLE foundation.
 //!
 //! This module provides six direct documented HLE services by default plus a
-//! separate typed SWI/SVC wrapper. An explicit, host-selected opt-in adds the
-//! documented decompression SWIs; the default keeps them unsupported. The
-//! wrapper performs framed exception entry/return without fetching BIOS bytes;
+//! separate typed SWI/SVC wrapper. Explicit, host-selected opt-ins add the
+//! documented decompression SWIs and ObjAffineSet; the default keeps them
+//! unsupported. The wrapper performs framed exception entry/return without
+//! fetching BIOS bytes;
 //! each guest SWI still costs one instruction, while its internal HLE work has
 //! no cycle/scheduler model.
 //!
@@ -12,11 +13,14 @@
 //! BIOS bytes are read, no emulator implementation is consulted, and no BIOS
 //! side effects outside the documented service outputs are invented.
 
+mod affine;
 mod arithmetic;
 mod decompress;
 mod memory;
 mod swi;
+mod target;
 
+pub use affine::AffinePolicy;
 pub use decompress::DecompressionPolicy;
 pub use swi::execute_swi;
 
@@ -67,6 +71,12 @@ pub enum BiosError {
     UnsupportedSource { service: u8, addr: u32 },
     /// The destination range is not in a write-capable memory region.
     UnsupportedDestination { service: u8, addr: u32 },
+    /// A service parameter is outside the documented/implemented range.
+    UnsupportedParameter {
+        service: u8,
+        value: u32,
+        reason: &'static str,
+    },
     /// A decompression stream header does not declare the expected format.
     DecompressHeader {
         service: u8,
@@ -131,6 +141,14 @@ impl fmt::Display for BiosError {
                 f,
                 "service 0x{service:02X}: destination range at 0x{addr:08X} is not writable memory"
             ),
+            BiosError::UnsupportedParameter {
+                service,
+                value,
+                reason,
+            } => write!(
+                f,
+                "service 0x{service:02X}: parameter 0x{value:08X} is not supported: {reason}"
+            ),
             BiosError::DecompressHeader {
                 service,
                 header,
@@ -180,6 +198,7 @@ pub fn call(service: u8, cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         SERVICE_SQRT => arithmetic::sqrt(cpu),
         SERVICE_CPU_SET => memory::cpu_set(cpu, bus),
         SERVICE_CPU_FAST_SET => memory::cpu_fast_set(cpu, bus),
+        affine::SERVICE_OBJ_AFFINE_SET => affine::call(cpu, bus),
         decompress::SERVICE_LZ77_8
         | decompress::SERVICE_LZ77_16
         | decompress::SERVICE_RL_8
@@ -199,6 +218,7 @@ pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
         SERVICE_REGISTER_RAM_RESET | SERVICE_CPU_SET | SERVICE_CPU_FAST_SET => {
             memory::validate_call(service, cpu, bus)
         }
+        affine::SERVICE_OBJ_AFFINE_SET => affine::validate_call(cpu, bus),
         decompress::SERVICE_LZ77_8
         | decompress::SERVICE_LZ77_16
         | decompress::SERVICE_RL_8
@@ -227,8 +247,8 @@ mod tests {
         cpu.set_reg(1, 0x9ABC_DEF0);
         let before = (cpu.state_digest(), bus.state_digest());
         for service in [
-            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-            0xFF,
+            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0xFF,
         ] {
             assert_eq!(
                 call(service, &mut cpu, &mut bus),

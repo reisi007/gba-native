@@ -206,4 +206,35 @@ fn backup_policy_is_explicit_and_volatile() {
     // The backup contents are guest state and change the digest.
     let fresh = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
     assert_ne!(sram.state_digest(), fresh.state_digest());
+    // The selected capacity is host configuration: an equally erased device
+    // has the same guest-state digest under Strict, 32 KiB and 64 KiB.
+    let strict = Bus::new(cart(0x200));
+    let small = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
+    let large = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram64KVolatile);
+    assert_eq!(strict.state_digest(), small.state_digest());
+    assert_eq!(small.state_digest(), large.state_digest());
+}
+
+#[test]
+fn backup_policy_64k_reaches_the_documented_window_end() {
+    let mut sram = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram64KVolatile);
+    assert_eq!(sram.backup_policy(), BackupPolicy::Sram64KVolatile);
+    assert_eq!(sram.read8(0x0E00_FFFF), Ok(0xFF));
+    sram.write8(0x0E00_FFFF, 0x5A).expect("sram store");
+    assert_eq!(sram.read8(0x0E00_FFFF), Ok(0x5A));
+    // The 32 KiB policy keeps the upper half explicit.
+    let small = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
+    assert!(matches!(
+        small.read8(0x0E00_FFFF),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    assert!(matches!(
+        sram.read16(0x0E00_0000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    // 0x0E010000 is outside the documented backup window entirely.
+    assert!(matches!(
+        sram.write8(0x0E01_0000, 1),
+        Err(Error::Unmapped { .. })
+    ));
 }

@@ -665,3 +665,44 @@ and `13h` Huffman remain unimplemented and explicit unsupported services.
 This is a behavior-only format implementation with no BIOS timing or retail-BIOS
 compatibility claim. It narrows the "six services" boundary only for callers
 that explicitly select the policy; AOT harnesses remain on the default policy.
+
+## D34 — 64 KiB volatile SRAM device model
+
+The external run with the approved decompression opt-in stopped at
+`0x0E008000`, the first address beyond the modelled 32 KiB SRAM. GBATEK
+documents the backup window as `0E000000-0E00FFFF Game Pak SRAM (max 64 KBytes)`.
+A throwaway experiment that raised the model to 64 KiB advanced from 16,593,186
+to 18,911,571 instructions, so the boundary was the device capacity, not a flash
+command.
+
+`BackupPolicy::Sram64KVolatile` (`run --synthetic-backup-sram64k`) adds a second
+explicit, volatile device model covering the whole documented 64 KiB window.
+The existing 32 KiB policy and its flag are unchanged; `Strict` remains the
+default. Neither model persists anything, implements a flash command engine or
+claims a flash device ID. The modelled bytes are guest state in
+`Bus::state_digest`; the policy is host configuration. Selecting both capacity
+flags is an argument error.
+
+## D35 — Explicit opt-in for documented ObjAffineSet
+
+With D34 the counterfactual run reached SWI `0Fh` (`ObjAffineSet`) at step
+18,911,571. The first call used source `0x03007DAC`, destination `0x03007DB4`,
+count 1, offset 2, scale `(512, 512)`, angle `0x0000`. The owner approved
+implementing the documented service as a further explicit opt-in.
+
+`AffinePolicy::Documented` (`run --synthetic-bios-affine`) implements only SWI
+`0Fh` from the public GBATEK interface: six-byte source entries (s16 scale x,
+s16 scale y, u16 angle), four s16 destination parameters (PA, PB, PC, PD), the
+upper eight angle bits used, and destination stride `offset` between parameters
+with the next calculation starting `4*offset` bytes later. `offset=2` therefore
+stores the four parameters contiguously; `offset=8` places one parameter per
+8-byte OAM slot, matching the documented OAM structure.
+
+The HLE computes the mathematical affine matrix from a 256-entry Q12 sine table
+generated from the mathematical sine definition, not copied from a BIOS image.
+It does not claim bit-identical results to a particular BIOS sine table or
+rounding. Products use `i32` and the final store keeps the low 16 bits, matching
+a hardware `STRH`. Source/destination ranges, 2-byte alignment and the even
+offset precondition are validated before the first store; strict policy keeps
+`0Fh` an explicit unsupported service. `BgAffineSet` (`0Eh`) and every other
+service remain unimplemented.

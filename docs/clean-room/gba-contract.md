@@ -27,9 +27,9 @@ not a roadmap promise and not a retail-game compatibility statement.
   `PUSH`/`POP`/`LDMIA`/`STMIA` are implemented for the policy below. ARM7TDMI
   PSR transfers and MSR-driven register banking are implemented for this
   subset. Typed ARM/Thumb SWI reaches the six default documented BIOS HLE
-  services, plus an explicit decompression opt-in, via explicit SVC entry, a
-  saved handler frame, SYSTEM-mode service execution and architectural SWI
-  return. Other exception classes, multiply-long and
+  services, plus explicit decompression and affine opt-ins, via explicit SVC
+  entry, a saved handler frame, SYSTEM-mode service execution and architectural
+  SWI return. Other exception classes, multiply-long and
   halfword-multiply instructions, and BIOS boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
   `apps/desktop` and `apps/web` packages present the same static synthetic
@@ -74,8 +74,8 @@ not BIOS reset execution. `Cpu::direct_entry()` remains unchanged; callers that
 execute guest SWIs initialize the documented USER/SYS, IRQ and SVC stack tops
 explicitly. The CLI guest runner and generated AOT harness do so. The
 interpreter supports typed ARM/Thumb SWIs for the six default HLE services
-below; the explicit decompression opt-in adds the services listed in the same
-section. It enters SVC at vector `0x08` without fetching BIOS bytes, frames
+below; the explicit decompression and affine opt-ins add the services listed in
+the same section. It enters SVC at vector `0x08` without fetching BIOS bytes, frames
 handler state, runs the service in SYSTEM mode and returns through full CPSR
 restoration.
 Other exception classes and BIOS instruction fetch remain unsupported. The
@@ -124,24 +124,27 @@ own policy, not by this one.
 
 A fourth policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
 (`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access there
-as `UnsupportedSave`. The explicit `Sram32KVolatile` opt-in
-(`run --synthetic-backup-sram`) models a byte-wide, volatile 32 KiB SRAM that
-starts erased (`0xFF`), is lost when the process ends and has no flash command
-engine and no persistence. Wider accesses and the window beyond 32 KiB stay
-explicit `UnsupportedSave` errors. This is a device model for bounded progress
+as `UnsupportedSave`. The explicit `Sram32KVolatile` (`run
+--synthetic-backup-sram`) and `Sram64KVolatile` (`run
+--synthetic-backup-sram64k`) opt-ins model a byte-wide, volatile 32 KiB or
+64 KiB SRAM (the documented window maximum) that starts erased (`0xFF`), is lost
+when the process ends and has no flash command engine and no persistence. Wider
+accesses and the window beyond the selected capacity stay explicit
+`UnsupportedSave` errors. This is a device model for bounded progress
 experiments, not a save feature; the SRAM contents are guest state included in
 `Bus::state_digest`, while the selected policy is host configuration and is not
-hashed.
+hashed. Selecting both capacity flags is an argument error.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
-`run --synthetic-backup-sram` and `run --synthetic-bios-decompress` (all default
-to strict). Successful output prints all five policy values
+`run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`,
+`run --synthetic-bios-decompress` and `run --synthetic-bios-affine` (all default
+to strict). Successful output prints all six policy values
 (`bios_data_policy`, `bios_write_policy`, `rom_write_policy`, `backup_policy`,
-`decompression_policy`) plus an explicit non-authentic assumption line for each
-selected opt-in; the optional snapshot report prints the five policy values, the
-BIOS data/write notes and the decompression note. Tests use synthetic fixtures
-only.
+`decompression_policy`, `affine_policy`) plus an explicit non-authentic
+assumption line for each selected opt-in; the optional snapshot report prints
+the six policy values, the BIOS data/write notes and the decompression/affine
+notes. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
@@ -180,15 +183,27 @@ but before any destination store. `10h` BitUnPack and `13h` Huffman remain unsup
 `Strict` policy keeps every decompression SWI an explicit `UnsupportedService`
 error.
 
+A second documented-service opt-in, `AffinePolicy::Documented`
+(`run --synthetic-bios-affine`), adds SWI `0Fh` `ObjAffineSet`. It reads the
+documented six-byte source entries (s16 scale X, s16 scale Y, u16 angle), writes
+PA/PB/PC/PD at the documented `offset` stride (the next calculation starts
+`4*offset` bytes later), uses the upper 8 angle bits and a 256-entry Q12 sine
+table generated from the mathematical definition. Source/destination ranges,
+2-byte alignment and an even offset of at least 2 are validated before the
+first store. `BgAffineSet` (`0Eh`) remains unsupported, and the default
+`AffinePolicy::Strict` keeps `0Fh` an explicit `UnsupportedService`. The sine
+table is not copied from a BIOS image and the HLE does not claim bit-identical
+results to a particular BIOS table or rounding.
+
 The direct `bios::call` API does not consume an instruction, advance PC, enter
 SVC/IRQ mode, write SPSR, fetch a vector, count cycles or model wait states. A
 guest SWI consumes exactly one guest instruction and performs the framed SVC
 path described below; service internals add no budget, cycle or wait-state
 accounting. Every other service number is an explicit
 `BiosError::UnsupportedService`; Halt/IntrWait/VBlankIntrWait, Stop/Sleep,
-SoftReset/HardReset, BitUnPack and Huffman remain unimplemented, and the
-LZ77/RL/diff services are unsupported unless the opt-in is selected. Unsupported
-requests are never successful no-ops. See `docs/clean-room/hle-services.md` for exact
+SoftReset/HardReset, BitUnPack, Huffman and BgAffineSet remain unimplemented,
+and the LZ77/RL/diff services and ObjAffineSet are unsupported unless their
+opt-in is selected. Unsupported requests are never successful no-ops. See `docs/clean-room/hle-services.md` for exact
 policies and tests.
 
 ### Guest SWI/SVC path
@@ -444,8 +459,8 @@ is generated from the documented 16-byte refill threshold, a timer, a frame or
 audio output. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - The backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by default and
-  only answers under the explicit `BackupPolicy::Sram32KVolatile` opt-in (see
-  the backup policy above). BIOS reads/writes and unmapped addresses are errors;
+  only answers under the explicit `BackupPolicy::Sram32KVolatile` or
+  `Sram64KVolatile` opt-in (see the backup policy above). BIOS reads/writes and unmapped addresses are errors;
   the only exception is the explicit synthetic zero-fill opt-in, which changes
   BIOS **data reads** to zero and leaves BIOS fetch/write errors and every other
   address unchanged.
@@ -491,7 +506,7 @@ would be restricted. Multiply-long, halfword multiply, coprocessor, ARMv5
 `BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
 and are never NOPs.
 Typed SWI is handled only by the bounded default-service path above (plus the
-explicit decompression opt-in); unsupported service numbers and SVC-origin
+explicit decompression/affine opt-ins); unsupported service numbers and SVC-origin
 nesting are explicit errors.
 
 | Family | Implemented | Rejected |
@@ -502,7 +517,7 @@ nesting are explicit errors.
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
 | Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
-| Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression opt-in) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
+| Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression and affine opt-ins) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
 | Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, halfword multiplies |
 | Swap | ARM `SWP`/`SWPB`; `Rd=Rm` is allowed; unaligned word SWP rotates the loaded value by `8 * address[1:0]` but stores the source unrotated; SWPB zero-extends the loaded byte; destination and PC update only after both bus accesses succeed | R15 operands, `Rn=Rd` or `Rn=Rm` (UNPREDICTABLE), nonzero SBZ bits [11:8] |
 | Everything else | none | multiply-long/halfword multiply, coprocessor, unconditional/newer space |
@@ -688,7 +703,7 @@ is not officially defined as predictable.
 | PC-relative | `LDR` literal | — |
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
 | Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
-| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six default HLE services (the decompression opt-in is not wired into AOT) | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
+| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six default HLE services (the decompression and affine opt-ins are not wired into AOT) | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
 | Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte

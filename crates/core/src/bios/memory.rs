@@ -266,7 +266,13 @@ fn require_alignment(service: u8, addr: u32, align: u32) -> Result<()> {
     }
 }
 
-fn validate_source(bus: &Bus, service: u8, addr: u32, units: u32, width: u32) -> Result<()> {
+pub(super) fn validate_source(
+    bus: &Bus,
+    service: u8,
+    addr: u32,
+    units: u32,
+    width: u32,
+) -> Result<()> {
     let (start, end) = expanded_range(service, addr, units, width)?;
     if start < BIOS_END {
         // Fail closed instead of reading a non-existent BIOS or silently
