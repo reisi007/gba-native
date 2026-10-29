@@ -164,6 +164,22 @@ Relevant anchors actually consulted for this milestone:
   bytes and reads return them; the model never claims a flash device is absent.
   Both anchors were consulted on 2026-10-29 in the same upstream GBATEK text;
   that retrieval was not separately retained or hashed.
+- `#bios-decompression-functions`,
+  `#lz77uncompreadnormalwrite8bit-wram---swi-11h-gbands7nds9dsi7dsi9`,
+  `#lz77uncompreadnormalwrite16bit-vram---swi-12h-gba`,
+  `#rluncompreadnormalwrite8bit-wram---swi-14h-gbands7nds9dsi7dsi9`,
+  `#rluncompreadnormalwrite16bit-vram---swi-15h-gba`,
+  `#diff8bitunfilterwrite8bit-wram---swi-16h-gbands9dsi9`,
+  `#diff8bitunfilterwrite16bit-vram---swi-17h-gba` and
+  `#diff16bitunfilter---swi-18h-gbands9dsi9`: the 32-bit header layout (reserved
+  nibble, compressed type, 24-bit decompressed size), the LZ77 flag-byte and
+  back-reference encoding, the run-length flag/length encoding, the 8/16-bit
+  diff accumulation, the Wram/Vram write-unit split and the documented
+  `disp=000h` Vram limitation. Only the opt-in `DocumentedFormats` policy
+  implements these descriptions; no BIOS bytes, code or disassembly were used.
+  These anchors were consulted on 2026-10-29 in the S1 rendering at
+  <https://mgba-emu.github.io/gbatek/>, which is the same reference text;
+  that retrieval was not separately retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.

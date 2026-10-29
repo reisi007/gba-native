@@ -1,9 +1,11 @@
 //! Independently implemented, documentation-driven BIOS HLE foundation.
 //!
-//! This module provides six direct documented HLE services and a separate typed
-//! SWI/SVC wrapper. The wrapper performs framed exception entry/return without
-//! fetching BIOS bytes; each guest SWI still costs one instruction, while its
-//! internal HLE work has no cycle/scheduler model.
+//! This module provides six direct documented HLE services by default plus a
+//! separate typed SWI/SVC wrapper. An explicit, host-selected opt-in adds the
+//! documented decompression SWIs; the default keeps them unsupported. The
+//! wrapper performs framed exception entry/return without fetching BIOS bytes;
+//! each guest SWI still costs one instruction, while its internal HLE work has
+//! no cycle/scheduler model.
 //!
 //! All service implementations are derived from the public hardware interface
 //! documented in GBATEK; see `docs/clean-room/hle-services.md`. No Nintendo
@@ -11,9 +13,11 @@
 //! side effects outside the documented service outputs are invented.
 
 mod arithmetic;
+mod decompress;
 mod memory;
 mod swi;
 
+pub use decompress::DecompressionPolicy;
 pub use swi::execute_swi;
 
 use crate::bus::Bus;
@@ -63,6 +67,23 @@ pub enum BiosError {
     UnsupportedSource { service: u8, addr: u32 },
     /// The destination range is not in a write-capable memory region.
     UnsupportedDestination { service: u8, addr: u32 },
+    /// A decompression stream header does not declare the expected format.
+    DecompressHeader {
+        service: u8,
+        header: u32,
+        expected_type: u8,
+        expected_nibble: u8,
+    },
+    /// The decompressed size is not a multiple of the selected write unit.
+    DecompressUnitSize { service: u8, size: u32 },
+    /// An LZ77 back-reference points before the first decompressed byte.
+    DecompressBackReference {
+        service: u8,
+        output: u32,
+        displacement: u32,
+    },
+    /// The LZ77 halfword variant cannot use the documented non-working disp=0.
+    DecompressZeroDisplacement { service: u8 },
 }
 
 impl fmt::Display for BiosError {
@@ -110,6 +131,33 @@ impl fmt::Display for BiosError {
                 f,
                 "service 0x{service:02X}: destination range at 0x{addr:08X} is not writable memory"
             ),
+            BiosError::DecompressHeader {
+                service,
+                header,
+                expected_type,
+                expected_nibble,
+            } => write!(
+                f,
+                "service 0x{service:02X}: header 0x{header:08X} has type {} and nibble {} (expected type {expected_type}, nibble {expected_nibble})",
+                (header >> 4) & 0xF,
+                header & 0xF
+            ),
+            BiosError::DecompressUnitSize { service, size } => write!(
+                f,
+                "service 0x{service:02X}: decompressed size {size} is not a multiple of the selected write unit"
+            ),
+            BiosError::DecompressBackReference {
+                service,
+                output,
+                displacement,
+            } => write!(
+                f,
+                "service 0x{service:02X}: back-reference displacement {displacement} at output offset {output} points before the output start"
+            ),
+            BiosError::DecompressZeroDisplacement { service } => write!(
+                f,
+                "service 0x{service:02X}: disp=000h is not usable by the documented 16-bit LZ77 variant"
+            ),
         }
     }
 }
@@ -132,6 +180,13 @@ pub fn call(service: u8, cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         SERVICE_SQRT => arithmetic::sqrt(cpu),
         SERVICE_CPU_SET => memory::cpu_set(cpu, bus),
         SERVICE_CPU_FAST_SET => memory::cpu_fast_set(cpu, bus),
+        decompress::SERVICE_LZ77_8
+        | decompress::SERVICE_LZ77_16
+        | decompress::SERVICE_RL_8
+        | decompress::SERVICE_RL_16
+        | decompress::SERVICE_DIFF8_8
+        | decompress::SERVICE_DIFF8_16
+        | decompress::SERVICE_DIFF16_16 => decompress::call(service, cpu, bus),
         other => Err(Error::Bios(BiosError::UnsupportedService(other))),
     }
 }
@@ -144,6 +199,13 @@ pub(super) fn validate_call(service: u8, cpu: &Cpu, bus: &Bus) -> Result<()> {
         SERVICE_REGISTER_RAM_RESET | SERVICE_CPU_SET | SERVICE_CPU_FAST_SET => {
             memory::validate_call(service, cpu, bus)
         }
+        decompress::SERVICE_LZ77_8
+        | decompress::SERVICE_LZ77_16
+        | decompress::SERVICE_RL_8
+        | decompress::SERVICE_RL_16
+        | decompress::SERVICE_DIFF8_8
+        | decompress::SERVICE_DIFF8_16
+        | decompress::SERVICE_DIFF16_16 => decompress::validate_call(service, cpu, bus),
         other => Err(Error::Bios(BiosError::UnsupportedService(other))),
     }
 }
@@ -165,7 +227,8 @@ mod tests {
         cpu.set_reg(1, 0x9ABC_DEF0);
         let before = (cpu.state_digest(), bus.state_digest());
         for service in [
-            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x10, 0x11, 0x12, 0x14, 0x15, 0xFF,
+            0x00u8, 0x02, 0x04, 0x05, 0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+            0xFF,
         ] {
             assert_eq!(
                 call(service, &mut cpu, &mut bus),

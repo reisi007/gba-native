@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram] [--synthetic-bios-decompress]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -149,12 +149,14 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut bios_rom_writes = false;
     let mut rom_writes = false;
     let mut backup_sram = false;
+    let mut bios_decompress = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
             "--synthetic-bios-rom-writes" => bios_rom_writes = true,
             "--synthetic-rom-writes-ignored" => rom_writes = true,
             "--synthetic-backup-sram" => backup_sram = true,
+            "--synthetic-bios-decompress" => bios_decompress = true,
             "--budget" => {
                 let value = args
                     .next()
@@ -189,6 +191,10 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if backup_sram {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram32KVolatile);
     }
+    if bios_decompress {
+        bus =
+            bus.with_decompression_policy(gba_native::bios::DecompressionPolicy::DocumentedFormats);
+    }
     let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
     let output = if let Some(path) = snapshot_output {
         let image = display::snapshot(&bus)?;
@@ -213,6 +219,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!("bios_write_policy={}", bus.bios_write_policy().name());
     println!("rom_write_policy={}", bus.rom_write_policy().name());
     println!("backup_policy={}", bus.backup_policy().name());
+    println!("decompression_policy={}", bus.decompression_policy().name());
     if bios_rom_writes {
         println!(
             "bios_write_assumption=experimental documented mask-ROM no-effect writes; not BIOS data, opcodes or a compatibility claim"
@@ -221,6 +228,11 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if backup_sram {
         println!(
             "backup_assumption=experimental volatile 32 KiB SRAM; no flash engine and no persistence"
+        );
+    }
+    if bios_decompress {
+        println!(
+            "decompression_assumption=experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code; not a general BIOS implementation"
         );
     }
     if rom_writes {

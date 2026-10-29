@@ -1,9 +1,11 @@
 # Independently implemented BIOS HLE services and guest SWI path
 
 Status: six documented Rust HLE primitives are callable directly and from typed
-ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. No BIOS is
-fetched or booted; the implementation is not a general exception subsystem and
-does not establish playability. `README.md` and `gba-contract.md` state the same
+ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. An explicit,
+host-selected opt-in adds the documented LZ77, run-length and diff-filter
+decompression SWIs; without it they stay unsupported. No BIOS is fetched or
+booted; the implementation is not a general exception subsystem and does not
+establish playability. `README.md` and `gba-contract.md` state the same
 boundary.
 
 Decision background: **D8** in `docs/decisions.md` chooses documented BIOS HLE
@@ -28,6 +30,10 @@ interface reference, not an emulator implementation source.
   - `#bios-memory-copy`
   - `#swi-0bh-gbands7nds9dsi7dsi9---cpuset`
   - `#swi-0ch-gbands7nds9dsi7dsi9---cpufastset`
+  - `#bios-decompression-functions` and the `LZ77UnCompReadNormalWrite8bit/16bit`
+    (`11h`/`12h`), `RLUnCompReadNormalWrite8bit/16bit` (`14h`/`15h`) and
+    `Diff8bitUnFilterWrite8bit/16bit` / `Diff16bitUnFilter` (`16h`..`18h`)
+    entries
   - `#bios-reset-functions`
   - `#swi-01h-gba---registerramreset`
   - `#bios-halt-functions` (explicitly not implemented here)
@@ -207,6 +213,60 @@ Only r0 changes.
   and a start request outside normal mode with the internal clock is an explicit
   error. No save/persistence behavior is claimed.
 
+## Opt-in decompression services
+
+The default `DecompressionPolicy::Strict` keeps SWI `11h/12h/14h/15h/16h/17h/
+18h` explicit `BiosError::UnsupportedService` values. The explicit
+`DecompressionPolicy::DocumentedFormats` opt-in
+(`run --synthetic-bios-decompress`) enables only these documented formats:
+
+| SWI | Format | Destination stores |
+| --- | --- | --- |
+| `11h` | LZ77, "Wram" variant | 8-bit units |
+| `12h` | LZ77, "Vram" variant | 16-bit units |
+| `14h` | run-length, "Wram" variant | 8-bit units |
+| `15h` | run-length, "Vram" variant | 16-bit units |
+| `16h` | 8-bit diff filter, "Wram" variant | 8-bit units |
+| `17h` | 8-bit diff filter, "Vram" variant | 16-bit units |
+| `18h` | 16-bit diff filter | 16-bit units |
+
+The implementation is derived from the public GBATEK format descriptions, not
+from BIOS bytes or code. Its boundaries are deliberately strict:
+
+- The source address must be 4-byte aligned. The 32-bit header must have the
+  documented compressed type (`1` LZ77, `3` run-length, `8` diff filter) and a
+  reserved/data-size nibble matching the selected service; otherwise
+  `DecompressHeader` is returned before the destination is touched.
+- Byte variants accept destinations wholly inside byte-writable EWRAM or
+  IWRAM. Halfword variants accept EWRAM/IWRAM/palette/VRAM/OAM, require a
+  halfword-aligned destination and an even decompressed size, and otherwise
+  return `Misaligned`, `DecompressUnitSize` or `UnsupportedDestination`.
+  ROM, BIOS, save, I/O and unmapped destinations are not supported.
+- LZ77 `disp=000h` is rejected for `12h`: GBATEK states the Vram function works
+  only with `disp=001h..FFFh`. A back-reference before the output start is
+  `DecompressBackReference` for either LZ77 variant.
+- The service reconstructs the complete documented output byte sequence in a
+  host buffer first. A decode failure (invalid header/back-reference or an
+  exhausted readable source) therefore leaves the destination untouched; a
+  structurally valid stream that simply carries different bytes cannot be
+  detected without a checksum. The final store is not transactional; a bus
+  error part-way through it leaves the bytes already written.
+- Service preconditions (policy, header, destination range) are rejected before
+  the SVC frame. A decode failure occurs after the architectural SWI frame has
+  been entered, but before any destination store, and propagates as an explicit
+  error; the frame is not rolled back, matching the bounded non-transactional
+  error policy of the memory-copy services.
+- The decompressed size is the header's 24-bit field. No compressed-stream
+  length is inferred from the following bytes; the decoder stops exactly at the
+  declared output size.
+- `10h` BitUnPack and `13h` Huffman are not implemented. They remain explicit
+  unsupported services under both policies.
+
+Ranges are validated and the output is rebuilt before the first store, but this
+is a bounded behavior model: it does not claim BIOS cycle timing, compressed
+data produced by a particular retail BIOS, or support for every possible
+compressed stream.
+
 ## Deliberately unimplemented
 
 The following are explicit `BiosError::UnsupportedService` values, never spins
@@ -218,8 +278,10 @@ or silent successes:
 - `03h` Stop/Sleep and `27h` CustomHalt.
 - `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, affine setup and every
   other service not listed above.
-- The decompression family (`10h`..`18h`) is future work; no fake handlers are
-  installed.
+- `10h` BitUnPack and `13h` Huffman remain future work; no fake handlers are
+  installed. The LZ77/RL/diff services are implemented only under
+  `DecompressionPolicy::DocumentedFormats`; the default policy keeps them
+  unsupported.
 - BIOS bytes and BIOS boot remain absent. The runtime has a bounded,
   behavior-only VBlank IRQ dispatcher frame and handler return; it never fetches
   or reconstructs BIOS instructions. Other exception paths, IRQ nesting, FIQ,
@@ -249,6 +311,19 @@ implementation:
   checked as a pre-effect error. Reserved bits take classification precedence
   when combined with flags 5..7.
 - Dispatch: explicit `UnsupportedService` results that mutate nothing.
+
+`crates/core/src/bios/decompress/tests.rs` uses synthetic LZ77, run-length and
+diff vectors written independently of the decoder: literal/back-reference
+expansion including an overlapping back-reference, header type and reserved
+nibble failures, byte-variant rejection of VRAM, halfword alignment/even-size
+failures, `disp=0` rejection for `12h`, a back-reference before the output
+start, routed run-length/diff vectors with independent cumulative expectations,
+a zero-size no-op, destination preservation after a truncated stream, and the
+strict-policy `UnsupportedService` boundary. `crates/core/tests/bios_decompress.rs`
+runs a Thumb SWI `11h` through the real SVC frame into EWRAM (the frame itself
+uses IWRAM) and checks the
+resume address, CPSR restoration, register preservation and output bytes, plus
+the strict default's no-write failure.
 
 `crates/core/tests/swi_decode.rs` checks typed ARM/Thumb comments.
 `crates/core/tests/swi_execution.rs` checks full SVC entry/return, ARM and Thumb

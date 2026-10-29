@@ -197,9 +197,8 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 413, "full workspace test inventory changed");
-    // Inventory pins Mode 0 BG0, WASM, CLI, host input/RAM/I/O/DMA/VCOUNT,
-    // BIOS/IRQ, mask-ROM/serial and ARMv4 Thumb/exception/multiply/SWP suites.
+    assert_eq!(total, 434, "full workspace test inventory changed");
+    // Pins Mode 0 BG0, WASM, CLI, host I/O/DMA/VCOUNT, BIOS/IRQ, mask-ROM/serial and ARMv4 suites.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -214,6 +213,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("arm_swap", 5),
         ("exception_return", 7),
         ("bios_arithmetic", 6),
+        ("bios_decompress", 2),
         ("bios_dispatch", 2),
         ("bios_memory_copy", 14),
         ("bios_reset", 7),
@@ -264,7 +264,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     let root_targets = [
         ("cli_aot_build", 2),
         ("cli_output", 5),
-        ("cli_run", 8),
+        ("cli_run", 9),
         ("frontend_gates", 4),
         ("quality_counter", 10),
         ("scripts", 5),
@@ -273,7 +273,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 47);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 65);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 25);
     baseline += assert_target_count(
         &root,
@@ -284,7 +284,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 409, "selected package test inventory changed");
+    assert_eq!(baseline, 430, "selected package test inventory changed");
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.
     let help = cargo(

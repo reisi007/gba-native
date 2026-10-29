@@ -626,3 +626,42 @@ from the model, so a guest that needs HBlank still stops or waits instead of
 receiving a fabricated interrupt. D32 narrows D28's exclusion list: the
 VCOUNT-match request is now modelled, while D28's other exclusions (HBlank,
 per-line scheduling, cycle timing) still hold.
+
+## D33 — Explicit opt-in for documented decompression HLE
+
+The external run reached the guest's frame-callback path only under a
+counterfactual boot-flag write, and that path immediately called SWI `12h`
+(`LZ77UnCompReadNormalWrite16bit`) with source `0x08DC3EA4`, destination
+`0x06000000` and header `0x0004E010` (compressed type 1, 1248 bytes). The
+prototype's six-service HLE contract therefore stopped the title before any
+graphics data could be loaded. The owner approved extending the HLE with
+documented decompression formats on 2026-10-29.
+
+D33 keeps the default boundary intact. `DecompressionPolicy::Strict` remains the
+default and returns `UnsupportedService` for `11h/12h/14h/15h/16h/17h/18h`.
+Only the explicit `DecompressionPolicy::DocumentedFormats` opt-in
+(`run --synthetic-bios-decompress`) implements:
+
+- LZ77 (`11h` byte stores, `12h` halfword stores),
+- run-length (`14h` byte stores, `15h` halfword stores),
+- 8-bit diff filter (`16h` byte stores, `17h` halfword stores),
+- 16-bit diff filter (`18h` halfword stores).
+
+The formats are reimplemented from the public GBATEK descriptions (S1), never
+from BIOS bytes, code or disassembly. The header's compressed type and
+reserved/data-size nibble must match the service; the source must be 4-byte
+aligned. Byte variants accept only EWRAM/IWRAM. Halfword variants accept
+EWRAM/IWRAM/palette/VRAM/OAM but require a halfword-aligned destination and an
+even decompressed size. ROM, BIOS, save, I/O and unmapped destinations are
+explicit errors. LZ77 `disp=000h` is rejected for `12h`, matching GBATEK's note
+that the Vram variant works only with `disp=001h..FFFh`.
+
+The decoder rebuilds the documented output bytes in a host buffer before the
+first destination store, so a decode failure leaves the destination untouched;
+a structurally valid stream that simply describes different bytes cannot be
+detected without a checksum. The store itself is not transactional. `10h` BitUnPack
+and `13h` Huffman remain unimplemented and explicit unsupported services.
+
+This is a behavior-only format implementation with no BIOS timing or retail-BIOS
+compatibility claim. It narrows the "six services" boundary only for callers
+that explicitly select the policy; AOT harnesses remain on the default policy.

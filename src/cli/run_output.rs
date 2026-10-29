@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use gba_native::bios::DecompressionPolicy;
 use gba_native::bus::{BiosDataPolicy, BiosWritePolicy, Bus, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
@@ -44,6 +45,14 @@ pub(super) fn write_snapshot(
             "experimental documented mask-ROM no-effect writes; no BIOS byte is stored, read or executed"
         }
     };
+    let decompression_note = match bus.decompression_policy() {
+        DecompressionPolicy::Strict => {
+            "fail-closed; decompression SWIs are explicit unsupported-service errors"
+        }
+        DecompressionPolicy::DocumentedFormats => {
+            "experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code"
+        }
+    };
     let report = format!(
         "capture_kind=post_budget_bitmap_snapshot\n\
          rom_bytes={}\n\
@@ -54,6 +63,8 @@ pub(super) fn write_snapshot(
          bios_write_note={}\n\
          rom_write_policy={}\n\
          backup_policy={}\n\
+         decompression_policy={}\n\
+         decompression_note={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -80,6 +91,8 @@ pub(super) fn write_snapshot(
         bios_write_note,
         bus.rom_write_policy().name(),
         bus.backup_policy().name(),
+        bus.decompression_policy().name(),
+        decompression_note,
         requested_budget,
         used_budget,
         stop_reason,

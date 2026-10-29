@@ -42,7 +42,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
 | ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases align only the transfer address down while writeback uses the original base (Design) |
 | ARM `SWP`/`SWPB` | Implemented for documented ARMv4T forms; `Rd=Rm` is valid and unpredictable aliases are rejected; independent interpreter/AOT vectors |
-| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing |
+| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing. Explicit experimental `--synthetic-bios-decompress` adds documented LZ77/RL/diff SWIs (not BitUnPack or Huffman); the default stays fail-closed |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
 | Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No flash command engine, save type or persistence is modelled; the backup window is governed by its own policy below |
@@ -67,7 +67,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram] [--synthetic-bios-decompress]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
@@ -81,14 +81,21 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   writes a PPM. The guest itself draws the image via ARM setup, a BX to Thumb,
   a Thumb pixel loop and a Thumb BX back.
 - `run` initializes the documented guest BIOS stacks and executes a bounded
-  number of instructions, including typed SWIs to the six HLE services. Other
-  services return explicit errors. Reaching the budget is not a boot or frame
-  claim. BIOS data reads fail closed by default. `--synthetic-bios-zero-fill`
+  number of instructions, including typed SWIs to the six default HLE services.
+  Other services return explicit errors unless an opt-in below enables them.
+  Reaching the budget is not a boot or frame claim. BIOS data reads fail closed
+  by default. `--synthetic-bios-zero-fill`
   is an explicit experimental opt-in that returns zero for every BIOS data read
   width (`0x00000000..=0x00003FFF`); it is reported as
   `bios_data_policy=synthetic-zero-fill` and is neither authentic BIOS data or
   opcodes nor hardware behavior. BIOS fetches and writes stay rejected under
-  both policies. Without `--out`, it creates no files. With `--out`, after both
+  both policies. `--synthetic-bios-decompress` is an explicit experimental
+  opt-in for the documented LZ77 (`11h`/`12h`), run-length (`14h`/`15h`) and
+  diff-filter (`16h`/`17h`/`18h`) SWIs; it is reported as
+  `decompression_policy=documented-formats`. The default is `strict`, which
+  keeps the whole decompression family explicit unsupported-service errors.
+  BitUnPack (`10h`) and Huffman (`13h`) remain unsupported under either policy.
+  Without `--out`, it creates no files. With `--out`, after both
   execution and the static bitmap snapshot succeed, it creates a fresh directory
   containing `screen.ppm` and `report.txt`. The report records the ROM and image
   hashes, requested/used instruction budget, selected BIOS data policy, final
@@ -334,7 +341,8 @@ open pending independent verification and CI; local tests alone do not close it.
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
-  SVC frame, six-service HLE dispatch and full CPSR return. VBlank and
+  SVC frame, six default-service HLE dispatch (with opt-in decompression) and
+  full CPSR return. VBlank and
   timer-overflow IRQ dispatch uses the documented six-word IRQ frame, ARM
   handler pointer and bounded exception return without fetching BIOS code; BIOS
   boot and timing are not implemented.
@@ -346,7 +354,8 @@ open pending independent verification and CI; local tests alone do not close it.
   halves of `BL`, `BX`, literal `LDR`, word/byte register and immediate
   transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
   register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
-  unconditional `B`, and typed SWI to the six documented HLE services. The
+  unconditional `B`, and typed SWI to the six default documented HLE services
+  (with the explicit decompression opt-in). The
   ARMv5 `BLX` second half and register form are rejected; the ARMv4 empty-list
   `LDMIA`/`STMIA` R15/`+0x40` quirk is implemented while empty stack lists remain
   explicit errors. An unaligned SP/base aligns

@@ -26,6 +26,7 @@ pub use irq::{
 };
 pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
+use crate::bios::DecompressionPolicy;
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
 use crate::sha256;
@@ -162,6 +163,7 @@ pub struct Bus {
     bios_write_policy: BiosWritePolicy,
     rom_write_policy: RomWritePolicy,
     backup_policy: BackupPolicy,
+    decompression_policy: DecompressionPolicy,
     backup: Vec<u8>,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
@@ -200,6 +202,7 @@ impl Bus {
             bios_write_policy: BiosWritePolicy::Strict,
             rom_write_policy: RomWritePolicy::Strict,
             backup_policy: BackupPolicy::Strict,
+            decompression_policy: DecompressionPolicy::Strict,
             backup: vec![0xFF; SAVE_LEN],
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
@@ -255,6 +258,23 @@ impl Bus {
 
     pub fn backup_policy(&self) -> BackupPolicy {
         self.backup_policy
+    }
+
+    /// Selects the explicit opt-in for documented decompression HLE.
+    ///
+    /// Under [`DecompressionPolicy::DocumentedFormats`] SWI `11h/12h/14h/15h/
+    /// 16h/17h/18h` implement only the public LZ77, run-length and diff-filter
+    /// formats. The default [`DecompressionPolicy::Strict`] keeps them explicit
+    /// unsupported-service errors. This is host configuration, not guest state,
+    /// and is excluded from [`Bus::state_digest`].
+    #[must_use]
+    pub fn with_decompression_policy(mut self, policy: DecompressionPolicy) -> Self {
+        self.decompression_policy = policy;
+        self
+    }
+
+    pub fn decompression_policy(&self) -> DecompressionPolicy {
+        self.decompression_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.

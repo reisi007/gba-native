@@ -165,7 +165,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   dependency on a JIT.
 - Do not silently turn unsupported instructions, I/O, PPU features or vendor
   backends into successful no-ops or nearest-neighbor fallbacks.
-- Guest SWI support is limited to the six documented HLE services. Preserve
+- Guest SWI support is limited to the six documented HLE services by default.
+  The documented LZ77/RL/diff decompression SWIs are an explicit, host-selected
+  opt-in (`DecompressionPolicy::DocumentedFormats`); do not enable them by
+  default or add further services without a reviewed contract change. Preserve
   explicit errors for unsupported services and SVC-origin nested SWIs; do not
   fetch or synthesize BIOS instruction bytes. The current ascending SVC-frame
   slot order is a bounded design policy, not a Nintendo BIOS compatibility
@@ -197,7 +200,8 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   nearest/letterbox, PPM.
 - `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
 - `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
-  `arithmetic.rs`, `memory.rs`) plus typed guest SWI framing/dispatch (`swi.rs`).
+  `arithmetic.rs`, `memory.rs`), the opt-in documented decompression formats
+  (`decompress.rs`), and typed guest SWI framing/dispatch (`swi.rs`).
 - `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
   `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),

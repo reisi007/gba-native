@@ -1133,3 +1133,48 @@ must not be synthesized from BIOS bytes. The next blocking capability is
 therefore decompression HLE (and possibly the related Huffman/RL entries), a
 scope decision, not a rendering defect. No start screen, frame or compatibility
 result is claimed.
+
+## Round: opt-in decompression HLE (2026-10-29)
+
+The previous round's counterfactual stopping point was SWI `12h` after 1,678
+instructions. The owner approved extending the HLE with the documented
+decompression formats under an explicit host policy (D33). The default remains
+`DecompressionPolicy::Strict`, in which `11h/12h/14h/15h/16h/17h/18h` are
+explicit `UnsupportedService` errors. `DocumentedFormats`
+(`run --synthetic-bios-decompress`) implements LZ77, run-length, 8-bit diff and
+16-bit diff from the public GBATEK format descriptions; BitUnPack (`10h`) and
+Huffman (`13h`) remain unsupported.
+
+The implementation validates the 4-byte-aligned source, the header's reserved
+nibble/type and the destination before the first store. Byte variants accept
+only EWRAM/IWRAM; halfword variants accept EWRAM/IWRAM/palette/VRAM/OAM and
+require a halfword-aligned destination and an even size. LZ77 `disp=000h` is
+rejected for `12h` per GBATEK's documented Vram limitation. Output is rebuilt
+in a host buffer, so a decode failure leaves the destination untouched; a
+structurally valid stream that simply describes different payload bytes cannot
+be detected without a checksum. Synthetic tests are in `crates/core/src/bios/decompress/tests.rs`
+(18 vectors including an overlapping back-reference, both halfword routes,
+source alignment, policy-digest independence, a source-exhaustion case and a
+zero-size unsupported destination) and
+`crates/core/tests/bios_decompress.rs` (2 SWI-frame tests); `tests/cli_run.rs`
+pins the explicit policy line and assumption. Inventory pins: 434 listed / 430
+selected, `--lib` 65, `cli_run` 9, `bios_decompress` 2.
+
+External evidence uses the same read-only ROM (SHA-256
+`7c599c56849efeebeb93bd71f714932ae4cdf980db51c9c1016b4431057f71d4`) and the
+same **counterfactual** boot-flag write as the previous round; the observer is a
+throwaway under `target/`, not a repository artifact. Without the opt-in the run
+stops at SWI `12h` after 1,678 instructions. With
+`--synthetic-bios-decompress` semantics enabled, the same run passes that call
+and continues to step 16,593,186, where it stops on the 32 KiB backup model at
+`0x0E008000` (`save hardware ... is not implemented`). A throwaway experiment
+that raises the volatile SRAM model to the documented 64 KiB maximum (not a
+committed change) advances to step 18,911,571 and then stops on SWI `0Fh`
+(`ObjAffineSet`), which remains outside the HLE contract.
+
+The reached state is still not a start screen: `DISPCNT=0x0000` (mode 0, forced
+blank clear, no layer enable), palette backdrop `0x0000` and a black mode-0
+snapshot (`image_sha256=d8b44303...`) are observed. No frame, boot, gameplay or
+compatibility claim is made. The next capability decisions are the backup
+device size and `ObjAffineSet`, not a rendering defect. `10h`/`13h` also remain
+unimplemented in the decompression family.

@@ -422,3 +422,42 @@ fn run_synthetic_backup_sram_is_explicit_and_reported_once() {
         "{report}"
     );
 }
+
+#[test]
+fn run_synthetic_bios_decompress_is_explicit_and_reported_once() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    synthetic_rom(&cwd.join("plain.gba"), &[(0, 0xE3A0_0000)]);
+
+    let output = cli(
+        &cwd,
+        &[
+            "run",
+            "plain.gba",
+            "--budget",
+            "1",
+            "--synthetic-bios-decompress",
+            "--out",
+            "output/decompress",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("decompression_policy=documented-formats"),
+        "stdout is missing the selected decompression policy"
+    );
+    assert_eq!(
+        stdout.matches("decompression_assumption=").count(),
+        1,
+        "the decompression assumption must be printed exactly once"
+    );
+    let report =
+        std::fs::read_to_string(cwd.join("output/decompress/report.txt")).expect("run report");
+    assert!(
+        report.contains("decompression_policy=documented-formats"),
+        "{report}"
+    );
+    assert!(report.contains("decompression_note="), "{report}");
+}
