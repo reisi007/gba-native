@@ -44,6 +44,11 @@ pub(super) fn emit_block(out: &mut String, block: &AotBlock) -> Result<()> {
 }
 
 fn emit_instruction(out: &mut String, instruction: &IrInstr) -> Result<()> {
+    writeln!(
+        out,
+        "    if gba_native::interpret::deliver_pending_irq(cpu, bus) {{ return Ok(Next::Continue); }}"
+    )
+    .unwrap();
     match instruction.op {
         Op::B { target } => emit_direct_branch(out, instruction, target, false),
         Op::Bl { target } => emit_direct_branch(out, instruction, target, true),

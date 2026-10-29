@@ -105,7 +105,13 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
         .unwrap();
     }
     writeln!(out, "            _ => {{").unwrap();
+    writeln!(
+        out,
+        "                interpret::deliver_pending_irq(cpu, bus);"
+    )
+    .unwrap();
     writeln!(out, "                interpret::step(cpu, bus)?;").unwrap();
+    writeln!(out, "                bus.tick_frame();").unwrap();
     writeln!(out, "                remaining -= 1;").unwrap();
     writeln!(out, "                fallbacks += 1;").unwrap();
     writeln!(out, "                Next::Continue").unwrap();

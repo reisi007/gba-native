@@ -284,3 +284,175 @@ opt-in with synthetic fixtures only.
 This is not an authentic BIOS opcode source, not hardware behavior and not a
 boot, timing or compatibility claim. It does not relax the prohibition on BIOS
 image handling, disassembly outside D16's narrow process, or ROM modification.
+
+## D18 — Unaligned block/stack bases align only the transfer address
+
+Decided by the owner on 2026-10-29 to continue bounded local hardware-test-ROM
+experiments within the clean-room rules. GBATEK states that the low address bits
+of an ARM/Thumb block or stack base are ignored. It does not establish whether
+writeback derives from the original or the aligned base. This prototype now
+resolves that gap as a stated **Design** policy rather than rejecting the
+instruction:
+
+- The addressing mode is evaluated against `base & !3`, so every transferred
+  word lies in the aligned block or stack range.
+- Writeback, and the PUSH/POP SP update, always use the original, unmodified
+  base register: `base ± transfer_size`.
+- Base-in-list special cases are unchanged; a stored base value is still the
+  original register value.
+
+`gba_native::memory::aligned_block_base` is the single shared helper for the
+reference interpreter and the generated native code. Focused ARM and Thumb
+tests cover aligned and unaligned transfers, writeback and base-in-list, and an
+AOT parity fixture asserts that generated execution matches the reference.
+
+This is not a hardware-conformance claim. It does not establish cycle timing,
+commercial-ROM compatibility or playability.
+
+## D19 — ARM `S=1, Rd=PC` restores an existing SPSR only
+
+Decided by the owner on 2026-10-29 to continue bounded local hardware-test-ROM
+experiments within the clean-room rules. GBATEK
+`#arm-opcodes-data-processing-alu` states that an ARM data-processing
+instruction with `S=1` and `Rd=R15` restores the CPSR from the current mode's
+SPSR and takes the computed result as the PC. This is documented CPU state
+transfer, so the form is implemented instead of rejected:
+
+- `Cpu::return_from_exception` validates that the current mode has an SPSR and
+  that its saved mode is one of the seven ARM7TDMI modes before mutating state;
+  USER/SYSTEM and invalid saved modes remain explicit errors.
+- The restored CPSR replaces the ordinary `S=1` N/Z/C/V result, and the
+  restored T bit determines PC alignment. Mode and T may change; MSR remains
+  unable to change T.
+- The reference interpreter and generated native code use the same helper.
+  Discovery treats the operation as a PC write and invalidates cached banked
+  registers across the CPSR control change.
+
+This performs no exception entry and fetches no BIOS code. It is not a
+hardware-conformance, timing, commercial-ROM or playability claim.
+
+## D20 — Implement the documented Thumb empty block-list quirk
+
+Decided by the owner on 2026-10-29 to continue bounded local hardware-test-ROM
+experiments within the clean-room rules. GBATEK
+`#thumb-opcodes-memory-multiple-loadstore-pushpop-and-ldmstm` documents the
+ARMv4 Thumb empty `LDMIA`/`STMIA` list as an R15 transfer with `Rb` advanced by
+`0x40`. It is implemented explicitly rather than treated as a NOP or rejected:
+
+- Empty `STMIA` transfers R15; its stored value is the address of the STM
+  instruction plus 6, matching the visible PC of a following Thumb instruction.
+  This is checked against `MOV Rd,PC` and by black-box ROM test 229. Empty
+  `LDMIA` loads PC, clears bit 0 and remains in Thumb state, following this
+  prototype's existing Thumb PC-load rule.
+- The transfer address uses the accepted block-alignment policy; base writeback
+  is the original base plus `0x40`.
+- Empty `PUSH`/`POP` remain unsupported. Interpreter and emitted native code
+  implement the same behavior, with control-flow metadata marking empty LDMIA
+  as a dynamic PC write.
+
+This is a bounded CPU behavior implementation, not a hardware-conformance,
+timing, commercial-ROM or playability claim.
+
+## D21 — Deterministic prototype behavior for multiply `Rd=Rm` aliases
+
+Decided by the owner on 2026-10-29 to continue the local `thumb.gba` and
+`hello.gba` black-box tests. GBATEK
+`#arm-opcodes-multiply-and-multiply-accumulate-mul-mla` classifies `MUL` and
+`MLA` with `Rd=Rm` as unpredictable on ARM7TDMI, so no hardware result is
+claimed. The prototype adopts this explicit deterministic policy for those
+destination/multiplicand aliases:
+
+- Both multiplicands are read from the pre-instruction CPU state; the low
+  32-bit product is written to `Rd`, including when `Rd=Rm`.
+- For `MLA Rd=Rm`, the accumulator is also read before `Rd` is overwritten; the
+  low 32-bit product-plus-accumulator is written to `Rd`.
+- Existing `MULS` flag behavior is unchanged: N/Z follow the result, C is
+  preserved as the existing design choice, and V is unchanged.
+- The same operation is emitted by AOT and tested against independent expected
+  values. Other unpredictable aliases and all unrelated unsupported
+  instructions remain explicit errors.
+
+This design extension may let a local test ROM progress but establishes neither
+ARM7TDMI behavior nor compatibility. Only a visible PASS marker drawn by the ROM
+counts as its test result.
+
+## D22 — Test-driven prototype VRAM aliases
+
+Decided by the owner on 2026-10-29 after `memory.gba` advanced past its palette
+alias test and stopped at `0x06020000`. GBATEK
+`#gba-memory-map` lists `0x06018000..0x06FFFFFF` as unused, but the local
+black-box suite tests two video-memory aliases. The prototype adopts these
+explicit policies to advance that suite:
+
+- The VRAM address window `0x06000000..=0x06FFFFFF` repeats a 128 KiB aperture.
+- In display modes 0..=2, aperture offsets `0x18000..=0x1FFFF` map to
+  `0x10000..=0x17FFF`; in bitmap modes those offsets stay unmapped.
+- Other memory behavior, including OAM boundaries and open-bus reads, remains
+  unchanged and fail-closed.
+
+Core bus vectors check the 128 KiB alias, tiled-mode 32 KiB alias and
+bitmap-mode unmapped boundary. A generated-native fixture checks the first two;
+the bitmap-mode boundary remains a core-bus-only assertion. This test-driven
+extension is not a hardware-map or compatibility claim.
+
+## D23 — Narrow test-driven OAM alias
+
+Decided by the owner on 2026-10-29 after `memory.gba` passed the palette and
+VRAM mirror cases and stopped at its OAM mirror case. GBATEK
+`#gba-memory-map` lists `0x07000400..0x07FFFFFF` as unused; the prototype adds
+only the exact alias the local black-box test checks:
+
+- `0x07000400..=0x070007FF` maps to OAM offsets `0x000..=0x3FF`.
+- `0x07000800` and later addresses remain unmapped.
+- All existing OAM access-width rules, including ignored byte stores, apply
+  equally through the alias.
+
+Core bus vectors and a generated-native fixture verify the alias. It is a
+test-driven prototype extension, not a hardware-map or compatibility claim.
+
+## D24 — ARMv2 P-variant remains unsupported on ARM7TDMI
+
+Rechecked on 2026-10-29 while investigating `arm.gba`'s `CMP` encoding
+`0xE15FF000`. GBATEK's data-processing reference describes the `Rd=R15`
+P-variant result/PSR behavior as applying to ARMv2 and below only. ARM7TDMI's
+technical reference identifies its core as ARMv4T. Its §6.5 describes compare
+and test operations as producing no data result, but does not classify a
+nonzero `Rd` field. Both the ARM Architecture Reference Manual DDI0100E §4.1.14
+and DDI0100I §A4.1.15 label the `CMP` bits [15:12] `SBZ`; both manuals list
+`CMP` for ARMv4T and define nonzero SBZ values as UNPREDICTABLE. Thus no
+ARMv4T behavior is defined for this encoding. The decoder continues to reject
+nonzero `Rd` fields on test operations instead of emulating the older P-variant
+or guessing an ARMv4T result.
+
+This preserves the fail-closed boundary rather than making a local test pass via
+an unsupported CPU behavior. The blocked ROM result is recorded in
+`tests/roms/gba-tests/README.md`.
+
+## D25 — Implement documented ARMv4T swap instructions
+
+Decided 2026-10-29 while surveying the remaining `arm.gba` instruction families.
+ARM Architecture Reference Manual DDI0100E §4.1.51–52 documents `SWP`/`SWPB`;
+the operations are generic ARMv4T behavior, unlike the earlier blocked ARMv2
+P-variant tests. Implement the word and byte forms in shared IR, interpreter and
+AOT emission, including ARM7's unaligned word-load rotation and unrotated store.
+Permit the documented `Rd=Rm` alias and reject R15 operands, `Rn=Rd`/`Rn=Rm`
+aliases and nonzero SBZ bits rather than guessing unpredictable behavior.
+
+The runtime executes the operation as one non-timed guest step. It models no
+mid-instruction scheduling, cycle-accurate bus arbitration or DMA interaction.
+Synthetic independent tests cover the memory effects and AOT constant
+invalidation. `arm.gba` remains blocked earlier at test 234 and is not claimed to
+pass because the later swap cases are implemented.
+
+## D26 — Test-driven prototype palette alias
+
+Recorded 2026-10-29 for the existing owner-approved extension exercised by the
+optional `memory.gba` black-box mirror test. GBATEK `#gba-memory-map` lists
+addresses after the physical 1 KiB palette region as unused; this prototype
+maps the 16 MiB `0x05000000..=0x05FFFFFF` window to that 1 KiB storage using the
+low ten address bits.
+
+The existing palette access-width rules apply through the alias. Core bus
+vectors and a generated-native synthetic fixture cover alias reads/writes. This
+is a test-driven design extension, not a hardware-map or retail-compatibility
+claim; no other unmapped region is relaxed by this decision.

@@ -199,30 +199,31 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 336, "full workspace test inventory changed");
+    assert_eq!(total, 373, "full workspace test inventory changed");
 
-    // Exact inventory retains prior families and includes the Mode 0 BG0 slice,
-    // WASM-module tests, synthetic CLI run-snapshot regressions, host-input,
-    // mirrored-RAM, ignored-I/O, host-triggered Sound FIFO DMA, VCOUNT
-    // byte-lane and synthetic BIOS data-policy regressions.
+    // Inventory pins Mode 0 BG0, WASM modules, CLI snapshots, host input, RAM,
+    // ignored I/O, FIFO DMA, VCOUNT byte lanes, BIOS policy, and AOT IRQ fallback;
+    // ARMv4 Thumb empty-list, exception return, multiply, SWP/SWPB, and video mirrors.
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
     let core_targets = [
         ("arm_alu", 6),
-        ("arm_control", 9),
+        ("arm_control", 10),
         ("arm_halfword", 5),
         ("arm_halfword_extended", 8),
         ("arm_memory", 8),
         ("arm_shift", 4),
-        ("arm_block", 9),
+        ("arm_block", 10),
+        ("arm_swap", 5),
+        ("exception_return", 7),
         ("bios_arithmetic", 6),
         ("bios_dispatch", 2),
         ("bios_memory_copy", 14),
         ("bios_reset", 7),
-        ("bus", 15),
+        ("bus", 18),
         ("cartridge", 6),
-        ("cpu", 13),
+        ("cpu", 14),
         ("demo", 3),
         ("display", 5),
         ("display_mode0", 8),
@@ -234,24 +235,29 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("swi_decode", 3),
         ("swi_execution", 10),
         ("thumb_alu", 7),
-        ("thumb_block", 6),
+        ("thumb_block", 8),
         ("thumb_control", 5),
         ("thumb_memory", 7),
     ];
     let aot_targets = [
-        ("aot_alu", 2),
-        ("aot_block", 3),
+        ("aot_alu", 3),
+        ("aot_block", 5),
+        ("aot_block_unaligned", 2),
+        ("aot_fallback", 2),
         ("aot_control", 4),
         ("aot_halfword", 1),
-        ("aot_memory", 2),
+        ("aot_memory", 3),
         ("aot_native", 5),
+        ("aot_exception_return", 2),
         ("aot_psr", 3),
         ("aot_ram", 1),
         ("aot_swi", 2),
         ("aot_swi_errors", 5),
         ("aot_swi_services", 1),
-        ("aot_target_build", 4),
+        ("aot_swap", 2),
+        ("aot_target_build", 5),
         ("aot_thumb_alu", 1),
+        ("aot_video_memory", 1),
     ];
     let root_targets = [
         ("cli_aot_build", 2),
@@ -266,7 +272,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
     baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 41);
-    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 22);
+    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 25);
     baseline += assert_target_count(
         &root,
         &target,
@@ -276,7 +282,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 332, "selected package test inventory changed");
+    assert_eq!(baseline, 369, "selected package test inventory changed");
 
     // Bare/default-run CLI from the repository root, then manifest invocations
     // from an unrelated working directory that owns all generated output.

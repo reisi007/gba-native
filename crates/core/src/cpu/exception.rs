@@ -1,5 +1,6 @@
 use crate::cpu::{Cpu, FLAG_I, FLAG_T, IRQ_STACK, MODE_MASK, Mode, SVC_STACK, USER_STACK};
 use crate::error::{Error, Result};
+use crate::semantics;
 
 impl Cpu {
     /// Set the GBA BIOS stack tops documented at `#gba-bios-ram-usage`.
@@ -86,6 +87,32 @@ impl Cpu {
         }
         self.cpsr = status;
         self.pc = resume_pc;
+        Ok(())
+    }
+
+    /// Documented ARM exception return: an `S=1` data-processing instruction
+    /// with `Rd=R15` restores the CPSR from the current mode's SPSR and takes
+    /// the instruction's computed result as the new PC.
+    ///
+    /// Unlike an MSR control write, the restored control byte may change the T
+    /// bit and the mode, because the whole interrupted state comes back at once.
+    /// The saved SPSR is validated before any state changes, and USER/SYSTEM
+    /// have no SPSR at all, so those forms stay explicit errors instead of
+    /// fabricating a status register. The caller must not apply the ordinary
+    /// `S=1` NZCV result afterwards: the restored CPSR replaces it.
+    pub fn return_from_exception(&mut self, computed_pc: u32) -> Result<()> {
+        let status = self.spsr[self.mode().bank()].ok_or(Error::Psr(
+            "S=1 with Rd=PC requires an SPSR restore from the current mode, \
+             but USER/SYSTEM has no SPSR",
+        ))?;
+        if Mode::from_bits(status).is_none() {
+            return Err(Error::Psr(
+                "SPSR used by an S=1 with Rd=PC exception return holds an invalid mode",
+            ));
+        }
+        self.cpsr = status;
+        // The restored T bit decides the alignment of the computed target.
+        self.pc = semantics::aligned_pc(computed_pc, status & FLAG_T != 0);
         Ok(())
     }
 }

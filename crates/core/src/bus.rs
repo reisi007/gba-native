@@ -239,12 +239,6 @@ fn is_bios(addr: u32) -> bool {
     (BIOS_BASE..BIOS_BASE + BIOS_LEN as u32).contains(&addr)
 }
 
-fn offset_in(addr: u32, base: u32, len: usize) -> Option<usize> {
-    addr.checked_sub(base)
-        .map(|offset| offset as usize)
-        .filter(|offset| *offset < len)
-}
-
 fn require_halfword(addr: u32) -> Result<()> {
     if addr.is_multiple_of(2) {
         Ok(())

@@ -21,6 +21,49 @@ pub(super) fn mirror_offset(addr: u32, base: u32, len: usize) -> Option<usize> {
     Some((offset as usize) & (len - 1))
 }
 
+/// Owner-approved prototype extension from the local black-box mirror test:
+/// alias 1 KiB palette RAM through the 16 MiB `0x05xxxxxx` address window.
+/// GBATEK labels addresses after `0x050003FF` unused, so this is not a
+/// hardware-map claim.
+pub(super) fn palette_mirror_offset(addr: u32) -> Option<usize> {
+    let offset = addr.checked_sub(PALETTE_BASE)?;
+    const WINDOW: u32 = 0x0100_0000;
+    if offset >= WINDOW {
+        return None;
+    }
+    Some((offset as usize) & (PALETTE_LEN - 1))
+}
+
+/// Owner-approved test-driven VRAM aliases over the 16 MiB video window.
+/// The 128 KiB aperture repeats; its final 32 KiB hole aliases the final
+/// 32 KiB of physical VRAM only in tiled modes 0..=2. Other accesses into that
+/// hole remain unmapped. GBATEK labels the window after physical VRAM unused,
+/// so this is an explicit prototype extension rather than a hardware-map claim.
+pub(super) fn vram_mirror_offset(addr: u32, display_mode: u16) -> Option<usize> {
+    let offset = addr.checked_sub(VRAM_BASE)?;
+    const WINDOW: u32 = 0x0100_0000;
+    if offset >= WINDOW {
+        return None;
+    }
+    let aperture_offset = (offset as usize) & 0x1_FFFF;
+    if aperture_offset < VRAM_LEN {
+        return Some(aperture_offset);
+    }
+    if display_mode <= 2 {
+        Some(aperture_offset - 0x8000)
+    } else {
+        None
+    }
+}
+
+/// Narrow owner-approved prototype extension for the local OAM mirror test:
+/// the immediately following 1 KiB window aliases physical OAM. GBATEK lists
+/// this address range as unused, so this is not a hardware-map claim.
+pub(super) fn oam_mirror_offset(addr: u32) -> Option<usize> {
+    let offset = addr.checked_sub(OAM_BASE)? as usize;
+    (offset < OAM_LEN * 2).then_some(offset & (OAM_LEN - 1))
+}
+
 impl Bus {
     /// I/O writes that no modelled register claimed. Kept out of the state
     /// digest: they are an observation about the model, not guest state.
@@ -67,13 +110,13 @@ impl Bus {
         if let Some(offset) = mirror_offset(addr, IWRAM_BASE, IWRAM_LEN) {
             return Ok(self.iwram[offset]);
         }
-        if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
+        if let Some(offset) = palette_mirror_offset(addr) {
             return Ok(self.palette[offset]);
         }
-        if let Some(offset) = offset_in(addr, VRAM_BASE, VRAM_LEN) {
+        if let Some(offset) = vram_mirror_offset(addr, self.dispcnt() & 7) {
             return Ok(self.vram[offset]);
         }
-        if let Some(offset) = offset_in(addr, OAM_BASE, OAM_LEN) {
+        if let Some(offset) = oam_mirror_offset(addr) {
             return Ok(self.oam[offset]);
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
@@ -135,19 +178,19 @@ impl Bus {
                 .read16(addr, self.pressed_keys)
                 .unwrap_or(Err(Error::UnsupportedIoRead { addr, width: 16 }));
         }
-        if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
+        if let Some(offset) = palette_mirror_offset(addr) {
             return Ok(u16::from_le_bytes([
                 self.palette[offset],
                 self.palette[offset + 1],
             ]));
         }
-        if let Some(offset) = offset_in(addr, VRAM_BASE, VRAM_LEN) {
+        if let Some(offset) = vram_mirror_offset(addr, self.dispcnt() & 7) {
             return Ok(u16::from_le_bytes([
                 self.vram[offset],
                 self.vram[offset + 1],
             ]));
         }
-        if let Some(offset) = offset_in(addr, OAM_BASE, OAM_LEN) {
+        if let Some(offset) = oam_mirror_offset(addr) {
             return Ok(u16::from_le_bytes([self.oam[offset], self.oam[offset + 1]]));
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
@@ -204,9 +247,9 @@ impl Bus {
         }
         // Palette, VRAM and OAM are 16-bit devices; assemble a word from two
         // implemented halfword accesses.
-        if offset_in(addr, PALETTE_BASE, PALETTE_LEN).is_some()
-            || offset_in(addr, VRAM_BASE, VRAM_LEN).is_some()
-            || offset_in(addr, OAM_BASE, OAM_LEN).is_some()
+        if palette_mirror_offset(addr).is_some()
+            || vram_mirror_offset(addr, self.dispcnt() & 7).is_some()
+            || oam_mirror_offset(addr).is_some()
         {
             let low = self.read16(addr)? as u32;
             let high = self.read16(addr + 2)? as u32;
@@ -240,21 +283,21 @@ impl Bus {
             self.record_ignored_io_write(addr);
             return Ok(());
         }
-        if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
+        if let Some(offset) = palette_mirror_offset(addr) {
             // GBATEK: byte stores to 16-bit palette memory duplicate the byte.
             let aligned = offset & !1;
             self.palette[aligned] = value;
             self.palette[aligned + 1] = value;
             return Ok(());
         }
-        if let Some(offset) = offset_in(addr, VRAM_BASE, VRAM_LEN) {
+        if let Some(offset) = vram_mirror_offset(addr, self.dispcnt() & 7) {
             // Same documented byte-store duplication for VRAM.
             let aligned = offset & !1;
             self.vram[aligned] = value;
             self.vram[aligned + 1] = value;
             return Ok(());
         }
-        if offset_in(addr, OAM_BASE, OAM_LEN).is_some() {
+        if oam_mirror_offset(addr).is_some() {
             // OAM has no byte-write path; the store has no effect.
             return Ok(());
         }
@@ -304,15 +347,15 @@ impl Bus {
             self.record_ignored_io_write(addr);
             return Ok(());
         }
-        if let Some(offset) = offset_in(addr, PALETTE_BASE, PALETTE_LEN) {
+        if let Some(offset) = palette_mirror_offset(addr) {
             self.palette[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
             return Ok(());
         }
-        if let Some(offset) = offset_in(addr, VRAM_BASE, VRAM_LEN) {
+        if let Some(offset) = vram_mirror_offset(addr, self.dispcnt() & 7) {
             self.vram[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
             return Ok(());
         }
-        if let Some(offset) = offset_in(addr, OAM_BASE, OAM_LEN) {
+        if let Some(offset) = oam_mirror_offset(addr) {
             self.oam[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
             return Ok(());
         }
@@ -358,9 +401,9 @@ impl Bus {
         if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
             return Err(Error::UnsupportedSave { addr });
         }
-        if offset_in(addr, PALETTE_BASE, PALETTE_LEN).is_some()
-            || offset_in(addr, VRAM_BASE, VRAM_LEN).is_some()
-            || offset_in(addr, OAM_BASE, OAM_LEN).is_some()
+        if palette_mirror_offset(addr).is_some()
+            || vram_mirror_offset(addr, self.dispcnt() & 7).is_some()
+            || oam_mirror_offset(addr).is_some()
         {
             self.write16(addr, value as u16)?;
             self.write16(addr + 2, (value >> 16) as u16)?;

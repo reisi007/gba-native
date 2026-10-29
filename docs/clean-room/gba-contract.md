@@ -25,8 +25,8 @@ not a roadmap promise and not a retail-game compatibility statement.
   PSR transfers and MSR-driven register banking are implemented for this
   subset. Typed ARM/Thumb SWI reaches the six documented BIOS HLE services via
   explicit SVC entry, a saved handler frame, SYSTEM-mode service execution and
-  architectural SWI return. Other exception classes, the long and halfword
-  multiply group, swap and BIOS boot remain absent.
+  architectural SWI return. Other exception classes, multiply-long and
+  halfword-multiply instructions, and BIOS boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
   `apps/desktop` and `apps/web` packages present the same static synthetic
   snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
@@ -72,8 +72,10 @@ explicitly. The CLI guest runner and generated AOT harness do so. The
 interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
 it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
 runs the service in SYSTEM mode and returns through full CPSR restoration.
-Other exception classes, IRQ delivery and BIOS instruction fetch remain
-unsupported. BIOS data reads are governed by the policy below.
+Other exception classes and BIOS instruction fetch remain unsupported. The
+bounded IRQ request/entry design is described below; it does not implement the
+GBA BIOS dispatcher frame or handler return. BIOS data reads are governed by the
+policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
@@ -154,9 +156,24 @@ is misaligned, underflows, or is outside work RAM is rejected before framing.
 SP to `0x03007FA0`, and SVC SP to `0x03007FE0`. It is not implicit in
 `Cpu::direct_entry()`. The `run` command and generated AOT harness initialize
 these stack tops; synthetic direct-entry tests remain unchanged unless they opt
-in. This model has no IRQ delivery, BIOS code fetch, cycle timing, scheduler or
-wait-state accounting inside the HLE handler. A bus failure after exception
-entry is terminal and is not rolled back.
+in. HLE handler internals have no cycle, scheduler or wait-state accounting. A
+bus failure after exception entry is terminal and is not rolled back.
+
+### Bounded IRQ delivery (partial; Design)
+
+The host-driven instruction-count frame model raises the VBlank request. Between
+guest instructions, the runner enters a handler only when IRQs are unmasked,
+IME and a matching IE/IF bit are set, and the nonzero handler pointer at
+`0x03007FFC` is present. The current bounded entry saves the old CPSR in
+`SPSR_irq`, sets `LR_irq` to the interrupted PC + 4, enters ARM IRQ mode with I
+set and F preserved, and dispatches to the word-aligned handler pointer. Entry
+itself consumes no guest instruction budget; handler instructions do.
+
+This is a partial prototype dispatch policy, not a model of the GBA BIOS
+dispatcher: its documented IRQ stack frame and handler-return path are not yet
+implemented. Only the VBlank request is generated; IRQ nesting, other IRQ
+sources, FIQ, scanline timing and BIOS code fetch remain unsupported. Do not
+interpret this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -177,9 +194,18 @@ Implemented regions and widths:
   `RomOverread`. ROM bytes cannot be mutated through the bus.
 - Work RAM mirrors its bank across the documented 16 MiB window: 256 KiB EWRAM
   over `0x02000000..=0x02FFFFFF` and 32 KiB IWRAM over `0x03000000..=0x03FFFFFF`
-  (`#gba-memory-map`). No other mirroring is modelled: VRAM/palette/OAM addresses
-  just outside their exact regions are `Unmapped`, and no open-bus behaviour is
-  claimed.
+  (`#gba-memory-map`). By explicit prototype policies recorded in D22/D26, the
+  1 KiB palette array aliases across `0x05000000..=0x05FFFFFF`, and VRAM uses a
+  repeating 128 KiB aperture across `0x06000000..=0x06FFFFFF`. In tiled modes
+  0..=2 the aperture's `0x18000..=0x1FFFF` hole aliases the last physical 32 KiB;
+  that hole remains unmapped in bitmap modes. These test-driven extensions
+  satisfy local black-box mirror cases, while GBATEK labels addresses outside
+  the physical palette/VRAM regions unused; they are not hardware-map claims.
+  OAM has one additional narrow prototype alias at
+  `0x07000400..=0x070007FF`, mapping to its first 1 KiB; the following addresses
+  remain unmapped. This test-driven extension satisfies a local black-box mirror
+  case while GBATEK labels the alias unused, and is not a hardware-map claim.
+  Other unmapped reads remain explicit errors and no open-bus behavior is claimed.
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
   require 4-byte alignment. I/O uses register-specific 8/16-bit access, and a
   32-bit access composes two halfword accesses (including across register pairs).
@@ -299,7 +325,7 @@ Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
 unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
 sixteenth condition. A false condition is a no-op that still consumes one
 instruction and advances PC, including for a PSR transfer whose executed form
-would be restricted. Multiply-long, halfword multiply, swap, coprocessor, ARMv5
+would be restricted. Multiply-long, halfword multiply, coprocessor, ARMv5
 `BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
 and are never NOPs.
 Typed SWI is handled only by the bounded six-service path above; unsupported
@@ -307,20 +333,31 @@ service numbers and SVC-origin nesting are explicit errors.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
-| Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands and `S=0` PC destinations | `S=1` with `Rd=PC` (needs SPSR restore), ARMv2 P-variant test ops, ARMv5/newer |
+| Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands, `S=0` PC destinations and the documented `S=1, Rd=PC` exception return | `S=1` with `Rd=PC` in USER/SYSTEM (no SPSR) or with an invalid saved mode, test-op encodings with nonzero `Rd` (SBZ; nonzero is UNPREDICTABLE), ARMv5/newer |
 | Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
 | Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
-| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base, unaligned base (bounded runtime policy) |
-| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
+| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base |
+| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
 | Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six-service HLE dispatch and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
-| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product, documented `Rd`/`Rm` and R15 restrictions | `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, the halfword multiplies, `SWP` |
-| Everything else | none | multiply-long/halfword multiply, swap, coprocessor, unconditional/newer space |
+| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, halfword multiplies |
+| Swap | ARM `SWP`/`SWPB`; `Rd=Rm` is allowed; unaligned word SWP rotates the loaded value by `8 * address[1:0]` but stores the source unrotated; SWPB zero-extends the loaded byte; destination and PC update only after both bus accesses succeed | R15 operands, `Rn=Rd` or `Rn=Rm` (UNPREDICTABLE), nonzero SBZ bits [11:8] |
+| Everything else | none | multiply-long/halfword multiply, coprocessor, unconditional/newer space |
 
 `MUL`/`MLA` set N/Z from the result and leave V unaffected. GBATEK documents C
 as "destroyed" on ARMv4, which has no defined value; this prototype preserves
 the previous C bit as a stated **Design** choice, so no test may depend on C
-after a multiply.
+after a multiply. `MUL Rd=Rm` is architecturally unpredictable on ARM7TDMI; this
+prototype explicitly reads both pre-instruction operands and writes their low
+32-bit product. For `MLA Rd=Rm`, the accumulator is also read from the
+pre-instruction state before the low 32-bit sum is written. These are
+compatibility-oriented design extensions, not hardware-behavior claims.
+
+`SWP`/`SWPB` use the ARMv4T forms specified by DDI0100E §4.1.51–52. Address
+and source registers are snapshotted before the bus accesses, which preserves
+the documented `Rd=Rm` case. A bus error on either access leaves `Rd` and PC
+unchanged. The instruction is one indivisible guest step in this non-timed
+runtime; cycle-accurate bus arbitration and mid-instruction DMA are not modeled.
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -385,11 +422,13 @@ this prototype is willing to generalize:
   stores the old base when it is the first (lowest) entry and the new base
   otherwise; LDM has no additional writeback and the loaded base value wins
   (documented ARMv4 behavior).
-- Block/stack base alignment is a **Design** policy: GBATEK says low bits are
-  ignored for LDM/STM/PUSH/POP, but it does not establish whether writeback is
-  derived from the original or the aligned base. This prototype rejects an
-  unaligned base before any access or writeback instead of choosing one result.
-  The same policy applies to Thumb SP and `LDMIA`/`STMIA` bases.
+- Block/stack base alignment is a **Design** policy: GBATEK says low address
+  bits are ignored for LDM/STM/PUSH/POP. This prototype aligns only the transfer
+  address (`base & !3`) before applying the addressing mode; writeback, and the
+  PUSH/POP SP update, are always computed from the original, unmodified base
+  register. The public document does not establish that writeback source, so
+  this is not a hardware-conformance claim. The same policy applies to Thumb SP
+  and `LDMIA`/`STMIA` bases.
 - Thumb implements word/byte register-offset forms, half/signed
   register-offset forms, immediate word/byte transfer forms, the existing
   immediate halfword form, SP-relative word transfers and the preserved literal
@@ -397,7 +436,12 @@ this prototype is willing to generalize:
   order and the LR/PC bit; `POP PC` clears bit 0 and keeps Thumb state.
   `LDMIA`/`STMIA` use the ARMv4 base-in-list special documented for Thumb:
   STM stores the old base if it is the first entry, otherwise the new base;
-  LDM's loaded base wins. Empty lists are explicit errors.
+  LDM's loaded base wins. For the documented ARMv4 empty-list quirk, empty
+  `LDMIA`/`STMIA` transfers R15 as the sole word and writes `Rb+0x40`; empty
+  `PUSH`/`POP` remain explicit errors. Empty-list LDM loads an even-aligned PC
+  and retains Thumb state; empty-list STM stores the instruction address plus 6,
+  matching the following Thumb instruction's visible PC as checked by ROM test
+  229.
 - No CPU data-abort exception is modeled. A bus error ends the run; a partial
   multi-access leaves earlier transfers visible, performs no writeback and
   never claims atomicity.
@@ -440,9 +484,12 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
-- **Boundary:** only the documented SWI-to-HLE path performs SVC entry, a bounded
-  saved frame and exception return. Other exception classes/vectoring, IRQ
-  delivery, BIOS execution and other SPSR-restoring PC writes remain unsupported.
+- **Boundary:** the documented SWI-to-HLE path performs exception entry, a
+  bounded saved SVC frame and its SWI return. The separate partial VBlank IRQ
+  entry policy above does not model the BIOS dispatcher frame or return. ARM
+  data-processing `S=1, Rd=PC` can restore an already existing valid SPSR but
+  performs no exception entry. Other exception classes/vectoring and BIOS
+  execution remain unsupported.
 
 Pipeline offsets are documented. ARM operands reading R15 use
 `instruction address + 8`, or `+12` when the instruction uses a
@@ -452,11 +499,16 @@ value. Direct branch targets are forced to 4-byte (ARM) or 2-byte (Thumb)
 alignment.
 
 ARM ALU/MOV writes to PC with `S=0` are allowed, force-align the low two bits
-and keep the ARM state; `S=1` with `Rd=PC` is explicitly unsupported because it
-would require an SPSR restore. Thumb `MOV PC,Rs`/`ADD PC,Rs` force-align the low
-bit and keep Thumb state. `BX` bit 0 is the only state switch. `BX PC` follows
-GBATEK's ARM7 behavior (ARM `$+8`; Thumb `(($+4) AND NOT 2)`, switching to ARM);
-GBATEK notes that this case is not officially defined as predictable.
+and keep the ARM state. The documented `S=1` with `Rd=PC` exception return
+restores CPSR from the current mode's SPSR and uses the computed result as the
+PC aligned for the restored T bit; ordinary ALU NZCV results are discarded
+because the restored CPSR replaces them. A missing SPSR in USER/SYSTEM or an
+invalid saved mode errors before any state mutation. This restores existing CPU
+state only: it does not perform exception entry or fetch BIOS code. Thumb
+`MOV PC,Rs`/`ADD PC,Rs` force-align the low bit and keep Thumb state. `BX` bit 0
+is the only other state switch. `BX PC` follows GBATEK's ARM7 behavior (ARM
+`$+8`; Thumb `(($+4) AND NOT 2)`, switching to ARM); GBATEK notes that this case
+is not officially defined as predictable.
 
 ## Implemented Thumb subset
 
@@ -472,7 +524,7 @@ GBATEK notes that this case is not officially defined as predictable.
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
 | Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
 | Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six documented HLE services | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
-| Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, unaligned SP/base (bounded runtime policy), ARMv5/newer |
+| Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
 alignment. `BX` alone changes ARM/Thumb state. High-register `ADD`/`MOV` never

@@ -47,6 +47,14 @@ pub enum Op {
         accumulate: Option<u8>,
         set_flags: bool,
     },
+    /// ARM `SWP`/`SWPB`: read memory at `Rn`, write `Rm` to that address, and
+    /// return the original value in `Rd`. `byte` selects the byte form.
+    Swap {
+        rd: u8,
+        rm: u8,
+        rn: u8,
+        byte: bool,
+    },
     /// Conditional or unconditional direct branch. The target is already
     /// aligned and relative to the documented pipeline offset.
     B {
@@ -167,9 +175,15 @@ impl Op {
                 load: true, regs, ..
             } => regs & (1 << 15) != 0,
             Op::Pop { pc: true, .. } => true,
+            Op::ThumbBlock {
+                load: true,
+                regs: 0,
+                ..
+            } => true,
             Op::BlHigh { .. }
             | Op::Cmp { .. }
             | Op::Mul { .. }
+            | Op::Swap { .. }
             | Op::LdrLiteral { .. }
             | Op::LdrHalf { .. }
             | Op::StrHalf { .. }
@@ -183,11 +197,27 @@ impl Op {
         }
     }
 
+    /// `S=1` with `Rd=R15` in ARM data processing (`MOVS PC,Rn`,
+    /// `SUBS PC,LR,#4`, ...). It is the documented exception return: the whole
+    /// CPSR is restored from the current mode's SPSR instead of receiving the
+    /// arithmetic N/Z/C/V result, and the computed value becomes the PC in the
+    /// restored ARM/Thumb state. Thumb high-register ADD/MOV never set flags,
+    /// so this is an ARM-only form.
+    pub fn restores_spsr(self) -> bool {
+        match self {
+            Op::Mov { rd, set_flags, .. }
+            | Op::Add { rd, set_flags, .. }
+            | Op::Sub { rd, set_flags, .. } => rd == 15 && set_flags,
+            Op::Alu { rd, set_flags, .. } => rd == Some(15) && set_flags,
+            _ => false,
+        }
+    }
+
     pub fn writes_register(self, register: u8) -> bool {
         match self {
             Op::Mov { rd, .. } | Op::Add { rd, .. } | Op::Sub { rd, .. } => rd == register,
             Op::Alu { rd, .. } => rd == Some(register),
-            Op::Mul { rd, .. } => rd == register,
+            Op::Mul { rd, .. } | Op::Swap { rd, .. } => rd == register,
             Op::BlHigh { .. } | Op::Bl { .. } => register == 14,
             Op::LdrLiteral { rd, .. } | Op::LdrHalf { rd, .. } | Op::Mrs { rd, .. } => {
                 rd == register
@@ -218,7 +248,9 @@ impl Op {
             // Thumb LDMIA/STMIA always updates the base; it may also load the
             // listed low registers. A loaded base wins over the increment.
             Op::ThumbBlock { load, rn, regs } => {
-                register == rn || (load && register < 8 && regs & (1 << register) != 0)
+                register == rn
+                    || (load && regs == 0 && register == 15)
+                    || (load && register < 8 && regs & (1 << register) != 0)
             }
             // An HLE service may alter any documented result register and
             // memory. Invalidate every cached register constant conservatively.

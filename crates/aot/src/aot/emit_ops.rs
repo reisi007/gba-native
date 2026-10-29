@@ -53,8 +53,7 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
                 operand_call(site, src)
             )
             .unwrap();
-            write_result(&mut out, Some(rd), "value", site.thumb);
-            if set_flags {
+            if write_result(&mut out, Some(rd), "value", site.thumb, set_flags) && set_flags {
                 writeln!(out, "    cpu.set_logic_flags(value, shifter_carry);").unwrap();
             }
         }
@@ -98,10 +97,25 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
                 expression = format!("({expression}).wrapping_add(cpu.reg({rn}))");
             }
             writeln!(out, "    let value = {expression};").unwrap();
-            write_result(&mut out, Some(rd), "value", site.thumb);
+            // MUL with Rd=R15 is not a valid encoding, so this is never the
+            // `S=1` exception-return form.
+            write_result(&mut out, Some(rd), "value", site.thumb, false);
             if set_flags {
                 writeln!(out, "    cpu.set_logic_flags(value, None);").unwrap();
             }
+        }
+        Op::Swap { rd, rm, rn, byte } => {
+            writeln!(out, "    let address = cpu.reg({rn});").unwrap();
+            writeln!(out, "    let source = cpu.reg({rm});").unwrap();
+            if byte {
+                writeln!(out, "    let value = u32::from(bus.read8(address)?);").unwrap();
+                writeln!(out, "    bus.write8(address, source as u8)?;").unwrap();
+            } else {
+                writeln!(out, "    let word = bus.read32(address & !3)?;").unwrap();
+                writeln!(out, "    let value = word.rotate_right((address & 3) * 8);").unwrap();
+                writeln!(out, "    bus.write32(address & !3, source)?;").unwrap();
+            }
+            writeln!(out, "    cpu.set_reg({rd}, value);").unwrap();
         }
         Op::BlHigh { lr } => {
             writeln!(out, "    cpu.set_reg(14, 0x{lr:08X}u32);").unwrap();
@@ -183,8 +197,7 @@ fn emit_add_sub(
         "    let (result, carry, overflow) = {helper}(rn_value, rhs);"
     )
     .unwrap();
-    write_result(out, Some(rd), "result", site.thumb);
-    if set_flags {
+    if write_result(out, Some(rd), "result", site.thumb, set_flags) && set_flags {
         writeln!(out, "    cpu.set_arith_flags(result, carry, overflow);").unwrap();
     }
 }
@@ -209,8 +222,7 @@ fn emit_alu(
             _ => unreachable!(),
         };
         writeln!(out, "    let result = {expression};").unwrap();
-        write_result(out, rd, "result", site.thumb);
-        if set_flags {
+        if write_result(out, rd, "result", site.thumb, set_flags) && set_flags {
             writeln!(out, "    cpu.set_logic_flags(result, shifter_carry);").unwrap();
         }
         return;
@@ -232,25 +244,41 @@ fn emit_alu(
         .unwrap();
     }
     writeln!(out, "    let (result, carry, overflow) = {expression};").unwrap();
-    write_result(out, rd, "result", site.thumb);
-    if set_flags {
+    if write_result(out, rd, "result", site.thumb, set_flags) && set_flags {
         writeln!(out, "    cpu.set_arith_flags(result, carry, overflow);").unwrap();
     }
 }
 
-fn write_result(out: &mut String, rd: Option<u8>, value: &str, thumb: bool) {
+/// Emit the `Rd` write and report whether the ordinary `S=1` flag update still
+/// applies. `S=1` with `Rd=R15` is the documented exception return: the computed
+/// value becomes the PC in the state restored from the current mode's SPSR and
+/// the arithmetic N/Z/C/V result is discarded, because the restored CPSR
+/// replaces it. The helper validates the SPSR before mutating any state.
+fn write_result(
+    out: &mut String,
+    rd: Option<u8>,
+    value: &str,
+    thumb: bool,
+    set_flags: bool,
+) -> bool {
     match rd {
+        Some(15) if set_flags => {
+            writeln!(out, "    cpu.return_from_exception({value})?;").unwrap();
+            false
+        }
         Some(15) => {
             writeln!(
                 out,
                 "    cpu.set_reg(15, gba_native::semantics::aligned_pc({value}, {thumb}));"
             )
             .unwrap();
+            true
         }
         Some(rd) => {
             writeln!(out, "    cpu.set_reg({rd}, {value});").unwrap();
+            true
         }
-        None => {}
+        None => true,
     }
 }
 

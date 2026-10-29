@@ -19,7 +19,15 @@ impl NativeHarness {
     /// a pre-existing directory, file or symbolic link is refused rather than
     /// reused or followed. The caller owns `dir` and may remove only that
     /// directory; no recursive cleanup or replacement is offered here.
+    ///
+    /// An inherited `CARGO_BUILD_TARGET` is honored rather than overridden: the
+    /// nested `cargo build` keeps that target and the returned executable is
+    /// resolved from its target-specific directory
+    /// (`<target-dir>/<triple>/debug/`). Without the variable the host-native
+    /// directory (`<target-dir>/debug/`) is used. Target support is decided by
+    /// the actual `cargo`/`rustc` toolchain.
     pub fn build(source: &str, dir: &Path) -> Result<Self> {
+        let target = inherited_build_target()?;
         let target_dir = prepare_crate(source, dir)?;
         let output = Command::new(cargo())
             .arg("build")
@@ -31,14 +39,18 @@ impl NativeHarness {
             .output()?;
         if !output.status.success() {
             return Err(Error::Native(format!(
-                "generated harness build failed: {}",
+                "generated harness build failed for target {}: {}",
+                target.as_deref().unwrap_or("host"),
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        let exe = target_dir.join("debug").join(format!(
-            "gba-native-aot-harness{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+        let exe = harness_executable(&target_dir, "debug", target.as_deref());
+        if !exe.is_file() {
+            return Err(Error::Native(format!(
+                "cargo finished but no harness executable was produced at {}; this build path supports executable targets only",
+                exe.display()
+            )));
+        }
         Ok(Self { exe })
     }
 
@@ -72,10 +84,7 @@ impl NativeHarness {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        let exe = target_dir.join(target).join("release").join(format!(
-            "gba-native-aot-harness{}",
-            executable_suffix(target)
-        ));
+        let exe = harness_executable(&target_dir, "release", Some(target));
         if !exe.is_file() {
             return Err(Error::Native(format!(
                 "cargo finished but no target executable was produced at {}; this build path supports executable targets only",
@@ -106,6 +115,56 @@ impl NativeHarness {
 
 fn cargo() -> std::ffi::OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
+}
+
+/// The Cargo build target inherited from the caller's environment, if any.
+///
+/// Cargo treats an empty `CARGO_BUILD_TARGET` as "no target", so only a
+/// non-empty value selects a target-specific layout. A value that this crate
+/// would not accept as one target triple is an explicit error rather than a
+/// silent host build.
+fn inherited_build_target() -> Result<Option<String>> {
+    let Some(raw) = std::env::var_os("CARGO_BUILD_TARGET") else {
+        return Ok(None);
+    };
+    let Some(value) = raw.to_str() else {
+        return Err(Error::Native(
+            "inherited CARGO_BUILD_TARGET is not valid UTF-8".to_string(),
+        ));
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    validate_target(value).map_err(|reason| {
+        Error::Native(format!(
+            "invalid inherited CARGO_BUILD_TARGET {value:?}: {reason}"
+        ))
+    })?;
+    Ok(Some(value.to_string()))
+}
+
+/// Resolve the harness executable Cargo wrote into `target_dir` for `profile`.
+///
+/// With an explicit `target`, Cargo nests the profile directory under the
+/// target triple; without one it uses the host layout. The executable-name
+/// suffix follows the same distinction: the host suffix for a host build and
+/// the bounded per-target policy for an explicit triple.
+pub(super) fn harness_executable(
+    target_dir: &Path,
+    profile: &str,
+    target: Option<&str>,
+) -> PathBuf {
+    let mut dir = target_dir.to_path_buf();
+    if let Some(target) = target {
+        dir.push(target);
+    }
+    let suffix = match target {
+        Some(target) => executable_suffix(target),
+        None => std::env::consts::EXE_SUFFIX,
+    };
+    dir.join(profile)
+        .join(format!("gba-native-aot-harness{suffix}"))
 }
 
 /// Create the fresh generated crate and return its owned Cargo target

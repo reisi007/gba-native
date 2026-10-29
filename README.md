@@ -37,18 +37,19 @@ the root workspace lockfile contains only these three internal path packages.
 | Area | State |
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
-| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA and Thumb MUL |
-| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches and the bounded framed SWI entry/return path |
+| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA, Thumb MUL and the `S=1, Rd=PC` SPSR exception return |
+| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches, the framed SWI path and documented ALU exception return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
-| ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
-| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot, other exceptions or timing |
+| ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases align only the transfer address down while writeback uses the original base (Design) |
+| ARM `SWP`/`SWPB` | Implemented for documented ARMv4T forms; `Rd=Rm` is valid and unpredictable aliases are rejected; independent interpreter/AOT vectors |
+| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
 | Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI or save claim |
 | ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
-| Runtime fallback | Reference interpreter; RAM code is never AOT |
+| Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
 | Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2, static synthetic demo only; no ROM/AOT/input/audio/save; browser functional E2E locally observed, visual review pending |
@@ -138,8 +139,12 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   Neither branch is a playable standalone game, GUI frontend, save-aware app,
   final application or complete browser app: the WASM artifact is a
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or
-  persistence. Automated tests use synthetic fixtures; local supplied-ROM
-  attempts and their outcomes are recorded in the verification log. The latest
+  persistence. Automated `cargo test` and CI use synthetic fixtures. Optional
+  local hardware-test ROM instructions are in
+  `tests/roms/gba-tests/README.md`; their binaries remain read-only and outside
+  CI. A budget stop is not a pass: the ROM's own visible PASS result is required.
+  Local target/run attempts and their outcomes are recorded in the verification
+  log. The latest
   bounded native run stops at an unsupported BIOS-region access at
   `0x0000000A` (`direct-entry mode has no BIOS`); the strict default is
   unchanged and BIOS instruction fetch remains outside the implemented subset.
@@ -307,8 +312,12 @@ open pending independent verification and CI; local tests alone do not close it.
   immediate or by the low eight bits of a register; `B`, `BL` and `BX`.
   Documented PC reads (`+8`, or `+12` for register-specified shifts), ALU PC
   writes with `S=0`, and PC wrapping are implemented. `S=1` with `Rd=PC`
-  requires an SPSR restore and stays an explicit error; ARMv5/newer exchange
-  encodings are rejected. `MRS`/`MSR` remain as before. Single word/byte
+  restores CPSR from the current mode's valid SPSR and uses the computed result
+  as the state-aligned PC; USER/SYSTEM and invalid saved modes fail explicitly.
+  ARMv5/newer exchange encodings are rejected. `MUL`/`MLA` use the register
+  form; the architecturally unpredictable `MUL`/`MLA Rd=Rm` aliases follow the
+  explicit prototype design policy in D21.
+  `MRS`/`MSR` remain as before. Single word/byte
   `LDR`/`STR` support immediate-12 or shifted-register offsets, pre/post
   indexing, writeback and the documented PC base/source rules; `LDRH`/`STRH`/
   `LDRSB`/`LDRSH` add pre/post immediate or unshifted register offsets; ARM
@@ -333,10 +342,14 @@ open pending independent verification and CI; local tests alone do not close it.
   transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
   register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
   unconditional `B`, and typed SWI to the six documented HLE services. The
-  ARMv5 `BLX` second half and register form are rejected;
-  empty stack/block lists and unaligned SP/base are explicit errors.
-- Memory/I/O: EWRAM and IWRAM mirrors, exact palette/VRAM/OAM regions, three ROM
-  windows, selected display/input/WAITCNT/DMA/IRQ/sound/timer registers. Unused
+  ARMv5 `BLX` second half and register form are rejected; the ARMv4 empty-list
+  `LDMIA`/`STMIA` R15/`+0x40` quirk is implemented while empty stack lists remain
+  explicit errors. An unaligned SP/base aligns
+  only the transferred addresses while writeback uses the original base
+  (Design policy).
+- Memory/I/O: EWRAM and IWRAM mirrors, documented palette/VRAM/OAM regions plus
+  explicit prototype palette/VRAM/OAM alias policies, three ROM windows, selected
+  display/input/WAITCNT/DMA/IRQ/sound/timer registers. Unused
   I/O writes are ignored and recorded; unmodelled reads remain errors. There is
   no open bus, save support, cycle timing, audio generation or ticking timer.
 - Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.

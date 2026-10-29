@@ -134,6 +134,20 @@ fn thumb_fixture() -> Cartridge {
     finish(rom, b"GBA-TBL\0")
 }
 
+fn thumb_empty_list_fixture() -> Cartridge {
+    let mut rom = vec![0u8; 0x200];
+    // Store PC through an empty STMIA, then load a dynamic PC through an empty
+    // LDMIA. Both apply the ARMv4 R15/0x40 behavior.
+    for (index, halfword) in [0x4805u16, 0xC000, 0x4905, 0xC900].iter().enumerate() {
+        let offset = index * 2;
+        rom[offset..offset + 2].copy_from_slice(&halfword.to_le_bytes());
+    }
+    rom[0x18..0x1C].copy_from_slice(&(EWRAM_BASE + 0x100).to_le_bytes());
+    rom[0x1C..0x20].copy_from_slice(&0x0800_0020u32.to_le_bytes());
+    rom[0x20..0x24].copy_from_slice(&0x0800_0024u32.to_le_bytes());
+    finish(rom, b"GBA-ELD\0")
+}
+
 fn build_and_run(source: &str, cart: &Cartridge, tag: &str) -> (aot::NativeReport, Cpu, Bus) {
     let temp = TempDir::new(tag);
     let path = temp.path().join("fixture.gba");
@@ -280,8 +294,8 @@ fn native_thumb_stack_and_block_fixture_matches_hand_expected_state() {
     assert!(!translated.contains("interpret::step"));
     assert!(!source.contains("ROM_BYTES"));
     assert!(source.contains("cpu.reg(13)"));
-    assert!(source.contains("cpu.set_reg(13, start);"));
-    assert!(source.contains("bus.write32(base.wrapping_add(0x0u32)"));
+    assert!(source.contains("cpu.set_reg(13, sp.wrapping_sub(0x8u32));"));
+    assert!(source.contains("bus.write32(transfer.wrapping_add(0x0u32)"));
 
     let mut expected_cpu = Cpu::direct_entry();
     expected_cpu.initialize_bios_stacks();
@@ -338,4 +352,97 @@ fn native_thumb_stack_and_block_fixture_matches_hand_expected_state() {
     assert_eq!(report.image_width, WIDTH);
     assert_eq!(report.image_height, HEIGHT);
     assert_eq!(report.image_sha256, expected_image.sha256_hex());
+}
+
+#[test]
+fn native_thumb_empty_ldmia_matches_the_documented_armv4_pc_quirk() {
+    let cart = thumb_empty_list_fixture();
+    let artifact = aot::discover(&cart, 0x0800_0000, true, aot::Limits::default())
+        .expect("discover Thumb empty-list PC load");
+    assert_eq!(artifact.stats.instructions, 4);
+    assert_eq!(artifact.stats.blocks, 1);
+    assert!(artifact.blocks[0].instructions[3].is_control_flow());
+
+    let budget = 4;
+    let source =
+        aot::emit_native_module(&cart, &artifact, budget).expect("emit Thumb empty-list transfer");
+    assert!(source.contains("cpu.set_pc(pc_value & !1);"));
+    assert!(source.contains("base.wrapping_add(0x40u32)"));
+    assert!(source.contains("bus.write32(transfer, 0x08000008u32)?;"));
+    assert!(!source.contains("ROM_BYTES"));
+
+    let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
+    expected_cpu.set_pc(0x0800_0000);
+    expected_cpu.set_thumb(true);
+    let mut expected_bus = Bus::new(cart.clone());
+    let used = interpret::run_budget(&mut expected_cpu, &mut expected_bus, budget)
+        .expect("run reference empty-list transfer");
+    assert_eq!(used, budget);
+    assert_eq!(expected_cpu.pc(), 0x0800_0024);
+    assert!(expected_cpu.thumb());
+    assert_eq!(expected_cpu.reg(0), EWRAM_BASE + 0x140);
+    assert_eq!(expected_cpu.reg(1), 0x0800_0060);
+    assert_eq!(expected_bus.read32(EWRAM_BASE + 0x100), Ok(0x0800_0008));
+
+    let (report, _, _) = build_and_run(&source, &cart, "thumb-empty-list");
+    assert_eq!(report.budget_used, budget);
+    assert_eq!(report.fallbacks, 0);
+    assert_eq!(report.pc, 0x0800_0024);
+    assert!(report.thumb);
+    assert_eq!(report.regs[0], EWRAM_BASE + 0x140);
+    assert_eq!(report.regs[1], 0x0800_0060);
+    assert!(
+        report
+            .matches_reference(&expected_cpu, &expected_bus, budget)
+            .expect("native/reference parity")
+    );
+}
+
+#[test]
+fn native_empty_stmia_matches_the_following_thumb_mov_pc_observation() {
+    let mut rom = vec![0u8; 0x200];
+    let instructions: [u16; 6] = [
+        0x4805, // LDR r0,[PC,#20] -> EWRAM+0x100
+        0x1C03, // MOV r3,r0
+        0xC000, // STMIA r0!,{}; next MOV-PC value is stored
+        0x4679, // MOV r1,PC -> 0x0800000A
+        0x681A, // LDR r2,[r3]
+        0x4291, // CMP r1,r2
+    ];
+    for (index, halfword) in instructions.iter().enumerate() {
+        let offset = index * 2;
+        rom[offset..offset + 2].copy_from_slice(&halfword.to_le_bytes());
+    }
+    rom[0x18..0x1C].copy_from_slice(&(EWRAM_BASE + 0x100).to_le_bytes());
+    let cart = finish(rom, b"GBA-STM-PC\0");
+    let artifact = aot::discover(&cart, 0x0800_0000, true, aot::Limits::default())
+        .expect("discover empty STM/MOV-PC check");
+    let budget = 6;
+    let source =
+        aot::emit_native_module(&cart, &artifact, budget).expect("emit empty STM/MOV-PC check");
+
+    let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
+    expected_cpu.set_pc(0x0800_0000);
+    expected_cpu.set_thumb(true);
+    let mut expected_bus = Bus::new(cart.clone());
+    assert_eq!(
+        interpret::run_budget(&mut expected_cpu, &mut expected_bus, budget),
+        Ok(budget)
+    );
+    assert_eq!(expected_bus.read32(EWRAM_BASE + 0x100), Ok(0x0800_000A));
+    assert_eq!(expected_cpu.reg(1), 0x0800_000A);
+    assert_eq!(expected_cpu.reg(2), 0x0800_000A);
+    assert!(expected_cpu.flags().1, "CMP must observe equality");
+
+    let (report, _, _) = build_and_run(&source, &cart, "empty-stm-pc");
+    assert_eq!(report.budget_used, budget);
+    assert_eq!(report.regs[1], 0x0800_000A);
+    assert_eq!(report.regs[2], 0x0800_000A);
+    assert!(
+        report
+            .matches_reference(&expected_cpu, &expected_bus, budget)
+            .expect("native/reference parity")
+    );
 }

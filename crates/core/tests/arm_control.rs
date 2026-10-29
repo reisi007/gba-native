@@ -2,8 +2,8 @@
 //!
 //! Expected values follow the documented pipeline: PC reads as address+8, or
 //! address+12 for a register-specified shift; ALU PC writes are force-aligned
-//! and do not change state; S=1 with Rd=PC requires an SPSR restore and is
-//! explicitly rejected.
+//! and do not change state. `S=1` with `Rd=PC` is the documented exception
+//! return and is covered by `exception_return.rs`.
 
 use gba_native_core::bus::Bus;
 use gba_native_core::cart::Cartridge;
@@ -109,7 +109,7 @@ fn arm_pc_operand_reads_use_plus_8_or_plus_12_for_register_shift() {
 }
 
 #[test]
-fn arm_alu_pc_writes_are_aligned_and_s1_pc_is_explicitly_unsupported() {
+fn arm_alu_s0_pc_writes_are_aligned_and_keep_state() {
     let addr = 0x0800_0100;
     let cpu = execute(dp(13, false, 0, 15, 0), addr, false, |cpu| {
         cpu.set_reg(0, 0x0800_0206);
@@ -130,13 +130,23 @@ fn arm_alu_pc_writes_are_aligned_and_s1_pc_is_explicitly_unsupported() {
         (!0x1234_5678u32) & !3,
         "MVN PC with S=0 is allowed and force-aligned"
     );
+}
+
+#[test]
+fn arm_s1_pc_writes_decode_as_the_typed_exception_return_form() {
+    let addr = 0x0800_0100;
+    let cpu = execute(dp(13, true, 0, 0, 1), addr, false, |cpu| {
+        cpu.set_reg(0, 0x1111_1111);
+        cpu.set_reg(1, 0x0000_0002);
+    });
+    assert_eq!(cpu.reg(0), 2, "MOVS r0,r1 is unaffected");
+    assert_eq!(cpu.pc(), addr + 4);
 
     for raw in [dp(13, true, 0, 15, 0), dp(4, true, 1, 15, 0)] {
-        let error = decode_arm(addr, raw).expect_err("S=1 PC write needs SPSR restore");
-        assert!(
-            format!("{error}").contains("SPSR restore"),
-            "unexpected error: {error}"
-        );
+        let instruction = decode_arm(addr, raw).expect("S=1 PC write decodes");
+        assert!(instruction.op.restores_spsr(), "raw={raw:#010X}");
+        assert!(instruction.writes_cpsr_control(), "raw={raw:#010X}");
+        assert!(instruction.is_control_flow(), "raw={raw:#010X}");
     }
 }
 

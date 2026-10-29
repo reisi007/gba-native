@@ -34,7 +34,8 @@ Relevant anchors actually consulted for this milestone:
   odd-address LDRH rotation and LDRSH/LDRSB note.
 - `#arm-opcodes-branch-and-branch-with-link-b-bl-bx-blx-swi-bkpt`.
 - `#arm-opcodes-data-processing-alu` and `#second-operand-op2`: all sixteen
-  opcodes, shift kinds, zero-shift specials and CPSR flag rules.
+  opcodes, shift kinds, zero-shift specials and CPSR flag rules. The P-variant
+  description explicitly limits `Rd=R15` result/PSR behavior to ARMv2 and below.
 - `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`: MUL/MLA encoding,
   the `Rd`/`Rm` and R15 restrictions, low-32-bit result and the documented
   N/Z/C/V rule that C is "destroyed" on ARMv4.
@@ -71,7 +72,8 @@ Relevant anchors actually consulted for this milestone:
   immediate halfword, THUMB.11 SP-relative word and the literal load.
 - `#thumb-opcodes-memory-multiple-loadstore-pushpop-and-ldmstm`: THUMB.14
   full-descending PUSH/POP with LR/PC bit and THUMB.15 LDMIA/STMIA writeback and
-  base-in-list behavior.
+  base-in-list behavior, plus the ARMv4 empty-list R15 transfer and `Rb+0x40`
+  writeback quirk.
 - `#thumb-opcodes-jumps-and-calls`: conditional/unconditional branches and the
   two-half BL/BLX encoding.
 - `#lcd-io-display-control`: mode selection, BG enable flags and forced blank.
@@ -129,15 +131,66 @@ identifies the fetched PDF, not an immutable upstream revision.
 
 Sections actually consulted:
 
+- §2.1: the ARM7TDMI implements ARM architecture v4T.
 - §2.8.1 / Table 2-3: SWI return address is ARM PC+4 or Thumb PC+2 and the
   return instruction is `MOVS PC,R14_svc`.
 - §2.8.2 and Table 2-4: exception entry saves CPSR to SPSR, enters ARM state,
   vectors SWI to address `0x08`, sets I and leaves F unchanged.
 - §2.8.7: SWI enters Supervisor mode and `MOVS PC,R14_svc` restores PC/CPSR
   and resumes after the SWI.
+- §6.5: compare and test operations do not produce a data result; only ALU
+  status flags are affected. This generic timing description does not classify
+  a nonzero `Rd` field in those encodings.
 
 These statements corroborate the public hardware contract only. No BIOS image,
 instruction bytes, disassembly or implementation source was used.
+
+## S7 — ARM Architecture Reference Manual
+
+URL: <https://www.cs.miami.edu/~burt/learning/Csc521.141/Documents/arm_arm.pdf>
+
+Retrieved 2026-10-29; 5,740,866 bytes, SHA-256
+`c441eb7f981f3beb5ad901716808cd54d86e9b41aa68b42a2ce9701831b0b7ea`. This
+identifies the fetched PDF, not an immutable upstream revision. It is ARM DDI
+0100I, copyright 1996–2005.
+
+Sections actually consulted:
+
+- §A4.1.15 (printed pages A4-28–29): the `CMP` encoding labels bits [15:12]
+  `SBZ` and its syntax has no destination-register operand. §A4.2's architecture
+  table lists `CMP` for ARMv4T.
+- Glossary (printed page Glossary-13): an `SBZ` field must be zero; nonzero
+  values produce UNPREDICTABLE results.
+
+Therefore this ARMv4T reference does not define behavior for `CMP` with a
+nonzero `Rd` field, including the local test encoding `0xE15FF000`. It does not
+support implementing the older ARMv2 P-variant behavior on ARM7TDMI. The manual
+was consulted only as an architecture reference; no implementation sources
+were used.
+
+## S8 — ARM Architecture Reference Manual (ARMv4T-era edition)
+
+URL: <https://www.cl.cam.ac.uk/teaching/0506/ECADArch/datasheets/arm.pdf>
+
+Retrieved 2026-10-29; 13,344,133 bytes, SHA-256
+`fa405a69d371c533f91aab331c8265c1d50ad0f5fe856f232f3a05f93f687114`. This
+identifies the fetched PDF, not an immutable upstream revision. It is ARM DDI
+0100E, copyright 1996–2000.
+
+Sections actually consulted:
+
+- §4.1.14 (printed page A4-25): the `CMP` encoding labels bits [15:12] `SBZ`.
+  §4.2's architecture table (printed page A4-113) lists `CMP` for ARMv4T.
+- Glossary (printed page Glossary-xi): nonzero values in an `SBZ` field produce
+  UNPREDICTABLE results.
+- §4.1.51–52 (printed pages A4-102–105): ARM `SWP`/`SWPB` encodings and
+  operations; `Rd=Rm` is permitted, while R15 operands and `Rn=Rd`/`Rn=Rm`
+  aliases are UNPREDICTABLE. Unaligned word SWP rotates the loaded word right by
+  `8 * address[1:0]` and stores the source word without rotation; SWPB
+  zero-extends the loaded byte.
+
+This earlier ARM Architecture Reference Manual independently confirms that
+`CMP` with a nonzero `Rd` field has no defined ARMv4T behavior.
 
 ## S2 — gbadev resources
 

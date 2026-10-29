@@ -161,13 +161,12 @@ fn block_body(
     writeln!(out, "    let base = cpu.reg({rn});").unwrap();
     writeln!(
         out,
-        "    gba_native::memory::require_aligned_block_base(base, {})?;",
-        instruction.thumb
+        "    let transfer = gba_native::memory::aligned_block_base(base);"
     )
     .unwrap();
     writeln!(
         out,
-        "    let start = gba_native::memory::block_start(base, {count}u32, {pre_index}, {add});"
+        "    let start = gba_native::memory::block_start(transfer, {count}u32, {pre_index}, {add});"
     )
     .unwrap();
     writeln!(
@@ -240,10 +239,9 @@ fn push_body(instruction: &IrInstr, regs: u8, lr: bool) -> String {
     writeln!(out, "    let sp = cpu.reg(13);").unwrap();
     writeln!(
         out,
-        "    gba_native::memory::require_aligned_block_base(sp, true)?;"
+        "    let start = gba_native::memory::aligned_block_base(sp).wrapping_sub(0x{bytes:X}u32);"
     )
     .unwrap();
-    writeln!(out, "    let start = sp.wrapping_sub(0x{bytes:X}u32);").unwrap();
     let mut index = 0u32;
     for reg in 0..8u8 {
         if regs & (1 << reg) == 0 {
@@ -265,7 +263,7 @@ fn push_body(instruction: &IrInstr, regs: u8, lr: bool) -> String {
         )
         .unwrap();
     }
-    writeln!(out, "    cpu.set_reg(13, start);").unwrap();
+    writeln!(out, "    cpu.set_reg(13, sp.wrapping_sub(0x{bytes:X}u32));").unwrap();
     let _ = instruction;
     out
 }
@@ -277,7 +275,7 @@ fn pop_body(instruction: &IrInstr, regs: u8, pc: bool) -> String {
     writeln!(out, "    let sp = cpu.reg(13);").unwrap();
     writeln!(
         out,
-        "    gba_native::memory::require_aligned_block_base(sp, true)?;"
+        "    let transfer = gba_native::memory::aligned_block_base(sp);"
     )
     .unwrap();
     let mut index = 0u32;
@@ -288,7 +286,7 @@ fn pop_body(instruction: &IrInstr, regs: u8, pc: bool) -> String {
         let offset = index * 4;
         writeln!(
             out,
-            "    let value_{reg} = bus.read32(sp.wrapping_add(0x{offset:X}u32))?;"
+            "    let value_{reg} = bus.read32(transfer.wrapping_add(0x{offset:X}u32))?;"
         )
         .unwrap();
         writeln!(out, "    cpu.set_reg({reg}, value_{reg});").unwrap();
@@ -298,7 +296,7 @@ fn pop_body(instruction: &IrInstr, regs: u8, pc: bool) -> String {
         let offset = index * 4;
         writeln!(
             out,
-            "    let pc_value = bus.read32(sp.wrapping_add(0x{offset:X}u32))?;"
+            "    let pc_value = bus.read32(transfer.wrapping_add(0x{offset:X}u32))?;"
         )
         .unwrap();
         // Thumb POP PC force-aligns and keeps Thumb state.
@@ -311,13 +309,30 @@ fn pop_body(instruction: &IrInstr, regs: u8, pc: bool) -> String {
 
 fn thumb_block_body(instruction: &IrInstr, load: bool, rn: u8, regs: u8) -> String {
     let mut out = String::new();
+    if regs == 0 {
+        let address = instruction.addr.wrapping_add(6);
+        writeln!(out, "    let base = cpu.reg({rn});").unwrap();
+        writeln!(
+            out,
+            "    let transfer = gba_native::memory::aligned_block_base(base);"
+        )
+        .unwrap();
+        if load {
+            out.push_str("    let pc_value = bus.read32(transfer)?;\n");
+            out.push_str("    cpu.set_pc(pc_value & !1);\n");
+        } else {
+            writeln!(out, "    bus.write32(transfer, 0x{address:08X}u32)?;").unwrap();
+        }
+        writeln!(out, "    cpu.set_reg({rn}, base.wrapping_add(0x40u32));").unwrap();
+        return out;
+    }
     let count = regs.count_ones();
     let bytes = count * 4;
     let first = regs.trailing_zeros() as u8;
     writeln!(out, "    let base = cpu.reg({rn});").unwrap();
     writeln!(
         out,
-        "    gba_native::memory::require_aligned_block_base(base, true)?;"
+        "    let transfer = gba_native::memory::aligned_block_base(base);"
     )
     .unwrap();
     writeln!(out, "    let new_base = base.wrapping_add(0x{bytes:X}u32);").unwrap();
@@ -330,7 +345,7 @@ fn thumb_block_body(instruction: &IrInstr, load: bool, rn: u8, regs: u8) -> Stri
         if load {
             writeln!(
                 out,
-                "    let value_{reg} = bus.read32(base.wrapping_add(0x{offset:X}u32))?;"
+                "    let value_{reg} = bus.read32(transfer.wrapping_add(0x{offset:X}u32))?;"
             )
             .unwrap();
             writeln!(out, "    cpu.set_reg({reg}, value_{reg});").unwrap();
@@ -342,7 +357,7 @@ fn thumb_block_body(instruction: &IrInstr, load: bool, rn: u8, regs: u8) -> Stri
             };
             writeln!(
                 out,
-                "    bus.write32(base.wrapping_add(0x{offset:X}u32), {value})?;"
+                "    bus.write32(transfer.wrapping_add(0x{offset:X}u32), {value})?;"
             )
             .unwrap();
         }

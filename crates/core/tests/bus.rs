@@ -57,7 +57,7 @@ fn rom_windows_are_immutable_aliases() {
 }
 
 #[test]
-fn work_ram_mirrors_and_video_region_ends_are_exact() {
+fn work_ram_mirrors_and_video_region_boundaries_are_explicit() {
     let mut bus = Bus::new(cart(0x200));
     // Work RAM mirrors its bank across the whole 16 MiB window, so a bank end
     // aliases the bank start instead of being unmapped.
@@ -71,6 +71,7 @@ fn work_ram_mirrors_and_video_region_ends_are_exact() {
     assert_eq!(bus.read32(IWRAM_BASE + IWRAM_LEN as u32 - 4), Ok(0));
     assert_eq!(bus.read8(IWRAM_BASE + IWRAM_LEN as u32), Ok(0xDD));
 
+    bus.write16(DISPCNT_ADDR, 3).expect("bitmap mode");
     bus.write16(VRAM_BASE + VRAM_LEN as u32 - 2, 0x1234)
         .expect("vram end");
     assert_eq!(bus.read16(VRAM_BASE + VRAM_LEN as u32 - 2), Ok(0x1234));
@@ -85,18 +86,65 @@ fn work_ram_mirrors_and_video_region_ends_are_exact() {
         bus.read16(PALETTE_BASE + PALETTE_LEN as u32 - 2),
         Ok(0x7FFF)
     );
-    assert!(matches!(
-        bus.read8(PALETTE_BASE + PALETTE_LEN as u32),
-        Err(Error::Unmapped { .. })
-    ));
+    // Owner-approved prototype extension: the black-box mirror test expects
+    // the next 1 KiB palette alias to reach the same bytes.
+    assert_eq!(bus.read8(PALETTE_BASE + PALETTE_LEN as u32), Ok(0));
 
     bus.write16(OAM_BASE + OAM_LEN as u32 - 2, 0xBEEF)
         .expect("oam end");
     assert_eq!(bus.read16(OAM_BASE + OAM_LEN as u32 - 2), Ok(0xBEEF));
+    assert_eq!(bus.read16(OAM_BASE + OAM_LEN as u32), Ok(0));
     assert!(matches!(
-        bus.read8(OAM_BASE + OAM_LEN as u32),
+        bus.read8(OAM_BASE + OAM_LEN as u32 * 2),
         Err(Error::Unmapped { .. })
     ));
+}
+
+#[test]
+fn prototype_oam_mirror_aliases_only_the_next_one_kib_window() {
+    let mut bus = Bus::new(cart(0x200));
+    bus.write32(OAM_BASE + 0x20, 0x1122_3344).expect("OAM word");
+    assert_eq!(bus.read32(OAM_BASE + 0x420), Ok(0x1122_3344));
+    bus.write16(OAM_BASE + 0x440, 0xAABB)
+        .expect("aliased OAM halfword");
+    assert_eq!(bus.read16(OAM_BASE + 0x40), Ok(0xAABB));
+    assert!(matches!(
+        bus.read32(OAM_BASE + 0x800),
+        Err(Error::Unmapped { .. })
+    ));
+}
+
+#[test]
+fn prototype_vram_aliases_follow_the_128k_aperture_and_tiled_mode() {
+    let mut bus = Bus::new(cart(0x200));
+    bus.write32(VRAM_BASE, 0x1122_3344).expect("VRAM start");
+    assert_eq!(bus.read32(VRAM_BASE + 0x20000), Ok(0x1122_3344));
+
+    bus.write32(VRAM_BASE + 0x10000, 0xAABB_CCDD)
+        .expect("VRAM last bank");
+    assert_eq!(bus.read32(VRAM_BASE + 0x18000), Ok(0xAABB_CCDD));
+
+    bus.write16(DISPCNT_ADDR, 3).expect("bitmap mode");
+    assert!(matches!(
+        bus.read32(VRAM_BASE + 0x18000),
+        Err(Error::Unmapped { .. })
+    ));
+    assert_eq!(bus.read32(VRAM_BASE + 0x20000), Ok(0x1122_3344));
+}
+
+#[test]
+fn prototype_palette_mirror_aliases_all_access_widths_in_the_05_window() {
+    let mut bus = Bus::new(cart(0x200));
+    bus.write32(PALETTE_BASE + 0x10, 0x1122_3344)
+        .expect("palette word");
+    assert_eq!(bus.read32(PALETTE_BASE + 0x410), Ok(0x1122_3344));
+    assert_eq!(bus.read16(PALETTE_BASE + 0x810), Ok(0x3344));
+    assert_eq!(bus.read8(PALETTE_BASE + 0xC11), Ok(0x33));
+
+    bus.write16(PALETTE_BASE + 0x800, 0xABCD)
+        .expect("aliased halfword");
+    assert_eq!(bus.read16(PALETTE_BASE), Ok(0xABCD));
+    assert_eq!(bus.read8(0x05FF_FFFF), Ok(0));
 }
 
 #[test]

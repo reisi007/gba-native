@@ -216,9 +216,10 @@ or silent successes:
   other service not listed above.
 - The decompression family (`10h`..`18h`) is future work; no fake handlers are
   installed.
-- BIOS bytes and BIOS boot remain absent. Exceptions other than the bounded SWI
-  path, IRQ delivery, unsupported SWI services and all timing-dependent services
-  remain explicit errors or unsupported behavior.
+- BIOS bytes and BIOS boot remain absent. The runtime has bounded VBlank IRQ
+  request/entry behavior, but not the BIOS dispatcher frame or handler return.
+  Other exception paths, IRQ nesting, FIQ, unsupported SWI services and all
+  timing-dependent services remain explicit errors or unsupported behavior.
 
 ## Tests and evidence boundary
 

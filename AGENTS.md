@@ -65,8 +65,13 @@ tools under root `target/`; do not install global tools or run Cargo inside
 CI runs the same two scripts. A separate `macos-arm-native-aot` job on
 `macos-latest` asserts an `aarch64-apple-darwin` host and runs the synthetic
 `aot_target_build` and `cli_aot_build` integration targets for ROM-bound native
-AOT; it uses synthetic fixtures only and is neither a cross-compilation nor a
-platform-support claim. The optional desktop and browser workflows run
+AOT. That job builds for its ARM runner host; it is not the x86 cross-target
+test described by the optional local ROM procedure or a platform-support claim.
+CI uses repository-generated synthetic fixtures; the separately documented
+hardware-test ROMs under `tests/roms/gba-tests/` are local-only, read-only test
+inputs and must never be fetched or executed by CI, or included in CI jobs or
+artifacts. Their optional local manual use is documented with the ROMs.
+The optional desktop and browser workflows run
 `scripts/frontend.sh` and `scripts/web.sh --ci` separately. The underlying root
 gates remain:
 
@@ -143,8 +148,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 
 ## Hard boundaries
 
-- Never modify, copy, embed or commit the user-supplied `.gba` file, Nintendo
-  logo bytes, BIOS bytes or save data. The original ROM is read-only input.
+- Never modify, copy, embed or newly commit a user-supplied or vendored `.gba`
+  file, Nintendo logo bytes, BIOS bytes or save data. All such ROMs are
+  read-only inputs. Never copy ROM bytes into generated output or CI artifacts,
+  publish them, or include their binaries in a CI workflow; local manual
+  execution is optional and must follow `tests/roms/gba-tests/README.md`.
   Generated AOT source must not contain a ROM byte array or raw image copy; bind
   SHA-256+length and require a caller-supplied `--rom PATH`.
 - Do not use third-party emulator implementation sources, game decompilations or
@@ -166,10 +174,13 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   completed budget as a booted game or a rendered frame from hardware timing.
 - The default third-party dependency set stays empty: the workspace lockfile
   contains only the three internal path packages. Tests must not require network
-  access, commercial ROMs, BIOS files or external crates. The optional
-  `apps/desktop` and `apps/web` packages have their own locks and are excluded
-  from the default graph; browser registry dependencies and Node/npm tools stay
-  outside the root lock and root build.
+  access, commercial ROMs, BIOS files or external crates. The MIT-licensed
+  hardware-test ROMs in `tests/roms/gba-tests/` are optional local black-box
+  tests, not part of `cargo test` or CI. A budget stop is not a ROM pass: only
+  the ROM's own visible PASS result counts. The optional `apps/desktop` and
+  `apps/web` packages have their own locks and are excluded from the default
+  graph; browser registry dependencies and Node/npm tools stay outside the root
+  lock and root build.
 - AOT is restricted to immutable ROM bytes. RAM/self-modifying code must always
   go through the reference interpreter with a fresh fetch/decode.
 
@@ -210,6 +221,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
   failure paths, optional frontend gate contracts, web-tool bootstrap regression
   and workspace compatibility contracts.
+- `tests/roms/gba-tests/`: optional MIT-licensed local black-box ROM tests;
+  immutable inputs, not part of `cargo test` or CI. See the directory README for
+  cross-target execution instructions and visible-pass criteria.
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.

@@ -8,6 +8,9 @@ use crate::ir::{AluOpcode, Cond, DecodeResult, IrInstr, Op, Shift, ShiftKind, Sr
 pub(super) fn decode_arm_data_or_extra(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
     let immediate = (raw >> 25) & 1;
     let low_nibble = (raw >> 4) & 0xF;
+    if immediate == 0 && raw & 0x0FB0_00F0 == 0x0100_0090 {
+        return decode_arm_swap(addr, raw, cond);
+    }
     if immediate == 0 && low_nibble == 0b1001 {
         return decode_arm_multiply(addr, raw, cond);
     }
@@ -25,12 +28,57 @@ pub(super) fn decode_arm_data_or_extra(addr: u32, raw: u32, cond: Cond) -> Decod
     decode_arm_data_processing(addr, raw, cond)
 }
 
+/// ARMv4T `SWP`/`SWPB`. DDI0100E §4.1.51–52 makes `Rd=Rm` legal, but
+/// `R15` operands and `Rn` aliases with either `Rd` or `Rm` UNPREDICTABLE.
+fn decode_arm_swap(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
+    let rn = ((raw >> 16) & 0xF) as u8;
+    let rd = ((raw >> 12) & 0xF) as u8;
+    let rm = (raw & 0xF) as u8;
+    if raw & 0x0000_0F00 != 0 {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM SWP/SWPB requires its fixed SBZ bits [11:8] to be zero",
+        ));
+    }
+    if rn == 15 || rd == 15 || rm == 15 {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM SWP/SWPB with R15 is unpredictable",
+        ));
+    }
+    if rn == rd || rn == rm {
+        return Err(unsupported(
+            addr,
+            false,
+            raw,
+            "ARM SWP/SWPB with Rn aliased to Rd or Rm is unpredictable",
+        ));
+    }
+    Ok(IrInstr {
+        addr,
+        thumb: false,
+        raw,
+        cond,
+        op: Op::Swap {
+            rd,
+            rm,
+            rn,
+            byte: raw & (1 << 22) != 0,
+        },
+    })
+}
+
 /// ARM `MUL{cond}{S}` (bits 24-21 = 0000) and `MLA{cond}{S}` (0001). Every
 /// other opcode in this encoding space (UMAAL, the long multiplies and the
 /// halfword multiplies) stays an explicit unsupported encoding. Documented
 /// restrictions from GBATEK `#arm-opcodes-multiply-and-multiply-accumulate-mul-mla`:
-/// R15 may not appear, `Rd` may not equal `Rm`, and MUL's unused `Rn` field
-/// must be zero.
+/// R15 may not appear and MUL's unused `Rn` field must be zero. The documented
+/// unpredictable `MUL`/`MLA Rd=Rm` aliases use an explicit prototype design
+/// extension.
 fn decode_arm_multiply(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
     let opcode = (raw >> 21) & 0xF;
     let set_flags = (raw >> 20) & 1 == 1;
@@ -60,14 +108,6 @@ fn decode_arm_multiply(addr: u32, raw: u32, cond: Cond) -> DecodeResult {
             false,
             raw,
             "ARM MUL has a nonzero unused Rn field",
-        ));
-    }
-    if rd == rm {
-        return Err(unsupported(
-            addr,
-            false,
-            raw,
-            "ARM multiply with Rd=Rm is unpredictable",
         ));
     }
     Ok(IrInstr {
@@ -181,15 +221,12 @@ pub(super) fn decode_arm_data_processing(addr: u32, raw: u32, cond: Cond) -> Dec
             "ARM MOV/MVN requires its fixed Rn=0 encoding",
         ));
     }
-    if rd == 15 && set_flags && !is_test {
-        return Err(unsupported(
-            addr,
-            false,
-            raw,
-            "ARM S=1 with Rd=PC requires an SPSR restore, which is not implemented",
-        ));
-    }
-
+    // `S=1` with `Rd=R15` is a documented exception return (GBATEK
+    // `#arm-opcodes-data-processing-alu`): the CPSR is restored from the current
+    // mode's SPSR and the computed result becomes the PC. Test operations have
+    // a fixed Rd=0 and never reach this form, so it stays an ordinary typed
+    // data-processing instruction here; whether an SPSR exists is a runtime
+    // question (`Cpu::return_from_exception`).
     let rhs = decode_operand(addr, raw)?;
     let op = match opcode {
         0 => alu(AluOpcode::And, rd, rn, rhs, set_flags),

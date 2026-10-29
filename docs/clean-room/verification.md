@@ -119,11 +119,17 @@ lockfiles.
   `Bus::state_digest`.
 - ARM/Thumb ALU, NZCV for carry/borrow/overflow, condition-false no-op, PC
   advance, direct branches, `BL` link/return, BX ARM↔Thumb round trip, PC
-  operand pipeline values, and aligned ALU PC writes.
+  operand pipeline values, aligned ALU PC writes, and the documented `S=1,
+  Rd=PC` exception return from a valid SPSR.
 - Full ARM data-processing family, LSL/LSR/ASR/ROR/RRX by immediate and by
   register (low-byte amounts, 0/32/>32/256 cases), ADC/SBC/RSC carry ordering,
-  logical V/C preservation, and explicit `S=1` PC rejection. See
+  logical V/C preservation, and SPSR-based `S=1` PC return semantics. See
   `crates/core/tests/arm_alu.rs`, `crates/core/tests/arm_shift.rs` and `crates/core/tests/arm_control.rs`.
+- `crates/core/tests/exception_return.rs` and
+  `crates/aot/tests/aot_exception_return.rs`: valid ARM/Thumb state and bank
+  restoration, PC alignment from the restored T bit, NZCV restoration instead
+  of the ordinary ALU result, dynamic-PC discovery metadata, and fail-closed
+  missing/invalid SPSR cases with no state mutation.
 - Thumb move-shifted, the other fifteen register ALU opcodes plus `MUL`, high-register
   ADD/CMP/MOV (low/low MOV/CMP only as the contract's **Design** extension),
   ADR/PC/SP adjustment, and both `BL` halves with an exact mid-pair budget
@@ -165,9 +171,11 @@ lockfiles.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
-- Rejected encodings (multiply-long/halfword multiply/swap, block transfers, `S=1` Rd=PC,
-  malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb PUSH/BLX) report the raw
-  word/state and leave PC unchanged.
+- Rejected encodings (multiply-long/halfword multiply, unpredictable SWP aliases,
+  unsupported block transfers, malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb PUSH/BLX) report
+  the raw word/state and leave PC unchanged. A decoded `S=1, Rd=PC` return with
+  no valid SPSR is an explicit `Error::Psr` and leaves the complete CPU state
+  unchanged.
 - Unaligned/nonexecutable fetches fail explicitly.
 - Unknown backend names are preserved in `UnsupportedBackend` (`--backend foo`
   reports `foo`, never `"unknown"`).
@@ -251,9 +259,13 @@ expectations, not from the decoder/interpreter:
 - `crates/core/tests/arm_alu.rs`: all sixteen opcodes in register and immediate form,
   ADC/SBC/RSC carry-in and overflow edges, RRX-before-flags ordering, logical
   shifter-carry/V preservation, S=0 preservation, and encoding restrictions.
+- `crates/core/tests/cpu.rs::arm_mul_and_mla_rd_eq_rm_use_pre_instruction_values_as_a_design_policy`:
+  checks the owner-approved deterministic `MUL` and `MLA Rd=Rm` extensions,
+  low-word results, N/Z behavior and C/V preservation; these are not ARM7TDMI
+  conformance vectors.
 - `crates/core/tests/arm_control.rs`: ARM PC+8/+12 operands, aligned S=0 PC writes,
-  S=1 PC errors, B/BL targets and link register, conditional false LR
-  preservation, BX state exchange and BX PC behavior.
+  S=1 PC exception-return decode metadata, B/BL targets and link register,
+  conditional false LR preservation, BX state exchange and BX PC behavior.
 - `crates/core/tests/thumb_alu.rs`: all sixteen register ALU forms including
   `MUL`, both shift
   groups, low-byte register amounts, high-register flags/PC rules, ADR/SP
@@ -278,16 +290,18 @@ expectations, not from the decoder/interpreter:
   reserved register bits, ARMv5 LDRD/STRD rejection, and alias/writeback errors.
 - `crates/core/tests/arm_block.rs`: IA/IB/DA/DB ascending addresses for both
   directions, writeback and ARMv4 base-in-list specials, PC load alignment/store
-  value, `S=1`/empty/PC-base rejection, unaligned-base pre-access rejection, and
-  a documented observable partial-failure outcome.
+  value, `S=1`/empty/PC-base rejection, unaligned-base transfer alignment with
+  original-base writeback (including base-in-list), and a documented observable
+  partial-failure outcome.
 - `crates/core/tests/thumb_memory.rs`: THUMB.7 word/byte register offsets,
   THUMB.8 half/signed register forms, THUMB.9 word/byte immediate scaling,
   preserved THUMB.10 halfword shape, THUMB.11 SP-relative word transfers and the
   preserved literal load.
 - `crates/core/tests/thumb_block.rs`: PUSH/POP full-descending order and SP
   restore, LR/PC bits with `POP PC` alignment and Thumb state, empty-list
-  errors, LDMIA/STMIA writeback/base-in-list specials, unaligned SP/base
-  rejection, and partial-transfer observability.
+  PUSH/POP errors plus the ARMv4 LDMIA/STMIA R15/`+0x40` quirk, writeback/base-in-list specials, unaligned SP/base
+  transfer alignment with original-base writeback, and partial-transfer
+  observability.
 - `crates/aot/tests/aot_memory.rs`: direct native word/byte/half/signed accesses,
   unaligned word load, a dynamic `LDR pc` target (one fallback), hand-expected
   registers/bus and reference match. A discovery-only case asserts that a
@@ -295,6 +309,19 @@ expectations, not from the decoder/interpreter:
   load, so `BX` stays dynamic.
 - `crates/aot/tests/aot_block.rs`: direct native ARM STMIA/LDMDB and Thumb
   PUSH/POP/LDMIA/STMIA with hand-expected registers, memory and exact budget.
+- `crates/aot/tests/aot_block.rs::native_thumb_empty_ldmia_matches_the_documented_armv4_pc_quirk`:
+  native empty-list PC transfer, `+0x40` base writeback, dynamic control-flow
+  metadata and reference parity using a synthetic ROM.
+- `crates/aot/tests/aot_fallback.rs`: an unknown dynamic target executes through
+  interpreter fallback across the modeled active-to-VBlank boundary; native
+  output matches reference CPU, bus, image and exact budget. A second synthetic
+  fixture arms VBlank IRQs, installs a guest handler and unmasks IRQs; translated
+  instructions detect the pending request and the handler executes through a
+  fresh fallback, matching reference CPU, bus and budget. This covers IRQ entry
+  parity only; it does not claim the BIOS dispatcher frame or handler return.
+- `crates/aot/tests/aot_block_unaligned.rs`: native ARM STMIA/LDMDA and Thumb
+  STMIA/LDMIA with unaligned bases; hand-expected aligned transfer words and
+  original-base writeback compared against the reference interpreter.
 - `crates/aot/tests/aot_ram.rs`: the dedicated issue #17 native-RAM regression.
   It asserts that only ROM blocks are present, the two RAM instructions each use
   a fresh reference fallback on both visits (exactly four), the patched
@@ -378,6 +405,8 @@ expectations, not from the decoder/interpreter:
   and state digest), exact 26-instruction budget, 0 fallbacks, DISPCNT-only bus
   digest and full image digest. A second fixture proves a dynamic `MOV PC,Rs`
   target takes two fresh reference fallbacks while the native block terminates.
+  A third fixture checks native `MUL` and `MLA Rd=Rm` aliases against separate
+  expected results and the reference policy implementation.
 - Thumb-ALU fixture (`crates/aot/tests/aot_thumb_alu.rs`): Thumb move-shifted, AND/ORR/EOR/
   MVN/NEG/SBC/ADD, high-register MOVs and both `BL` halves. The generated block
   section has no interpreter call; the dynamic callee takes exactly three
@@ -789,12 +818,14 @@ not initial HEAD sizes, and are not used as historical evidence.
 
 ## Not established
 
-No hardware conformance ROM suite has been run. No retail game is supported or
-known playable. No BIOS boots; only the bounded synthetic SWI entry/return path
-is tested. Other exception entry/return, interrupt delivery, save persistence,
+No complete hardware conformance ROM suite has passed, and no real GBA hardware
+was used. No retail game is supported or known playable. No BIOS boots; only the
+bounded synthetic SWI entry/return path, partial VBlank IRQ request/entry, and
+the documented CPU-only ALU SPSR return are tested. The BIOS IRQ dispatcher
+frame/handler return and other exception entry/vectoring, save persistence,
 audio output, input interaction, DMA arbitration and automatic event timing,
 cycle timing, other BG modes/layers, OBJ/sprite rendering or a playable frontend
-is verified. The static Mode 0 BG0 snapshot is
+are not verified. The static Mode 0 BG0 snapshot is
 only a synthetic, documentation-driven capability slice; it is not evidence
 that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
 optional synthetic `apps/desktop` frontend presents
@@ -813,7 +844,7 @@ conformance remain unverified. No real GBA hardware
 measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
 or tested. REA native analysis remains blocked as recorded.
 
-Low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, `S=1` PC restore, and all
+Low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, other exception entry/vectoring, and all
 load/store expansion beyond the listed literal/halfword forms remain explicitly
 unsupported. Low/low Thumb `MOV`/`CMP` are accepted only as the explicit
 **Design** extension described in the contract, not as documented-valid aliases.
@@ -829,3 +860,23 @@ cases; they are not an exhaustive proof of ARMv4T or GBA correctness. Future
 compatibility reports must identify ROM digest, BIOS policy, test suite/version,
 host, execution budget and observable pass condition, not just a screenshot or a
 lack of errors.
+
+## Local hardware-test ROM cross-build and run (2026-10-29)
+
+All seven optional ROM-bound AOT artifacts were built for
+`x86_64-apple-darwin` on an Apple-silicon Mac and executed under Rosetta. Each
+was verified as a Mach-O x86_64 executable, required the unchanged external ROM
+path, and reported `embedded_rom_bytes=0`. The reference snapshots for
+`thumb.gba` and `memory.gba` visibly show their ROM-owned “All tests passed”
+result; their AOT endpoints and image digests match. `arm.gba` remains blocked at
+test 234 on the unpredictable `CMP` encoding, and `bios.gba` remains blocked on
+its BIOS-vector read. `hello.gba`, `shades.gba` and `stripes.gba` consume the
+5,000,000-instruction budget and are only PPU samples, not PASS results. Exact
+per-ROM outcomes and the later SWP follow-up are recorded in
+`tests/roms/gba-tests/README.md`. These local results do not establish Emerald
+playability or compatibility beyond the named ROM-owned test results.
+
+Artifacts and snapshots are local ignored output only. Vendored ROMs remain
+read-only, are not part of `cargo test` or CI, and were neither copied into the
+generated artifacts nor embedded. This run is not a hardware-conformance or
+playability claim; BIOS execution remains blocked and Issue #10 stays open.

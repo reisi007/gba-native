@@ -37,6 +37,8 @@ pub use wasm_meta::{wasm_artifact_metadata, wasm_build_metadata, wasm_readme};
 pub use wasm_tool::{WASM_BINDGEN_VERSION, wasm_bindgen_cli};
 
 #[cfg(test)]
+mod harness_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod wasm_tests;

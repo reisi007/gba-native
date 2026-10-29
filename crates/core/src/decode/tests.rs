@@ -106,10 +106,16 @@ fn rejects_arm_multiply_and_block_space() {
     ));
     assert!(decode_arm(0, 0xE96D_4000).is_err());
     assert!(decode_arm(0, 0xE92D_0000).is_err());
-    // SWP shares the 00010b/bit20=0 shape with PSR transfers but must be
-    // reported as multiply/swap, never as a malformed MRS.
-    let swp = decode_arm(0, 0xE100_0091).expect_err("SWP rejected");
-    assert!(format!("{swp}").contains("multiply/swap"));
+    // SWP shares the multiply/PSR decode region but has its own typed operation.
+    assert_eq!(
+        decode_arm(0, 0xE100_1092).expect("SWP r1,r2,[r0]").op,
+        Op::Swap {
+            rd: 1,
+            rm: 2,
+            rn: 0,
+            byte: false,
+        }
+    );
 }
 
 #[test]
