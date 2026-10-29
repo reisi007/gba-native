@@ -1109,3 +1109,27 @@ boot produces a byte-identical `DISPCNT` timeline, so the guest is not waiting
 for input. The video hardware is never initialised beyond that backdrop and no
 start screen, frame or compatibility result is claimed. HBlank (IE bit 1,
 DISPSTAT bit 4) remains unimplemented.
+
+A second read-only trace narrows the idle state further. The guest's per-frame
+code calls the two callback slots at `0x030022C0`/`0x030022C4` exactly once per
+frame (`pc=0x0800051C`, reader at `0x0800052A`) and both read zero. The only
+non-zero value ever stored there is `0x0816CB15` at step 1,139,600 (setter
+`0x08000542`, caller `0x080004EE`); the boot code clears it again at step
+1,140,711 after loading `[0x03005D88]`, which is zero, and comparing it to `1`.
+The callback target `0x0816CB14` is never executed in 20,000,000 instructions,
+and IWRAM `0x030022B4..=0x030022E8` (the suspected main state block) stays zero.
+The guest is therefore alive and counting frames (`0x030022E0`/`0x030022E4`
+increment once per frame) with no registered frame callback. The word
+`0x03005D88` is written zero once by the guest and read exactly once by the
+boot check; it is the switch that decides whether the callback survives.
+
+A **counterfactual** experiment (not evidence of correct emulation, and not a
+repository change) writes `1` to `0x03005D88` after step 1,140,600. The boot
+check then keeps callback2 = `0x0816CB15`, the callback executes, and the run
+stops after 1,678 further instructions with
+`BIOS HLE: service 0x12 is not implemented`. Service `12h` is the BIOS LZ77
+decompression entry point, which is outside the six documented HLE services and
+must not be synthesized from BIOS bytes. The next blocking capability is
+therefore decompression HLE (and possibly the related Huffman/RL entries), a
+scope decision, not a rendering defect. No start screen, frame or compatibility
+result is claimed.
