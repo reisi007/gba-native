@@ -7,8 +7,8 @@
 //! the documented disconnected state and UART remains an explicit error.
 
 use gba_native_core::bus::{
-    BiosWritePolicy, Bus, RCNT_ADDR, RomWritePolicy, SIOCNT_ADDR, SIODATA8_ADDR, SIODATA32_H_ADDR,
-    SIODATA32_L_ADDR,
+    BackupPolicy, BiosWritePolicy, Bus, RCNT_ADDR, RomWritePolicy, SIOCNT_ADDR, SIODATA8_ADDR,
+    SIODATA32_H_ADDR, SIODATA32_L_ADDR,
 };
 use gba_native_core::cart::{Cartridge, ROM_BASE};
 use gba_native_core::error::Error;
@@ -165,4 +165,41 @@ fn rom_write_policy_is_explicit_and_never_stores_cartridge_bytes() {
     // The policy is host configuration, not guest state.
     let strict_twin = Bus::new(cart(0x200));
     assert_eq!(lenient.state_digest(), strict_twin.state_digest());
+}
+
+#[test]
+fn backup_policy_is_explicit_and_volatile() {
+    let mut strict = Bus::new(cart(0x200));
+    assert_eq!(strict.backup_policy(), BackupPolicy::Strict);
+    assert!(matches!(
+        strict.read8(0x0E00_0000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    assert!(matches!(
+        strict.write8(0x0E00_0000, 0x12),
+        Err(Error::UnsupportedSave { .. })
+    ));
+
+    let mut sram = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
+    // Erased on construction.
+    assert_eq!(sram.read8(0x0E00_0000).expect("erased"), 0xFF);
+    sram.write8(0x0E00_0000, 0x12).expect("sram store");
+    assert_eq!(sram.read8(0x0E00_0000).expect("stored"), 0x12);
+    // The modelled device is byte wide, so wider accesses stay explicit.
+    assert!(matches!(
+        sram.read16(0x0E00_0000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    assert!(matches!(
+        sram.write32(0x0E00_0000, 1),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    // Outside the modelled 32 KiB the window stays explicit.
+    assert!(matches!(
+        sram.read8(0x0E00_8000),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    // The backup contents are guest state and change the digest.
+    let fresh = Bus::new(cart(0x200)).with_backup_policy(BackupPolicy::Sram32KVolatile);
+    assert_ne!(sram.state_digest(), fresh.state_digest());
 }

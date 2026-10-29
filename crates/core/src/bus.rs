@@ -9,11 +9,13 @@
 use std::collections::BTreeSet;
 
 mod access;
+mod backup;
 mod dma;
 mod io;
 mod irq;
 mod sound;
 mod timer;
+pub use backup::{BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_WINDOW_LEN};
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
@@ -159,6 +161,8 @@ pub struct Bus {
     bios_data_policy: BiosDataPolicy,
     bios_write_policy: BiosWritePolicy,
     rom_write_policy: RomWritePolicy,
+    backup_policy: BackupPolicy,
+    backup: Vec<u8>,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -195,6 +199,8 @@ impl Bus {
             bios_data_policy: policy,
             bios_write_policy: BiosWritePolicy::Strict,
             rom_write_policy: RomWritePolicy::Strict,
+            backup_policy: BackupPolicy::Strict,
+            backup: vec![0xFF; SAVE_LEN],
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -234,6 +240,21 @@ impl Bus {
 
     pub fn rom_write_policy(&self) -> RomWritePolicy {
         self.rom_write_policy
+    }
+
+    /// Selects the explicit opt-in for a volatile backup device.
+    ///
+    /// Under [`BackupPolicy::Sram32KVolatile`] the backup window is backed by
+    /// 32 KiB of erased SRAM that lives only in memory. No file is written and
+    /// no flash command engine exists.
+    #[must_use]
+    pub fn with_backup_policy(mut self, policy: BackupPolicy) -> Self {
+        self.backup_policy = policy;
+        self
+    }
+
+    pub fn backup_policy(&self) -> BackupPolicy {
+        self.backup_policy
     }
 
     /// Sets the host-injected GBA key mask, where one means pressed.
@@ -313,6 +334,7 @@ impl Bus {
                 + self.palette.len()
                 + self.vram.len()
                 + self.oam.len()
+                + self.backup.len()
                 + 10,
         );
         bytes.extend_from_slice(&self.ewram);
@@ -321,6 +343,7 @@ impl Bus {
         bytes.extend_from_slice(&self.vram);
         bytes.extend_from_slice(&self.oam);
         self.io.append_digest(&mut bytes);
+        bytes.extend_from_slice(&self.backup);
         bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
         sha256::digest(&bytes)
     }

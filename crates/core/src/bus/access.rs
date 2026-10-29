@@ -133,8 +133,8 @@ impl Bus {
                 len: self.cart.len(),
             });
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_read(addr, 1).map(|v| v as u8);
         }
         if (IO_BASE..=IO_BASE + 0x3FF).contains(&addr) {
             if let Some(value) = self.io.irq().read8(addr) {
@@ -210,8 +210,8 @@ impl Bus {
                 len: self.cart.len(),
             });
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_read(addr, 2).map(|v| v as u16);
         }
         Err(Error::Unmapped { addr })
     }
@@ -253,8 +253,8 @@ impl Bus {
                 len: self.cart.len(),
             });
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_read(addr, 4);
         }
         // Palette, VRAM and OAM are 16-bit devices; assemble a word from two
         // implemented halfword accesses.
@@ -370,8 +370,8 @@ impl Bus {
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
             return self.rom_store(addr);
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_write(addr, u32::from(value), 1);
         }
         Err(Error::Unmapped { addr })
     }
@@ -428,8 +428,8 @@ impl Bus {
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
             return self.rom_store(addr);
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_write(addr, u32::from(value), 2);
         }
         Err(Error::Unmapped { addr })
     }
@@ -464,8 +464,8 @@ impl Bus {
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
             return self.rom_store(addr);
         }
-        if (0x0E00_0000..=0x0E00_FFFF).contains(&addr) {
-            return Err(Error::UnsupportedSave { addr });
+        if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
+            return self.save_write(addr, value, 4);
         }
         if palette_mirror_offset(addr).is_some()
             || vram_mirror_offset(addr, self.dispcnt() & 7).is_some()

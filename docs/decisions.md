@@ -588,3 +588,36 @@ explicit `UnsupportedSave` error.
 
 With the three opt-ins the run advanced to the guest's backup-device probe
 (`0x0E005555`), which needs a save-type model that is out of scope.
+
+## D32 — Volatile SRAM backup model and V-Counter match IRQ
+
+Two further policy boundaries were uncovered by the same external run. After the
+ROM-only store opt-in the guest probed the backup window with the classic flash
+unlock sequence (`0xAA` to `0x0E00_5555`), which the prototype answered with
+`UnsupportedSave`. Modelling the *documented* result of that probe — no flash
+device present — is a device model, not a save feature:
+
+- `BackupPolicy::Strict` remains the default and reports every access in the
+  64 KiB window as `UnsupportedSave`.
+- `BackupPolicy::Sram32KVolatile` (`run --synthetic-backup-sram`) models a
+  byte-wide, volatile 32 KiB SRAM that starts erased (`0xFF`). It has no flash
+  command engine, no persistence and no file surface; wider accesses and the
+  window beyond 32 KiB stay explicit errors. The SRAM contents are guest state
+  and are included in `Bus::state_digest`.
+
+The same run then waited in a five-instruction loop at `0x080008C6` with
+`IE=0x0005`, `IME=1`, `DISPSTAT=0x9628` (LYC=150, V-Blank and V-Counter IRQ
+enabled) and an advancing `VCOUNT`. The loop is a per-frame wait, not a hang:
+it exits about once per frame and the guest then reads `KEYINPUT` and calls its
+subsystems. `IE` bit 0 is V-Blank and bit 2 is the
+V-Counter match; `IF` stayed zero because the prototype latched no match
+request. The documented match flag and request are now modelled: DISPSTAT bits
+8..15 are writable as `LYC`, the read-only match flag (bit 2) reflects
+`LYC == VCOUNT`, and with the V-Counter IRQ enable (bit 5) each transition into
+the matching line latches `IF` bit 2. This is a generic, documented register
+behaviour, not a cartridge-specific condition, and it does not add HBlank,
+cycle timing or BIOS execution.
+
+HBlank remains unimplemented: `IE` bit 1 and `DISPSTAT` bit 4 are still absent
+from the model, so a guest that needs HBlank still stops or waits instead of
+receiving a fabricated interrupt.

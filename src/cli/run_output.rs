@@ -53,6 +53,7 @@ pub(super) fn write_snapshot(
          bios_write_policy={}\n\
          bios_write_note={}\n\
          rom_write_policy={}\n\
+         backup_policy={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -78,6 +79,7 @@ pub(super) fn write_snapshot(
         bus.bios_write_policy().name(),
         bios_write_note,
         bus.rom_write_policy().name(),
+        bus.backup_policy().name(),
         requested_budget,
         used_budget,
         stop_reason,

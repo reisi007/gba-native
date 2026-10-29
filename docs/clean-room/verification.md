@@ -1049,9 +1049,46 @@ byte is written, no flash engine is modelled, and the backup region keeps
 896,755 and stops at the guest's backup-device probe (`0x0E005555`).
 
 `crates/core/tests/mask_rom_and_serial.rs` now also covers the ROM-only write
-policy (5 tests). Inventory pins: 408 listed / 404 selected.
+policy (5 tests).
 
-`DISPCNT` was `0x0080` (forced blank) at every stop, so no start screen, frame or
-compatibility result was observed and none is claimed. The Game Pak window keeps
-its fail-closed error because writes there depend on an unmodelled flash command
-engine.
+## Round: volatile backup SRAM and V-Counter match IRQ (2026-10-29)
+
+After the ROM-only store opt-in the guest issued the classic flash unlock write
+(`0xAA` to `0x0E00_5555`) and stopped on `save hardware ... is not implemented`.
+`BackupPolicy::Sram32KVolatile` (`run --synthetic-backup-sram`) models the
+documented answer of a cartridge with no flash device: a byte-wide, volatile,
+erased 32 KiB SRAM with no command engine and no persistence. The SRAM contents
+are guest state in `Bus::state_digest`; wider accesses and the rest of the
+64 KiB window remain explicit `UnsupportedSave` errors.
+
+With all four opt-ins the run advanced past 20,000,000 instructions and cleared
+forced blank (`DISPCNT=0x0000`, `display_forced_blank=0`). A tied observation
+window then showed `IE=0x0005`, `IME=1`, `DISPSTAT=0x9628` (LYC=150) and
+`IF=0` while the guest waited in a five-instruction loop at `0x080008C6`; an
+enabled V-Counter match was never latched. The documented match flag (DISPSTAT
+bit 2) and V-Counter request (`IF` bit 2) are now modelled for every line
+transition and for a write that makes `LYC` match the current line, gated by the
+DISPSTAT enable bit 5.
+
+A read-only instruction trace of that loop (throwaway observer under `target/`,
+never a repository artifact) decodes it as
+`ldrh r1,[r2,#28] / adds r0,r3,#0 / ands r0,r1 / cmp r0,#0 / beq` on the IWRAM
+halfword at `0x030022DC` with `r3=1`, i.e. a per-frame wait on bit 0. The guest
+sets and clears that bit from ROM code at `0x080007D4` and `0x080008B8`; the loop
+exits about once per frame (`exit pc=0x080008D0` observed six times in 500,000
+instructions), reads `KEYINPUT` (`0x03FF`, all released) and calls several
+subsystems before waiting again. **It is not a hang.**
+
+`crates/core/src/bus/irq/tests.rs` covers the derived flags, the request at the
+matching line, its absence without the enable bit and the immediate request on a
+matching write. `mask_rom_and_serial` covers the backup policy (6 tests).
+Inventory pins: 411 listed / 407 selected, `--lib` 46.
+
+After this change the same run still reports `final_pc=0x080008CE` at
+20,000,000 instructions with an unchanged white image
+(`image_sha256=232b3c7c...`). In a further 1,000,000-instruction window the
+guest wrote **no** palette, VRAM, OAM or DISPCNT byte at all (`DISPCNT` was
+written exactly twice in 50,000,000 instructions), so the video hardware is
+never initialised in this state and the V-Counter model was **not** sufficient.
+No start screen, frame or compatibility result is claimed. HBlank (IE bit 1,
+DISPSTAT bit 4) remains unimplemented.

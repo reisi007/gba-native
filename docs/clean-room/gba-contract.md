@@ -113,6 +113,16 @@ executable and does not affect the Game Pak ROM window, whose stores keep
 reporting `RomWrite`. The HLE copy services accept a BIOS destination only under
 that opt-in.
 
+A fourth host policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
+(`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access as
+`UnsupportedSave`. The explicit `Sram32KVolatile` opt-in
+(`run --synthetic-backup-sram`) models a byte-wide, volatile 32 KiB SRAM that
+starts erased (`0xFF`), is lost when the process ends and has no flash command
+engine and no persistence. Wider accesses and the window beyond 32 KiB stay
+explicit `UnsupportedSave` errors. This is a device model for bounded progress
+experiments, not a save feature, and the SRAM contents are guest state included
+in `Bus::state_digest`.
+
 A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
 The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
 documented no-effect store of a ROM-only cartridge. It never writes cartridge
@@ -120,10 +130,11 @@ bytes, models no flash command engine and leaves the backup region
 (`0x0E00_0000..=0x0E00_FFFF`) an explicit `UnsupportedSave` error.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
-`run --synthetic-bios-rom-writes` and `run --synthetic-rom-writes-ignored` (all
-default to strict); successful output and the optional snapshot report print
-`bios_data_policy`, `bios_write_policy` and `rom_write_policy` plus the matching
-non-authentic note for each opt-in. Tests use synthetic fixtures only.
+`run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored` and
+`run --synthetic-backup-sram` (all default to strict); successful output and the
+optional snapshot report print `bios_data_policy`, `bios_write_policy`,
+`rom_write_policy` and `backup_policy` plus the matching non-authentic note for
+each opt-in. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
@@ -307,15 +318,21 @@ Implemented regions and widths:
   slice, not hardware timing. One guest instruction is not three cycles, lines
   do not model drawing or HBlank periods, the 152 remainder instructions are
   spread evenly instead of at their exact cycle positions, and no instruction
-  observes a mid-line split. There is no HBlank, VCOUNT-match IRQ, per-line
-  interrupt scheduling, wait-state/cycle accounting or scanline renderer. The
+  observes a mid-line split. The DISPSTAT V-Count setting (bits 8..15) is
+  writable and compared against the current line: the read-only match flag
+  (bit 2) reads set while they are equal, and with the V-Counter IRQ enable
+  (bit 5) a line transition into the matching line latches the documented
+  V-Counter request in `IF` bit 2. A write that makes the setting match the
+  current line raises the request immediately, as documented. There is no
+  HBlank, per-line interrupt scheduling beyond this match, wait-state/cycle
+  accounting or scanline renderer. The
   pre-existing byte-addressed sound-register reads are unchanged, every other
   I/O address keeps the existing register-specific dispatch, and
   otherwise-unmodelled reads remain explicit `UnsupportedIoRead { width: 8 }`
   errors, including the neighbouring `DISPSTAT` lanes and the byte above
   `VCOUNT`. Byte writes to `VCOUNT` remain ignored-and-recorded like any other
-  unmodelled I/O write, and the DISPSTAT V-Count setting (bits 8..15), its match
-  flag (bit 2) and the V-Counter IRQ remain unmodelled.
+  unmodelled I/O write. The DISPSTAT V-Counter match model is the one described
+  above; no other per-line interrupt source exists.
 
 ### Timers
 
