@@ -343,6 +343,9 @@ impl Bus {
         bytes.extend_from_slice(&self.vram);
         bytes.extend_from_slice(&self.oam);
         self.io.append_digest(&mut bytes);
+        // The backup bytes are guest state only under the SRAM opt-in; under
+        // the strict default they are the constant erased image. Hashing them
+        // unconditionally keeps the digest independent of the host policy.
         bytes.extend_from_slice(&self.backup);
         bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
         sha256::digest(&bytes)

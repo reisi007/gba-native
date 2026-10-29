@@ -15,8 +15,10 @@
 //! a mid-line split. The DISPSTAT VBlank flag covers lines `160..=226` and line
 //! 227 clears it, per GBATEK `#lcd-io-interrupts-and-status` ("set in line
 //! 160..226; not 227"). The VBlank IRQ request latches once when line 160 is
-//! entered. HBlank, VCOUNT-match IRQs, scanline/cycle timing and BIOS execution
-//! remain absent.
+//! entered. `DISPSTAT` bits 8..15 are the writable V-Count setting, bit 2 is
+//! the read-only match flag for `LYC == VCOUNT`, and bit 5 gates the documented
+//! V-Counter request (`IF` bit 2) on every matching line transition. HBlank,
+//! scanline/cycle timing and BIOS execution remain absent.
 
 use super::Bus;
 
@@ -87,10 +89,10 @@ pub const fn instructions_until_line(line: u8) -> u64 {
 const DISPSTAT_VBLANK_FLAG: u16 = 1 << 0;
 const DISPSTAT_VCOUNT_FLAG: u16 = 1 << 2;
 const DISPSTAT_VCOUNT_IRQ_ENABLE: u16 = 1 << 5;
-const DISPSTAT_VCOUNT_IRQ: u16 = 1 << 2;
 /// Bits 3..5 plus the V-Count setting in bits 8..15.
 const DISPSTAT_WRITABLE: u16 = 0xFF38;
 const IF_VBLANK: u16 = 1 << 0;
+const IF_VCOUNT: u16 = 1 << 2;
 const IE_MASK: u16 = 0x3FFF;
 const IME_ENABLE: u16 = 1;
 
@@ -140,7 +142,7 @@ impl IrqState {
     /// the setting and the V-Counter IRQ is enabled.
     fn request_vcount_match(&mut self) {
         if self.dispstat & DISPSTAT_VCOUNT_IRQ_ENABLE != 0 && self.vcount_match() {
-            self.pending |= DISPSTAT_VCOUNT_IRQ;
+            self.pending |= IF_VCOUNT;
         }
     }
 

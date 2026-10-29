@@ -183,11 +183,6 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if bios_rom_writes {
         bus = bus.with_bios_write_policy(gba_native::bus::BiosWritePolicy::RomWritesDropped);
     }
-    if backup_sram {
-        println!(
-            "backup_assumption=experimental volatile 32 KiB SRAM; no flash engine and no persistence"
-        );
-    }
     if rom_writes {
         bus = bus.with_rom_write_policy(gba_native::bus::RomWritePolicy::Dropped);
     }

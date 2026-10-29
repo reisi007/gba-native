@@ -137,10 +137,32 @@ Relevant anchors actually consulted for this milestone:
   hidden VBlank lines, and the 228-line/280896-cycle frame at 1232 cycles per
   line. Only a deterministic instruction-count approximation is implemented:
   the retained 93632-instruction budget is spread over the 228 lines and the
-  VBlank request follows the modelled line-160 transition. No scanline, HBlank,
-  VCOUNT-match or cycle timing is taken from these sections. These anchors were
-  consulted on 2026-10-29 in the same upstream GBATEK text at
-  <https://problemkaputt.de/gbatek.htm>, which is the same reference text as S1;
+  VBlank request follows the modelled line-160 transition. The same section
+  documents the V-Count setting in DISPSTAT bits 8..15 (`LYC`), the read-only
+  match flag in bit 2, the enable in bit 5 and the V-Counter request in `IF`
+  bit 2 ("when its value is identical to the content of the VCOUNT register
+  then the V-Counter flag is set (Bit 2), and (if enabled in Bit 5) an
+  interrupt is requested"); that flag/request condition is implemented on top
+  of the instruction-count line model, with `LYC` values `0..=255` accepted and
+  only `0..=227` reachable. The same section does not state when a *write* that
+  creates a match is evaluated; the model raises it immediately and labels
+  that choice as an implementation decision, not a quoted rule. No HBlank or cycle timing is taken
+  from these sections. These anchors were consulted on 2026-10-29 in the same
+  upstream GBATEK text at <https://problemkaputt.de/gbatek.htm>, which is the
+  same reference text as S1; that retrieval was not separately retained or
+  hashed.
+- `#gba-memory-map` and `#gba-cart-backup-sramfram`: the backup window entry
+  (`0E000000-0E00FFFF Game Pak SRAM (max 64 KBytes) - 8bit Bus width`) and the
+  documented byte-wide SRAM/FRAM cartridge backup. Only the explicit
+  `Sram32KVolatile` opt-in models an erased, volatile, byte-wide 32 KiB SRAM
+  inside that window; no chip-size detection, no persistence and no flash
+  behaviour is implemented or claimed.
+- `#gba-cart-backup-flash-rom` and `#gba-cart-backup-ids`: consulted only to
+  confirm that flash needs the documented command/ID sequence ("Used to detect
+  the type (and presence) of FLASH chips"), which this prototype deliberately
+  does **not** implement. Under `Sram32KVolatile` such writes are ordinary SRAM
+  bytes and reads return them; the model never claims a flash device is absent.
+  Both anchors were consulted on 2026-10-29 in the same upstream GBATEK text;
   that retrieval was not separately retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and

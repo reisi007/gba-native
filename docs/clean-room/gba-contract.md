@@ -113,28 +113,29 @@ executable and does not affect the Game Pak ROM window, whose stores keep
 reporting `RomWrite`. The HLE copy services accept a BIOS destination only under
 that opt-in.
 
-A fourth host policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
-(`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access as
-`UnsupportedSave`. The explicit `Sram32KVolatile` opt-in
+A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
+The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
+documented no-effect store of a ROM-only cartridge. It never writes cartridge
+bytes and models no flash command engine. The backup window is governed by its
+own policy, not by this one.
+
+A fourth policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
+(`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access there
+as `UnsupportedSave`. The explicit `Sram32KVolatile` opt-in
 (`run --synthetic-backup-sram`) models a byte-wide, volatile 32 KiB SRAM that
 starts erased (`0xFF`), is lost when the process ends and has no flash command
 engine and no persistence. Wider accesses and the window beyond 32 KiB stay
 explicit `UnsupportedSave` errors. This is a device model for bounded progress
-experiments, not a save feature, and the SRAM contents are guest state included
-in `Bus::state_digest`.
-
-A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
-The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
-documented no-effect store of a ROM-only cartridge. It never writes cartridge
-bytes, models no flash command engine and leaves the backup region
-(`0x0E00_0000..=0x0E00_FFFF`) an explicit `UnsupportedSave` error.
+experiments, not a save feature; the SRAM contents are guest state included in
+`Bus::state_digest`, while the selected policy is host configuration and is not
+hashed.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored` and
-`run --synthetic-backup-sram` (all default to strict); successful output and the
-optional snapshot report print `bios_data_policy`, `bios_write_policy`,
-`rom_write_policy` and `backup_policy` plus the matching non-authentic note for
-each opt-in. Tests use synthetic fixtures only.
+`run --synthetic-backup-sram` (all default to strict). Successful output prints
+all four policy values plus an explicit non-authentic assumption line for each
+selected opt-in; the optional snapshot report prints the four policy values and
+the BIOS data/write notes. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
@@ -217,12 +218,13 @@ Entry consumes no guest instruction budget; guest-handler instructions and the
 modeled epilogue each consume one.
 
 This behavior-only model follows the public BIOS interrupt-handling contract;
-it is not BIOS execution or a claim to reproduce BIOS bytes. Only two request
+it is not BIOS execution or a claim to reproduce BIOS bytes. Three request
 sources are generated: the VBlank request once per frame at the modelled
-line-160 transition, and modelled timer overflow requests on `IF` bits 3..6.
-The `0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
-HBlank/VCOUNT-match IRQs, cycle timing and BIOS boot remain unsupported. Do not
-interpret this as general GBA interrupt compatibility.
+line-160 transition, modelled timer overflow requests on `IF` bits 3..6, and the
+V-Counter match request on `IF` bit 2 (see the `VCOUNT` model below). The
+`0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
+HBlank IRQs, cycle timing and BIOS boot remain unsupported. Do not interpret
+this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -319,13 +321,20 @@ Implemented regions and widths:
   do not model drawing or HBlank periods, the 152 remainder instructions are
   spread evenly instead of at their exact cycle positions, and no instruction
   observes a mid-line split. The DISPSTAT V-Count setting (bits 8..15) is
-  writable and compared against the current line: the read-only match flag
-  (bit 2) reads set while they are equal, and with the V-Counter IRQ enable
-  (bit 5) a line transition into the matching line latches the documented
-  V-Counter request in `IF` bit 2. A write that makes the setting match the
-  current line raises the request immediately, as documented. There is no
-  HBlank, per-line interrupt scheduling beyond this match, wait-state/cycle
-  accounting or scanline renderer. The
+  writable and compared against the current line: GBATEK
+  `#lcd-io-interrupts-and-status` says "when its value is identical to the
+  content of the VCOUNT register then the V-Counter flag is set (Bit 2), and
+  (if enabled in Bit 5) an interrupt is requested". The model implements
+  exactly that: the read-only match flag (bit 2) reads set while they are
+  equal, and with the V-Counter IRQ enable (bit 5) a line transition into the
+  matching line latches the V-Counter request in `IF` bit 2. A write that makes
+  the setting match the current line raises the request immediately; the cited
+  section states the flag/request condition for `LYC == VCOUNT` but not when a
+  write is evaluated, so this immediate evaluation is an implementation choice,
+  not a quoted rule. All `LYC` values `0..=255` are accepted, but only the
+  modelled lines `0..=227` can match. There is no HBlank, per-line interrupt
+  scheduling beyond this match, wait-state/cycle accounting or scanline
+  renderer. The
   pre-existing byte-addressed sound-register reads are unchanged, every other
   I/O address keeps the existing register-specific dispatch, and
   otherwise-unmodelled reads remain explicit `UnsupportedIoRead { width: 8 }`
@@ -406,10 +415,12 @@ group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
 audio output. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
-- Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
-  and unmapped addresses are errors; the only exception is the explicit
-  synthetic zero-fill opt-in, which changes BIOS **data reads** to zero and
-  leaves BIOS fetch/write errors and every other address unchanged.
+- The backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by default and
+  only answers under the explicit `BackupPolicy::Sram32KVolatile` opt-in (see
+  the backup policy above). BIOS reads/writes and unmapped addresses are errors;
+  the only exception is the explicit synthetic zero-fill opt-in, which changes
+  BIOS **data reads** to zero and leaves BIOS fetch/write errors and every other
+  address unchanged.
 - CPU data-transfer rules actually implemented and tested:
   - A byte load/store uses `read8`/`write8` and the byte's exact address. It is
     never emulated as a wider access plus extraction. Byte stores to

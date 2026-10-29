@@ -385,3 +385,40 @@ fn run_synthetic_bios_zero_fill_is_explicit_in_output_and_report() {
         assert!(report.contains(expected), "report is missing {expected}");
     }
 }
+
+#[test]
+fn run_synthetic_backup_sram_is_explicit_and_reported_once() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    synthetic_rom(&cwd.join("plain.gba"), &[(0, 0xE3A0_0000)]);
+
+    let output = cli(
+        &cwd,
+        &[
+            "run",
+            "plain.gba",
+            "--budget",
+            "1",
+            "--synthetic-backup-sram",
+            "--out",
+            "output/backup",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("backup_policy=sram-32k-volatile"),
+        "stdout is missing the selected backup policy"
+    );
+    assert_eq!(
+        stdout.matches("backup_assumption=").count(),
+        1,
+        "the backup assumption must be printed exactly once"
+    );
+    let report = std::fs::read_to_string(cwd.join("output/backup/report.txt")).expect("run report");
+    assert!(
+        report.contains("backup_policy=sram-32k-volatile"),
+        "{report}"
+    );
+}

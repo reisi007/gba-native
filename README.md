@@ -45,7 +45,7 @@ the root workspace lockfile contains only these three internal path packages.
 | BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
-| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No flash command engine, save type or persistence is modelled, and the save region keeps its explicit error |
+| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No flash command engine, save type or persistence is modelled; the backup window is governed by its own policy below |
 | Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` models a volatile, erased 32 KiB SRAM with no flash engine and no persistence. Wider accesses and the rest of the 64 KiB window stay explicit errors |
 | Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
 | Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |

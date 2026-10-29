@@ -247,6 +247,30 @@ fn vcount_setting_sets_the_match_flag_and_requests_irq() {
 }
 
 #[test]
+fn vcount_match_bit_is_read_only_and_acknowledges_through_if() {
+    let mut bus = bus();
+    // Of the read-only bits 0..2 the value sets only bit 2; bit 8 sets LYC = 1,
+    // so the stored value is 0x0100 with no enable bit. Line 0 does not match
+    // and the derived flag stays clear.
+    bus.write16(DISPSTAT_ADDR, 0x0104).expect("dispstat");
+    assert_eq!(bus.read16(DISPSTAT_ADDR).expect("dispstat") & 0x0004, 0);
+    assert_eq!(
+        bus.read16(DISPSTAT_ADDR).expect("dispstat") & 0xFF00,
+        0x0100
+    );
+    // LYC = 0 plus the enable bit raises the documented request on line 0.
+    bus.write16(DISPSTAT_ADDR, 0x0020).expect("dispstat");
+    assert_eq!(bus.read16(IF_ADDR), Ok(0x0004));
+    // Write-one-to-clear acknowledges the request; the match flag is derived.
+    bus.write16(IF_ADDR, 0x0004).expect("ack");
+    assert_eq!(bus.read16(IF_ADDR), Ok(0));
+    assert_eq!(
+        bus.read16(DISPSTAT_ADDR).expect("dispstat") & 0x0004,
+        0x0004
+    );
+}
+
+#[test]
 fn writing_a_matching_vcount_setting_requests_immediately() {
     let mut bus = bus();
     // Line 0 is current, so writing LYC = 0 with the IRQ enabled requests

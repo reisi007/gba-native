@@ -19,10 +19,14 @@ pub const SAVE_LEN: usize = 32 * 1024;
 /// The prototype has no persistence. The strict policy reports every access as
 /// [`Error::UnsupportedSave`]. The explicit opt-in models a volatile 32 KiB
 /// SRAM: byte-accessible storage that starts erased (`0xFF`), is lost when the
-/// process ends, and has no flash command engine. A guest that probes for flash
-/// therefore sees no flash device ID and falls back to SRAM.
+/// process ends, and has no flash command engine. The model answers such a
+/// window with plain SRAM bytes; it does not implement, emulate or claim any
+/// flash device-ID or command sequence.
 ///
 /// This is a device model, not a save feature: nothing is written to disk.
+/// The selected policy is host configuration and is excluded from
+/// [`Bus::state_digest`]; only the SRAM contents are guest state and are
+/// hashed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BackupPolicy {
     /// Fail closed: every backup-window access returns [`Error::UnsupportedSave`].

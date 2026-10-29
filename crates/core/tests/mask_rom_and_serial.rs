@@ -191,6 +191,10 @@ fn backup_policy_is_explicit_and_volatile() {
         Err(Error::UnsupportedSave { .. })
     ));
     assert!(matches!(
+        sram.write16(0x0E00_0000, 0x1234),
+        Err(Error::UnsupportedSave { .. })
+    ));
+    assert!(matches!(
         sram.write32(0x0E00_0000, 1),
         Err(Error::UnsupportedSave { .. })
     ));
