@@ -1086,9 +1086,16 @@ Inventory pins: 411 listed / 407 selected, `--lib` 46.
 
 After this change the same run still reports `final_pc=0x080008CE` at
 20,000,000 instructions with an unchanged white image
-(`image_sha256=232b3c7c...`). In a further 1,000,000-instruction window the
-guest wrote **no** palette, VRAM, OAM or DISPCNT byte at all (`DISPCNT` was
-written exactly twice in 50,000,000 instructions), so the video hardware is
-never initialised in this state and the V-Counter model was **not** sufficient.
-No start screen, frame or compatibility result is claimed. HBlank (IE bit 1,
-DISPSTAT bit 4) remains unimplemented.
+(`image_sha256=232b3c7c...`), so the V-Counter model was **not** sufficient.
+
+A write log over the whole 20,000,000-instruction run pins the video state
+exactly: the only palette/VRAM/OAM writes are the `RegisterRamReset` clears at
+step 19 (512 palette, 49,152 VRAM and 512 OAM halfwords) plus one single palette
+halfword at step 25, and `DISPCNT` is written exactly twice — `0x0080` at step
+19 (the same reset) and `0x0000` at step 1,140,644, from the game's own
+`DISPCNT` setter at `0x08001074`. In 50,000,000 instructions it is never written
+again and no graphics data is ever loaded. Holding A, Start or A+Start from boot
+produces a byte-identical `DISPCNT` timeline, so the guest is not waiting for
+input. The video hardware is never initialised and no start screen, frame or
+compatibility result is claimed. HBlank (IE bit 1, DISPSTAT bit 4) remains
+unimplemented.
