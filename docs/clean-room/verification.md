@@ -1262,3 +1262,67 @@ explicit errors or absent. Alpha/brightness arithmetic uses 8-bit channels as a
 stated approximation of the 5-bit hardware channels. The CLI run's success
 depends on the explicit synthetic device/HLE opt-ins; the ROM itself was never
 modified.
+
+## Round: trace-seeded native title-screen run (2026-10-30)
+
+The 2026-10-29 title-screen run executed the reference interpreter
+(`interpret::run_budget`). It established the modelled title state, not native
+translation. This round repeats the same read-only run with a trace-seeded
+native AOT artifact.
+
+A one-time reference trace at the same 455,000,000-instruction budget and the
+same explicit opt-ins records `(address, ARM/Thumb state, live raw word)` per
+executed instruction. The trace is scratch input under the ignored `target/`
+tree and is not committed. ROM seeds are decoded from the immutable cartridge;
+a seed word that disagrees with the cartridge is a hard error. Work-RAM seeds
+become sealed one-instruction blocks: the generated dispatcher re-reads the
+live encoding and calls the native block only on an exact match; any mismatch
+uses the reference interpreter with a fresh fetch/decode and increments
+`fallbacks`.
+
+The artifact has 18,825 one-instruction blocks: 18,294 ROM blocks and 531
+sealed work-RAM variants at 520 addresses (509 stable, 11 with two observed
+variants). Six SWI sites use the documented HLE services enabled by the
+explicit opt-ins. The artifact binds the ROM by SHA-256+length, contains no ROM
+array (`embedded_rom_bytes=0`) and requires a caller-supplied `--rom PATH`.
+
+The generated program was compiled into machine code by the installed
+rustc/cargo:
+
+- The cross build `--target x86_64-apple-darwin` on the aarch64 host produced a
+  `Mach-O 64-bit executable x86_64` (8.7 MB); `build.meta` records target
+  `x86_64-apple-darwin` and host `aarch64-apple-darwin`. The 18,301 out-of-line
+  `block_*` symbols that survive inlining implement guest instructions
+  directly; `otool -tV` shows the guest `LDRB`/`ADD`/PC-write sequence as native
+  loads, address arithmetic, register writes and a budget decrement, not a call
+  to the interpreter. The measured run took 56.91 s.
+- The host build `--target aarch64-apple-darwin` produced a `Mach-O 64-bit
+  executable arm64` that runs directly without a host instruction-translation
+  layer. The measured run took 24.55 s.
+
+The native run reports `budget_used=455000000`, `budget_remaining=0`,
+`native_instructions=454990284`, `irq_dispatch_returns=9716`, `fallbacks=0`.
+The three counters close exactly: 454,990,284 + 9,716 + 0 = 455,000,000. The
+trace's summed per-address counts are also 454,990,284, so the run followed the
+observed native path. The 9,716 units are the modelled BIOS IRQ-dispatcher
+return, counted separately and not as interpreter fallbacks. CPU, bus, VRAM and
+image SHA-256 values equal the reference interpreter run
+(`image_sha256=1f2febbccf5c507fdac2ad8c6bebab3597147d8fffac426299ba90190265af67`);
+the ROM SHA-256 is unchanged.
+
+Runtime canary: a copy of the host-native arm64 harness had `interpret::step`,
+`interpret::execute`, `decode_arm` and `decode_thumb` patched to `brk #0` and
+was ad-hoc re-signed. It completed the run with the identical report and
+hashes, so none of those entries was entered. A positive control patched
+`deliver_pending_irq` (called at every block start) to the same trap and exited
+on SIGTRAP (133), confirming the patch mechanism. The generated program's only
+`interpret::step` call is the out-of-line fallback; the dispatcher never took
+it.
+
+Limits: this is trace-seeded, profile-guided translation of the observed path,
+not a whole-ROM static translation. Untraced instructions, dynamic RAM code and
+any sealed-guard mismatch still use the reference interpreter. BIOS SWI
+services and the IRQ dispatcher entry/return are HLE host models, not
+translated guest code; no BIOS bytes are fetched. The run depends on explicit
+synthetic device/HLE opt-ins and is a static post-budget snapshot, not a frame,
+boot, gameplay, timing or compatibility claim.

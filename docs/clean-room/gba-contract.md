@@ -85,8 +85,10 @@ are governed by the policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
-- RAM is executable but is **never AOT-translated**, so self-modifying RAM code
-  is decoded freshly by the interpreter on every execution.
+- RAM is executable but is **never statically AOT-discovered**, so
+  self-modifying RAM code is decoded freshly by the interpreter on every
+  execution, except for explicit trace-seeded sealed single-instruction blocks
+  whose live encoding exactly matches the captured word (see "Hybrid AOT").
 - The CPU is instruction-budgeted. There is no scheduler, cycle count, HBlank
   or drawing-period timing, or rendered-frame concept. The host-driven model
   derives a read-only `VCOUNT` line from a fixed per-line instruction budget and
@@ -714,7 +716,7 @@ is not officially defined as predictable.
 | PC-relative | `LDR` literal | — |
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
 | Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
-| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six default HLE services (the decompression and affine opt-ins are not wired into AOT) | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
+| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six default HLE services, with the decompression and affine opt-ins carried into the generated harness policy only when explicitly selected | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
 | Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
@@ -868,7 +870,20 @@ does not write PC and does not itself end the block.
   block and is not followed statically; a false condition still makes its
   fallthrough discoverable. The same applies to ARM `LDM` with PC and Thumb
   `POP PC`. This prevents translating instructions that are only reachable
-  through a dynamic computed target. RAM is never discovered or translated.
+  through a dynamic computed target. RAM is never statically discovered or
+  followed. The separate trace-seeded mode below may translate observed
+  work-RAM instructions only as sealed, live-guarded single-instruction blocks.
+- Trace seeding (`aot build --trace`) is an explicit, bounded alternative to
+  static discovery. A one-time reference trace supplies `(address, state, raw
+  encoding)` seeds. ROM seeds are decoded from the immutable cartridge image and
+  a stale word is a hard error. Work-RAM seeds become sealed one-instruction
+  blocks: the generated dispatcher re-reads the live encoding at the seeded
+  address and calls the native block only when it exactly matches the captured
+  word. Any mismatch uses the reference interpreter with a fresh fetch/decode
+  and is counted as a fallback. Sealed blocks never span more than one
+  instruction, never embed a RAM or ROM snapshot, and never cause follow-on RAM
+  discovery. This is profile-guided translation of an observed path, not
+  general RAM translation or a whole-ROM coverage claim.
 - A typed SWI terminates its block and queues the known next-instruction
   continuation, because a supported HLE service returns there. `DiscoveryStats`
   counts SWIs separately. Native emission calls the framed

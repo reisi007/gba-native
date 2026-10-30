@@ -186,8 +186,14 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   `apps/web` packages have their own locks and are excluded from the default
   graph; browser registry dependencies and Node/npm tools stay outside the root
   lock and root build.
-- AOT is restricted to immutable ROM bytes. RAM/self-modifying code must always
-  go through the reference interpreter with a fresh fetch/decode.
+- Static AOT discovery is restricted to immutable ROM bytes. The explicit
+  trace-seeded mode (`aot build --trace`) may emit sealed one-instruction
+  work-RAM blocks only when the generated dispatcher re-reads the live encoding
+  and executes the native block solely on an exact match; any mismatch must go
+  through the reference interpreter with a fresh fetch/decode and count as a
+  fallback. Sealed blocks are profile-guided translations of observed
+  instructions, not general RAM translation, a RAM snapshot, or a whole-ROM
+  coverage claim. Follow-on RAM code is never statically discovered.
 
 ## Source layout
 
@@ -207,7 +213,8 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   (`decompress.rs`) and `BgAffineSet`/`ObjAffineSet` (`affine.rs`, `affine/`),
   the shared destination classifier (`target.rs`), and typed guest SWI
   framing/dispatch (`swi.rs`).
-- `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
+- `crates/aot/src/aot/`: bounded discovery (`discover.rs`), trace-seed parsing
+  and sealed work-RAM artifacts (`trace.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
   `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),
   target-profile build/metadata (`target_build.rs`), harness build/run

@@ -193,10 +193,12 @@ pub(super) fn is_sealable_work_ram(addr: u32, width: u32) -> bool {
     let Some(last) = addr.checked_add(width.saturating_sub(1)) else {
         return false;
     };
-    [gba_native::bus::EWRAM_BASE..=gba_native::bus::EWRAM_BASE + 0x3_FFFF,
-     gba_native::bus::IWRAM_BASE..=gba_native::bus::IWRAM_BASE + 0x7FFF]
-        .iter()
-        .any(|range| range.contains(&addr) && range.contains(&last))
+    [
+        gba_native::bus::EWRAM_BASE..=gba_native::bus::EWRAM_BASE + 0x3_FFFF,
+        gba_native::bus::IWRAM_BASE..=gba_native::bus::IWRAM_BASE + 0x7FFF,
+    ]
+    .iter()
+    .any(|range| range.contains(&addr) && range.contains(&last))
 }
 
 pub(super) fn decode_rom(cart: &Cartridge, addr: u32, thumb: bool) -> Result<IrInstr> {

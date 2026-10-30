@@ -62,6 +62,7 @@ pub fn emit_program_module(cart: &Cartridge, artifact: &AotArtifact) -> Result<S
     writeln!(out, "pub struct ProgramReport {{").unwrap();
     writeln!(out, "    pub budget_remaining: u64,").unwrap();
     writeln!(out, "    pub fallbacks: u64,").unwrap();
+    writeln!(out, "    pub irq_returns: u64,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
@@ -93,6 +94,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     .unwrap();
     writeln!(out, "    let mut remaining = budget;").unwrap();
     writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
+    writeln!(out, "    let mut irq_returns = 0u64;").unwrap();
     writeln!(out, "    while remaining > 0 {{").unwrap();
     writeln!(
         out,
@@ -106,6 +108,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     .unwrap();
     writeln!(out, "            bus.tick_frame();").unwrap();
     writeln!(out, "            remaining -= 1;").unwrap();
+    writeln!(out, "            irq_returns += 1;").unwrap();
     writeln!(out, "            continue;").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
@@ -149,7 +152,11 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
             )
             .unwrap();
         }
-        writeln!(out, "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?,").unwrap();
+        writeln!(
+            out,
+            "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?,"
+        )
+        .unwrap();
         writeln!(out, "                }}").unwrap();
         writeln!(out, "            }}").unwrap();
     }
@@ -168,6 +175,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "    Ok(ProgramReport {{").unwrap();
     writeln!(out, "        budget_remaining: remaining,").unwrap();
     writeln!(out, "        fallbacks,").unwrap();
+    writeln!(out, "        irq_returns,").unwrap();
     writeln!(out, "    }})").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();

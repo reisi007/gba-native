@@ -17,6 +17,10 @@ pub struct NativeReport {
     pub budget_remaining: u64,
     pub budget_used: u64,
     pub fallbacks: u64,
+    /// Modelled BIOS IRQ dispatcher returns (not interpreter fallbacks).
+    pub irq_returns: u64,
+    /// Guest instructions retired from generated native blocks.
+    pub native_instructions: u64,
     /// Digest of all CPU state, including inactive register banks and SPSRs.
     pub cpu_sha256: String,
     pub rom_sha256: String,
@@ -54,6 +58,8 @@ impl NativeReport {
             budget_remaining: parse_u64(field(&fields, "budget_remaining")?)?,
             budget_used: parse_u64(field(&fields, "budget_used")?)?,
             fallbacks: parse_u64(field(&fields, "fallbacks")?)?,
+            irq_returns: parse_u64(field(&fields, "irq_dispatch_returns")?)?,
+            native_instructions: parse_u64(field(&fields, "native_instructions")?)?,
             cpu_sha256: field(&fields, "cpu_sha256")?.to_string(),
             rom_sha256: field(&fields, "rom_sha256")?.to_string(),
             vram_sha256: field(&fields, "vram_sha256")?.to_string(),
@@ -75,6 +81,11 @@ impl NativeReport {
             && self.thumb == cpu.thumb()
             && self.regs == regs
             && self.budget_used == budget_used
+            && self
+                .native_instructions
+                .checked_add(self.fallbacks)
+                .and_then(|value| value.checked_add(self.irq_returns))
+                == Some(self.budget_used)
             && self.cpu_sha256 == sha256::hex(&cpu.state_digest())
             && self.rom_sha256 == bus.cart().sha256_hex()
             && self.vram_sha256 == sha256::hex(&bus.vram_digest())

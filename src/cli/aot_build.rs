@@ -60,9 +60,10 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
                     .map_err(|_| Error::Args(format!("invalid budget {value}")))?;
             }
             "--trace" => {
-                trace = Some(PathBuf::from(args.next().ok_or_else(|| {
-                    Error::Args("--trace needs a path".to_string())
-                })?));
+                trace =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        Error::Args("--trace needs a path".to_string())
+                    })?));
             }
             "--synthetic-bios-zero-fill" => policy.bios_zero_fill = true,
             "--synthetic-bios-rom-writes" => policy.bios_rom_writes = true,
@@ -177,9 +178,15 @@ fn build_native_artifact(request: BuildRequest) -> Result<()> {
     println!("rejected_seeds={}", artifact.stats.rejected_seeds);
     println!("bios_data_policy={}", request.policy.bios_zero_fill as u8);
     println!("bios_write_policy={}", request.policy.bios_rom_writes as u8);
-    println!("rom_write_policy={}", request.policy.rom_writes_dropped as u8);
+    println!(
+        "rom_write_policy={}",
+        request.policy.rom_writes_dropped as u8
+    );
     println!("backup_policy={}", request.policy.backup.name());
-    println!("decompression_policy={}", request.policy.decompression as u8);
+    println!(
+        "decompression_policy={}",
+        request.policy.decompression as u8
+    );
     println!("affine_policy={}", request.policy.affine as u8);
     println!("generated_dir={}", work.display());
     println!("generated_source={}", generated.display());
@@ -258,9 +265,15 @@ fn build_wasm_module(request: BuildRequest) -> Result<()> {
     println!("rejected_seeds={}", artifact.stats.rejected_seeds);
     println!("bios_data_policy={}", request.policy.bios_zero_fill as u8);
     println!("bios_write_policy={}", request.policy.bios_rom_writes as u8);
-    println!("rom_write_policy={}", request.policy.rom_writes_dropped as u8);
+    println!(
+        "rom_write_policy={}",
+        request.policy.rom_writes_dropped as u8
+    );
     println!("backup_policy={}", request.policy.backup.name());
-    println!("decompression_policy={}", request.policy.decompression as u8);
+    println!(
+        "decompression_policy={}",
+        request.policy.decompression as u8
+    );
     println!("affine_policy={}", request.policy.affine as u8);
     println!("generated_dir={}", work.display());
     println!("generated_source={}", generated.display());

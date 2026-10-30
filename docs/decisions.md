@@ -771,3 +771,31 @@ The renderer remains a deliberate subset: 2D OBJ tile mapping, OBJ double-size
 affine sprites, OBJ/BG mosaic, window 1, Mode 2 and scanline effects are
 explicit errors or absent. Alpha/brightness math uses the final 8-bit channels
 as a stated approximation of the 5-bit hardware channels.
+
+## D39 — Trace-seeded native AOT with sealed work-RAM blocks
+
+Decided 2026-10-30 for the native title-screen evidence. The previous
+title-screen run used the reference interpreter, so it did not separate native
+translation from interpretation. `aot build --trace` now accepts a one-time
+reference trace of `(address, state, raw encoding)` seeds.
+
+- ROM seeds are decoded from the immutable cartridge image; a trace word that
+  disagrees with the cartridge is a hard error, not a reinterpretation.
+- Work-RAM seeds become sealed one-instruction blocks. The generated dispatcher
+  re-reads the live encoding at the seeded address and calls the native block
+  only on an exact match. A mismatch uses the reference interpreter with a fresh
+  fetch/decode and counts as a fallback. No RAM or ROM snapshot is embedded and
+  no follow-on RAM code is discovered.
+- The artifact binds the ROM by SHA-256+length, reports `sealed_blocks`,
+  `rejected_seeds`, SWIs and the native/IRQ/fallback counters, and contains no
+  ROM bytes.
+- The native report separates `native_instructions` (retired from generated
+  blocks) from `irq_dispatch_returns` (modelled BIOS dispatcher returns) and
+  `fallbacks`; the three counters plus the remaining budget must equal the
+  budget.
+
+This is a bounded, profile-guided AOT mode, not general static translation of
+the ROM. The trace is scratch input under the ignored `target/` tree; committed
+tests use synthetic fixtures only. Sealed RAM blocks are a reviewed exception to
+the "static AOT is ROM-only" boundary, not a RAM-snapshot or general
+self-modifying-code claim.

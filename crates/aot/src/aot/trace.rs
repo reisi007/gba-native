@@ -14,12 +14,11 @@
 
 use std::collections::BTreeMap;
 
-use super::artifact::{
-    AotArtifact, AotBlock, DiscoveryStats, is_sealable_work_ram, decode_rom,
-};
+use super::artifact::{AotArtifact, AotBlock, DiscoveryStats, decode_rom, is_sealable_work_ram};
 use gba_native::cart::Cartridge;
 use gba_native::decode::{decode_arm, decode_thumb};
 use gba_native::error::{Error, Result};
+use gba_native::ir::Op;
 
 /// One executed instruction observed by a reference trace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,7 +51,10 @@ pub fn parse_trace_seeds(text: &str) -> Result<Vec<TraceSeed>> {
             )));
         }
         let addr = parse_hex(fields[0]).map_err(|reason| {
-            Error::Aot(format!("trace line {}: bad address {reason}", line_number + 1))
+            Error::Aot(format!(
+                "trace line {}: bad address {reason}",
+                line_number + 1
+            ))
         })?;
         let thumb = match fields[1] {
             "0" => false,
@@ -65,7 +67,10 @@ pub fn parse_trace_seeds(text: &str) -> Result<Vec<TraceSeed>> {
             }
         };
         let raw = parse_hex(fields[2]).map_err(|reason| {
-            Error::Aot(format!("trace line {}: bad raw word {reason}", line_number + 1))
+            Error::Aot(format!(
+                "trace line {}: bad raw word {reason}",
+                line_number + 1
+            ))
         })?;
         if fields.len() == 4 {
             fields[3].parse::<u64>().map_err(|_| {
@@ -147,6 +152,9 @@ pub fn trace_artifact(
             stats.sealed_blocks += 1;
             instruction
         };
+        if matches!(instruction.op, Op::Swi { .. }) {
+            stats.swis += 1;
+        }
         stats.instructions += 1;
         blocks.push(AotBlock {
             addr: seed.addr,
@@ -156,7 +164,9 @@ pub fn trace_artifact(
         });
     }
     if blocks.is_empty() {
-        return Err(Error::Aot("trace produced no executable blocks".to_string()));
+        return Err(Error::Aot(
+            "trace produced no executable blocks".to_string(),
+        ));
     }
     stats.blocks = blocks.len();
     Ok(AotArtifact {
@@ -180,8 +190,8 @@ mod tests {
 
     #[test]
     fn parses_optional_prefix_and_count() {
-        let seeds = parse_trace_seeds("ROM 08000000 0 E12FFF1E 10\n# x\n03001E0C 0 E1A00000\n")
-            .unwrap();
+        let seeds =
+            parse_trace_seeds("ROM 08000000 0 E12FFF1E 10\n# x\n03001E0C 0 E1A00000\n").unwrap();
         assert_eq!(seeds.len(), 2);
         assert_eq!(seeds[0].addr, 0x0800_0000);
         assert_eq!(seeds[1].raw, 0xE1A0_0000);
@@ -189,8 +199,7 @@ mod tests {
 
     #[test]
     fn accepts_multiple_variants_at_one_address() {
-        let seeds =
-            parse_trace_seeds("03001E0C 0 E1A00000\n03001E0C 0 E1A00001\n").unwrap();
+        let seeds = parse_trace_seeds("03001E0C 0 E1A00000\n03001E0C 0 E1A00001\n").unwrap();
         assert_eq!(seeds.len(), 2);
     }
 

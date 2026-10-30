@@ -202,6 +202,16 @@ pub(super) fn emit_driver(
     writeln!(out, "    println!(\"fallbacks={{}}\", program.fallbacks);").unwrap();
     writeln!(
         out,
+        "    println!(\"irq_dispatch_returns={{}}\", program.irq_returns);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"native_instructions={{}}\", BUDGET - program.budget_remaining - program.fallbacks - program.irq_returns);"
+    )
+    .unwrap();
+    writeln!(
+        out,
         "    println!(\"cpu_sha256={{}}\", sha256::hex(&cpu.state_digest()));"
     )
     .unwrap();
