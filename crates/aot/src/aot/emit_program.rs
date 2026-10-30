@@ -97,13 +97,6 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "    let mut irq_returns = 0u64;").unwrap();
     writeln!(out, "    while remaining > 0 {{").unwrap();
     writeln!(out, "        let executed = budget - remaining;").unwrap();
-    writeln!(out, "        if let Some(engine) = audio.as_mut() {{").unwrap();
-    writeln!(
-        out,
-        "            if executed % gba_native::input::AUDIO_CHUNK_INSTRUCTIONS == 0 {{ engine.advance(&bus.sound_registers(), gba_native::input::AUDIO_CHUNK_INSTRUCTIONS); }}"
-    )
-    .unwrap();
-    writeln!(out, "        }}").unwrap();
     writeln!(
         out,
         "        if !input.is_empty() {{ bus.set_pressed_keys(input.mask_at(executed)); }}"
@@ -122,8 +115,14 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "            bus.tick_frame();").unwrap();
     writeln!(out, "            remaining -= 1;").unwrap();
     writeln!(out, "            irq_returns += 1;").unwrap();
+    writeln!(
+        out,
+        "            if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+    )
+    .unwrap();
     writeln!(out, "            continue;").unwrap();
     writeln!(out, "        }}").unwrap();
+    writeln!(out, "        let before = remaining;").unwrap();
     writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
     let mut groups: BTreeMap<(u32, bool), Vec<&super::artifact::AotBlock>> = BTreeMap::new();
     for block in &artifact.blocks {
@@ -181,23 +180,16 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     .unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }};").unwrap();
+    writeln!(
+        out,
+        "        if let Some(engine) = audio.as_mut() {{ engine.advance(&bus.sound_registers(), before - remaining); }}"
+    )
+    .unwrap();
     writeln!(out, "        if next == Next::Halt {{").unwrap();
     writeln!(out, "            break;").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    bus.set_pressed_keys(0);").unwrap();
-    writeln!(out, "    if let Some(engine) = audio.as_mut() {{").unwrap();
-    writeln!(
-        out,
-        "        let remainder = (budget - remaining) % gba_native::input::AUDIO_CHUNK_INSTRUCTIONS;"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if remainder != 0 {{ engine.advance(&bus.sound_registers(), remainder); }}"
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
     writeln!(out, "    Ok(ProgramReport {{").unwrap();
     writeln!(out, "        budget_remaining: remaining,").unwrap();
     writeln!(out, "        fallbacks,").unwrap();

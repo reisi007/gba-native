@@ -877,9 +877,9 @@ contains no platform dependency:
 
 - `render_psg` mixes two square channels, the wave channel and the noise channel
   from the documented sound-register image.
-- `AudioEngine` keeps phase/LFSR state and advances in guest-instruction chunks,
-  so a register change during a run changes subsequent PCM instead of replacing
-  a static snapshot.
+- `AudioEngine` keeps phase/LFSR state and advances once per guest instruction
+  (`advance_instruction`), so a register write changes the very next generated
+  sample instead of waiting for a fixed snapshot interval.
 - `AudioSettings` supplies a 0..=100 master volume and digital mute; the
   persisted settings document stores `master_volume` and `muted`.
 - `wav_bytes` is a deterministic RIFF/WAVE sink. `render_tone` is a synthetic

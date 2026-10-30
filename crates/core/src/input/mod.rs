@@ -12,10 +12,7 @@ mod settings;
 mod touch;
 
 pub use keys::{BindingError, Key, KeyBindings};
-pub use script::{
-    AUDIO_CHUNK_INSTRUCTIONS, InputEvent, InputScript, ScriptError, run_scripted,
-    run_scripted_audio,
-};
+pub use script::{InputEvent, InputScript, ScriptError, run_scripted, run_scripted_audio};
 pub use settings::{SETTINGS_SCHEMA, Settings, SettingsError};
 pub use touch::{GbaLayout, Rect, TouchLayout};
 

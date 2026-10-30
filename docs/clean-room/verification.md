@@ -1358,7 +1358,7 @@ script on `ubuntu-latest` (the native target is its host triple), with the same
 digests and visual comparison.
 
 Performance report from that run (20,000,000 guest instructions):
-`perf_guest_instructions_per_second≈33.4M`, `perf_realtime_factor≈1.99`
+`perf_guest_instructions_per_second≈32.1M`, `perf_realtime_factor≈1.92`
 against the documented 16.777216 MHz clock, with the explicit caveat that one
 retired instruction is not one hardware cycle. This is a synthetic fixture
 measurement, not frame timing or a game-performance claim.
@@ -1410,16 +1410,18 @@ evidence directory is `output/local-name-entry-31759-*`. The test requires
 `crates/core/src/audio.rs` is a std-only, dependency-free PSG mixer. It renders
 two square channels, the wave channel and the noise channel from the documented
 sound-register image, applies a 0..=100 master volume or digital mute, and can
-emit a canonical RIFF/WAVE file. `AudioEngine` keeps phase and LFSR state across
-instruction chunks, so changing a guest register during a run changes later PCM
-rather than replacing a static snapshot. This is generation from guest state,
+emit a canonical RIFF/WAVE file. `AudioEngine` advances once per guest
+instruction (`advance_instruction`), so a register write changes the very next
+generated sample rather than a later chunk. This is generation from guest state,
 not a pre-recorded track.
 
 Evidence:
 
-- `cargo test -p gba-native-core --lib audio`: 8 mixer/engine/WAV tests pass,
+- `cargo test -p gba-native-core --lib audio`: 11 mixer/engine/WAV tests pass,
   including a 440 Hz square sign-crossing count, mute silence, volume scaling,
-  disabled-master silence and a stateful engine advance.
+  disabled-master silence, a stateful engine advance, and two tests proving that
+  master-disable and volume writes change the amplitude at the next sample (no
+  1024-instruction quantization).
 - `gba-native audio --out output/audio-demo/tone.wav --frequency 440
   --seconds 0.5 --volume 80` wrote 16,384 mono samples at 32,768 Hz
   (32,812-byte WAV), `audible=true`, WAV SHA-256
@@ -1439,10 +1441,10 @@ The committed input-tester guest now programs a 440 Hz square at boot. A
 `audio_samples=11718`, `audio_master_volume=80`, `audio_muted=false`,
 `audio_audible=true` and WAV SHA-256
 `7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`. The
-native AOT harness for `aarch64-apple-darwin` (`--audio`, volume 80) reported
-`audio_samples=32768`, `audio_audible=true`, `fallbacks=0` and
-`perf_realtime_factor=1.8584`, with WAV SHA-256
-`fb498e5dc824af31927f411b6e84896d5386f538bc15e7405517ba628342d5a0`. The frame
+native AOT harness for `aarch64-apple-darwin` (2,000,000-instruction build,
+`--audio`, volume 80) reported the same `audio_samples=11718`,
+`audio_audible=true`, `fallbacks=0` and WAV SHA-256
+`7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`. The frame
 still matched `5cbbd998…80b8b`. This is guest-state-driven audio from our own
 fixture, not a retail soundtrack claim.
 

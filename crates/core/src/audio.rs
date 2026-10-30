@@ -205,19 +205,19 @@ fn render_into(
 
 /// Stateful mixer that advances with the guest instruction timeline.
 ///
-/// Call [`AudioEngine::advance`] in bounded chunks (for example every 1024
-/// instructions) with the current sound-register snapshot. Phase and noise state
-/// persist across calls, so a guest pitch/volume change is heard as a change,
-/// not as a fresh snapshot. The nominal clock is the documented 16.777216 MHz
-/// CPU clock divided by [`SAMPLE_RATE`]; this is an approximation, not cycle
-/// timing. One instruction is attributed three cycles, matching the bus's
-/// documented frame/timer mapping.
+/// Call [`AudioEngine::advance_instruction`] after every guest instruction with
+/// the current sound-register snapshot. Phase and noise state persist across
+/// calls, so a guest pitch/volume change is heard at the next generated sample,
+/// not after a fixed snapshot interval. The nominal clock is the documented
+/// 16.777216 MHz CPU clock divided by [`SAMPLE_RATE`]; this is an approximation,
+/// not cycle timing. One instruction is attributed three cycles, matching the
+/// bus's documented frame/timer mapping.
 #[derive(Clone, Debug)]
 pub struct AudioEngine {
     settings: AudioSettings,
     phases: [f32; 4],
     lfsr: u16,
-    sample_fraction: f32,
+    cycle_accumulator: u64,
     samples: Vec<i16>,
 }
 
@@ -228,7 +228,7 @@ impl AudioEngine {
             settings,
             phases: [0.0; 4],
             lfsr: 0x7FFF,
-            sample_fraction: 0.0,
+            cycle_accumulator: 0,
             samples: Vec::new(),
         }
     }
@@ -242,13 +242,40 @@ impl AudioEngine {
         self.settings
     }
 
-    /// Advance the mixer by `instructions` guest instructions.
+    /// Advance the mixer by one guest instruction.
+    ///
+    /// Two consecutive calls represent a register write boundary: the next
+    /// sample rendered after the write uses the new register values. There is
+    /// no fixed 1024-instruction snapshot interval.
+    #[inline]
+    pub fn advance_instruction(&mut self, regs: &[u8]) {
+        let cycles_per_sample = 16_777_216 / SAMPLE_RATE;
+        self.cycle_accumulator += u64::from(crate::bus::INSTRUCTION_CYCLES);
+        if self.cycle_accumulator < u64::from(cycles_per_sample) {
+            return;
+        }
+        let frames = (self.cycle_accumulator / u64::from(cycles_per_sample)) as usize;
+        self.cycle_accumulator %= u64::from(cycles_per_sample);
+        render_into(
+            regs,
+            frames,
+            self.settings,
+            &mut self.phases,
+            &mut self.lfsr,
+            &mut self.samples,
+        );
+    }
+
+    /// Advance by a number of instructions in one step.
+    ///
+    /// This is used by generated dispatchers after a translated block. It uses
+    /// the register snapshot of the block end and renders all samples due in
+    /// one call; it never quantizes to a fixed instruction chunk.
     pub fn advance(&mut self, regs: &[u8], instructions: u64) {
-        let cycles = instructions as f64 * f64::from(crate::bus::INSTRUCTION_CYCLES);
-        let exact = cycles / f64::from(16_777_216 / SAMPLE_RATE);
-        self.sample_fraction += exact as f32;
-        let frames = self.sample_fraction as usize;
-        self.sample_fraction -= frames as f32;
+        let cycles_per_sample = 16_777_216 / SAMPLE_RATE;
+        self.cycle_accumulator += instructions * u64::from(crate::bus::INSTRUCTION_CYCLES);
+        let frames = (self.cycle_accumulator / u64::from(cycles_per_sample)) as usize;
+        self.cycle_accumulator %= u64::from(cycles_per_sample);
         render_into(
             regs,
             frames,
@@ -398,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn engine_advances_with_guest_instruction_chunks() {
+    fn engine_advances_with_guest_instructions() {
         let mut engine = AudioEngine::new(AudioSettings::new(100, false));
         let regs = square_regs();
         engine.advance(&regs, 1024);
@@ -422,6 +449,41 @@ mod tests {
         engine.advance(&high, 200_000);
         assert!(engine.samples().len() > first);
         assert!(engine.samples()[first..].iter().any(|s| *s != 0));
+    }
+
+    #[test]
+    fn register_write_changes_the_next_sample_without_chunk_latency() {
+        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
+        let mut regs = square_regs();
+        engine.advance(&regs, 1_024);
+        let before = engine.samples().len();
+        // Disable the master sound register at this exact instruction boundary.
+        regs[0x24] = 0;
+        engine.advance_instruction(&regs);
+        engine.advance(&regs, 512);
+        assert!(engine.samples().len() > before);
+        assert!(
+            engine.samples()[before..].iter().all(|sample| *sample == 0),
+            "a register write must affect the next sample, not a later chunk"
+        );
+    }
+
+    #[test]
+    fn volume_write_changes_amplitude_at_the_next_sample() {
+        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
+        let mut regs = square_regs();
+        engine.advance(&regs, 1_024);
+        assert!(engine.samples().iter().any(|sample| *sample != 0));
+        let before = engine.samples().len();
+        // Channel 1 envelope/volume nibble 0 silences the still-running channel.
+        regs[0x02] = 0x00;
+        regs[0x03] = 0x00;
+        engine.advance(&regs, 1_024);
+        assert!(engine.samples().len() > before);
+        assert!(
+            engine.samples()[before..].iter().all(|sample| *sample == 0),
+            "a volume write must affect the next generated sample"
+        );
     }
 
     #[test]

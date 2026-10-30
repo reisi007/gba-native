@@ -21,9 +21,6 @@ use crate::cpu::Cpu;
 use crate::error::Result;
 use crate::interpret;
 
-/// Instruction chunk used to sample sound registers into the audio engine.
-pub const AUDIO_CHUNK_INSTRUCTIONS: u64 = 1024;
-
 /// One held-key interval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InputEvent {
@@ -176,8 +173,9 @@ pub fn run_scripted(
     drive_with(cpu, bus, budget, script, |_, _| {})
 }
 
-/// Run the reference interpreter and feed sound-register snapshots to a
-/// stateful mixer every [`AUDIO_CHUNK_INSTRUCTIONS`] instructions.
+/// Run the reference interpreter and advance a stateful mixer at every
+/// instruction boundary. Register writes therefore affect the next sample;
+/// there is no 1024-instruction snapshot interval.
 pub fn run_scripted_audio(
     cpu: &mut Cpu,
     bus: &mut Bus,
@@ -185,8 +183,8 @@ pub fn run_scripted_audio(
     script: &InputScript,
     engine: &mut AudioEngine,
 ) -> Result<u64> {
-    drive_with(cpu, bus, budget, script, |bus, instructions| {
-        engine.advance(&bus.sound_registers(), instructions);
+    drive_with(cpu, bus, budget, script, |bus, _| {
+        engine.advance_instruction(&bus.sound_registers());
     })
 }
 
@@ -204,7 +202,6 @@ where
     let mut next = 0usize;
     let mut keys = 0u16;
     let mut until = 0u64;
-    let mut chunk = 0u64;
     while used < budget {
         while let Some(event) = script.events.get(next) {
             if event.at > used {
@@ -222,14 +219,7 @@ where
         interpret::step(cpu, bus)?;
         bus.tick_frame();
         used += 1;
-        chunk += 1;
-        if chunk == AUDIO_CHUNK_INSTRUCTIONS {
-            observe(bus, chunk);
-            chunk = 0;
-        }
-    }
-    if chunk > 0 {
-        observe(bus, chunk);
+        observe(bus, 1);
     }
     bus.set_pressed_keys(0);
     Ok(used)

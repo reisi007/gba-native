@@ -59,7 +59,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Nearest-neighbor PPM output | Implemented |
 | Input model | `core::input`: ten button bits, default/editable key bindings, 800x600 landscape + portrait touch layout, persisted settings document, instruction-indexed scripts |
 | Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
-| Audio (first slice) | Dependency-free PSG mixer and stateful `AudioEngine`, volume/mute, WAV sink; `run --audio-out` and the AOT harness `--audio`; browser WebAudio; full PSG timing/Direct Sound tracked in #29 |
+| Audio (first slice) | Dependency-free PSG mixer and stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out` and the AOT harness `--audio`; browser WebAudio; full PSG timing/Direct Sound tracked in #29 |
 | Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
 | Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
@@ -86,7 +86,9 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
 - `run --input FILE` replays `at:KEYS:hold` instruction-indexed input events
   (for example `0:A+B+Start:20000000`). The `run` report always includes
   `perf_*` wall-time, guest-instructions/second and real-time-factor lines with
-  the explicit non-cycle caveat.
+  the explicit non-cycle caveat. `run --audio-out FILE [--volume 0..100]
+  [--mute]` also renders the guest sound-register timeline to a WAV through the
+  dependency-free PSG `AudioEngine`.
 - `fixture input-tester` writes our own 4 KiB synthetic ROM. The committed
   fixture, input script and expected frame live under `tests/roms/synthetic/`;
   `scripts/input-tester.sh --visual` builds the native AOT artifact and compares
