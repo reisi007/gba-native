@@ -799,3 +799,96 @@ the ROM. The trace is scratch input under the ignored `target/` tree; committed
 tests use synthetic fixtures only. Sealed RAM blocks are a reviewed exception to
 the "static AOT is ROM-only" boundary, not a RAM-snapshot or general
 self-modifying-code claim.
+
+## D40 — Portable input, shell, fullscreen and persisted settings
+
+Decided 2026-10-30. The runtime already exposed `Bus::set_pressed_keys`, but no
+host-side button model, touch layout, settings document or frontend path used
+it. The new std-only `core::input` module owns:
+
+- the ten documented buttons and their KEYINPUT bits;
+- canonical host key codes and default bindings (`Z/J`, `X/K`, Enter,
+  Backspace, arrows/WASD, Q/E), with duplicate/empty-edit rejection;
+- an 800x600 landscape and a portrait normalised layout for pointer/touch hit
+  testing; the screen area is never a button;
+- a stable `key=value` settings document (schema 1) with fullscreen, touch and
+  integer-scaling preferences plus all bindings;
+- instruction-indexed input scripts (`at:KEYS:hold`) and a scripted reference
+  runner.
+
+The desktop frontend renders a windowed GBA shell (guest screen at 2x, D-pad,
+face/menu buttons, pressed highlighting), a fullscreen 3x frame, and a settings
+page listing every active binding. F1 opens settings, F11 or Alt+Enter toggles
+fullscreen, Escape closes settings or exits, and mouse/touch presses hit-test
+the same layout. The per-user settings file is written atomically on change and
+exit. The browser frontend uses the same key codes/binding defaults in
+`www/input.mjs`, maps touch buttons to the same mask and persists the settings
+in `localStorage`; the Fullscreen API falls back to a CSS mode when a browser
+embedding denies it.
+
+This is a synthetic frontend: it does not accept a ROM, save or audio, and the
+buttons drive presentation state only. It is not a retail input or playability
+claim. Android/iOS packaging remains open (#11); per-ROM input routing remains
+open (#7).
+
+## D41 — Synthetic input-tester ROM and Linux-native visual gate
+
+Decided 2026-10-30. A committed synthetic Mode 3 fixture (`demo/input_tester.rs`,
+`tests/roms/synthetic/input-tester.gba`, 4 KiB) draws ten 16-pixel bands in
+KEYINPUT order. A band is white while its button is held and dark otherwise, so
+one fixed mask produces a deterministic, human-readable frame. The source,
+committed bytes, script and expected PPM are pinned by SHA-256 and checked by
+`crates/core/tests/input_tester_fixture.rs`.
+
+`scripts/input-tester.sh` regenerates the bytes, builds the AOT harness for the
+host triple, runs it with the committed script and compares the output frame
+byte-for-byte. `--visual` renders expected and actual frames in the pinned
+Chromium through Playwright, compares every pixel in the browser and writes a
+screenshot artifact. The Linux CI job runs this path on `ubuntu-latest`; the
+default gates stay browser-free and offline.
+
+This is fixture evidence for the input path only. It is not hardware
+conformance, cycle timing, a retail-ROM test or a playability claim.
+
+## D42 — Cross-target build matrix
+
+Decided 2026-10-30. The supported cross targets are `aarch64-apple-darwin`,
+`x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-gnu` and
+`wasm32-unknown-unknown`. `scripts/cross.sh` builds the same synthetic
+input-tester artifact for every entry and verifies the produced file type;
+host-executable Apple artifacts also run and match the expected frame.
+
+- Linux uses `zig cc` as an optional host linker (`scripts/zig-linker.sh`).
+- Windows GNU uses mingw-w64; the MSVC target needs a Windows SDK/linker and is
+  not claimed.
+- wasm32 uses the pinned wasm-bindgen CLI and stays a module, not a GUI app.
+- A missing prerequisite fails with an installation hint; it never becomes a
+  silent skip or a false success.
+
+CI covers the Linux-native path on the actual Linux runner. The other targets
+are local build evidence unless a runner with the required linker executes them;
+a successful build is not a platform-support or gameplay claim.
+
+## D43 — Native, state-driven audio generation
+
+Decided 2026-10-30. Audio is generated from the same sound-hardware state the
+guest writes; it is not a pre-recorded asset. `core::audio` is std-only and
+contains no platform dependency:
+
+- `render_psg` mixes two square channels, the wave channel and the noise channel
+  from the documented sound-register image.
+- `AudioEngine` keeps phase/LFSR state and advances in guest-instruction chunks,
+  so a register change during a run changes subsequent PCM instead of replacing
+  a static snapshot.
+- `AudioSettings` supplies a 0..=100 master volume and digital mute; the
+  persisted settings document stores `master_volume` and `muted`.
+- `wav_bytes` is a deterministic RIFF/WAVE sink. `render_tone` is a synthetic
+  test signal, not game audio.
+
+The first host paths are a WAV artifact from the reference runner/AOT harness and
+a WebAudio sink in the browser. Native live playback is target-specific and must
+not add a default-workspace dependency or unsafe code. The current mixer is
+deliberately bounded: it has no full sweep/envelope/length frame sequencer, no
+Direct Sound FIFO sample clock and no cycle-accurate resampling. Those gaps and
+the cross-target acceptance tests are tracked in issue #29. This is not a
+retail-audio or hardware-timing claim.

@@ -348,6 +348,14 @@ impl Bus {
         self.pressed_keys = pressed & KEY_MASK;
     }
 
+    /// Snapshot of the write-only PSG register file at `0x04000060`.
+    ///
+    /// The dependency-free host audio renderer consumes this image. Guest reads
+    /// remain unchanged and the renderer is not part of `state_digest`.
+    pub fn sound_registers(&self) -> [u8; 0x48] {
+        self.io.sound().register_file()
+    }
+
     pub fn cart(&self) -> &Cartridge {
         &self.cart
     }

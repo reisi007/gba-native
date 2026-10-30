@@ -193,8 +193,17 @@ mod tests {
         let seeds =
             parse_trace_seeds("ROM 08000000 0 E12FFF1E 10\n# x\n03001E0C 0 E1A00000\n").unwrap();
         assert_eq!(seeds.len(), 2);
-        assert_eq!(seeds[0].addr, 0x0800_0000);
-        assert_eq!(seeds[1].raw, 0xE1A0_0000);
+        // The parser returns a deterministic address-sorted set, not input order.
+        assert!(
+            seeds
+                .iter()
+                .any(|seed| seed.addr == 0x0800_0000 && seed.raw == 0xE12F_FF1E)
+        );
+        assert!(
+            seeds
+                .iter()
+                .any(|seed| seed.addr == 0x0300_1E0C && seed.raw == 0xE1A0_0000)
+        );
     }
 
     #[test]

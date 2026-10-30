@@ -166,7 +166,9 @@ fn program_module_has_no_host_boundary_or_rom_binding() {
             "program section must not contain {marker:?}"
         );
     }
-    assert!(source.contains("pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64)"));
+    assert!(source.contains(
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>)"
+    ));
     assert!(source.contains("pub struct ProgramReport"));
     assert!(source.contains("pub budget_remaining: u64,"));
     assert!(source.contains("pub fallbacks: u64,"));
@@ -197,7 +199,9 @@ fn native_module_composes_program_with_binding_driver() {
         source.starts_with(&program),
         "native source must reuse the program section"
     );
-    assert!(source.contains("run_program(&mut cpu, &mut bus, BUDGET)?;"));
+    assert!(
+        source.contains("run_program(&mut cpu, &mut bus, BUDGET, &script, &mut audio_engine)?;")
+    );
     assert!(source.contains("fn main()"));
     assert!(source.contains("verify_binding(&cart)?;"));
     assert!(source.contains("--rom"));

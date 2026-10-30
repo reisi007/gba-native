@@ -1,18 +1,24 @@
 //! Command dispatch and user-facing commands.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use gba_native::aot::{self, NativeHarness};
+use gba_native::audio::AudioSettings;
 use gba_native::bus::Bus;
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::demo;
 use gba_native::display;
 use gba_native::error::{Error, Result};
+use gba_native::input::{InputScript, run_scripted, run_scripted_audio};
 use gba_native::interpret;
+use gba_native::perf::PerfStats;
 use gba_native::render::{self, Backend};
 
 mod aot_build;
+mod audio_cmd;
+mod fixture_cmd;
 mod output;
 mod run_output;
 
@@ -22,7 +28,9 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+  gba-native fixture input-tester --out output/<input-tester.gba>
+  gba-native audio --out output/<tone.wav> [--frequency 440] [--seconds 2] [--volume 80] [--mute]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
@@ -46,7 +54,9 @@ pub fn run() -> Result<()> {
                 .ok_or_else(|| Error::Args("info needs a ROM path".to_string()))?;
             cmd_info(Path::new(&path))
         }
+        "audio" => audio_cmd::run(args),
         "demo" => cmd_demo(args),
+        "fixture" => fixture_cmd::run(args),
         "run" => cmd_run(args),
         "aot" => {
             let subcommand = args
@@ -153,8 +163,45 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut backup_flash = false;
     let mut bios_decompress = false;
     let mut bios_affine = false;
+    let mut input_script: Option<InputScript> = None;
+    let mut audio_out: Option<PathBuf> = None;
+    let mut audio_volume = AudioSettings::default().master_volume;
+    let mut audio_muted = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--input" => {
+                let path = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| Error::Args("--input needs a script path".to_string()))?,
+                );
+                let text = std::fs::read_to_string(&path).map_err(|error| {
+                    Error::Args(format!(
+                        "cannot read input script {}: {error}",
+                        path.display()
+                    ))
+                })?;
+                input_script = Some(
+                    InputScript::parse(&text)
+                        .map_err(|error| Error::Args(format!("invalid input script: {error}")))?,
+                );
+            }
+            "--audio-out" => {
+                audio_out = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    Error::Args("--audio-out needs a WAV path".to_string())
+                })?));
+            }
+            "--volume" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Error::Args("--volume needs 0..=100".to_string()))?;
+                audio_volume = value
+                    .parse()
+                    .map_err(|_| Error::Args(format!("invalid volume {value}")))?;
+                if audio_volume > 100 {
+                    return Err(Error::Args("--volume must be 0..=100".to_string()));
+                }
+            }
+            "--mute" => audio_muted = true,
             "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
             "--synthetic-bios-rom-writes" => bios_rom_writes = true,
             "--synthetic-rom-writes-ignored" => rom_writes = true,
@@ -213,7 +260,20 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if bios_affine {
         bus = bus.with_affine_policy(gba_native::bios::AffinePolicy::Documented);
     }
-    let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
+    let started = Instant::now();
+    let mut audio_engine = audio_out.as_ref().map(|_| {
+        gba_native::audio::AudioEngine::new(AudioSettings::new(audio_volume, audio_muted))
+    });
+    let empty_script = InputScript::default();
+    let script = input_script.as_ref().unwrap_or(&empty_script);
+    let used = match audio_engine.as_mut() {
+        Some(engine) => run_scripted_audio(&mut cpu, &mut bus, budget, script, engine)?,
+        None => match &input_script {
+            Some(script) => run_scripted(&mut cpu, &mut bus, budget, script)?,
+            None => interpret::run_budget(&mut cpu, &mut bus, budget)?,
+        },
+    };
+    let stats = PerfStats::new(used, 0, 0, started.elapsed());
     let output = if let Some(path) = snapshot_output {
         let image = display::snapshot(&bus)?;
         Some(run_output::write_snapshot(
@@ -228,8 +288,32 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     } else {
         None
     };
+    let audio_written = if let (Some(path), Some(engine)) = (&audio_out, &audio_engine) {
+        let wav = engine.wav();
+        write_safely(path, &wav)?;
+        Some((
+            path.clone(),
+            engine.samples().len(),
+            gba_native::sha256::hex(&gba_native::sha256::digest(&wav)),
+            engine.samples().iter().any(|sample| *sample != 0),
+        ))
+    } else {
+        None
+    };
     println!("status=bounded");
     println!("instructions={used}");
+    for line in stats.report_lines() {
+        println!("{line}");
+    }
+    if let Some((path, samples, digest, audible)) = audio_written {
+        println!("audio_out={}", path.display());
+        println!("audio_sample_rate={}", gba_native::audio::SAMPLE_RATE);
+        println!("audio_samples={samples}");
+        println!("audio_master_volume={audio_volume}");
+        println!("audio_muted={audio_muted}");
+        println!("audio_audible={audible}");
+        println!("audio_wav_sha256={digest}");
+    }
     println!("pc=0x{:08X}", cpu.pc());
     println!("cpsr=0x{:08X}", cpu.cpsr());
     println!("thumb={}", if cpu.thumb() { 1 } else { 0 });

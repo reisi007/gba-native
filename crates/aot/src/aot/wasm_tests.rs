@@ -31,7 +31,9 @@ fn wasm_module_embeds_binding_constants_without_rom_bytes() {
         );
     }
     // The target-neutral program section stays unchanged and usable.
-    assert!(source.contains("pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64)"));
+    assert!(source.contains(
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>)"
+    ));
     assert!(source.contains("interpret::step(cpu, bus)?;"));
 }
 

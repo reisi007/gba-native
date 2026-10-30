@@ -57,8 +57,13 @@ the root workspace lockfile contains only these three internal path packages.
 | ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
 | Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
-| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
-| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2, static synthetic demo only; no ROM/AOT/input/audio/save; browser functional E2E locally observed, visual review pending |
+| Input model | `core::input`: ten button bits, default/editable key bindings, 800x600 landscape + portrait touch layout, persisted settings document, instruction-indexed scripts |
+| Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
+| Audio (first slice) | Dependency-free PSG mixer and stateful `AudioEngine`, volume/mute, WAV sink; `run --audio-out` and the AOT harness `--audio`; browser WebAudio; full PSG timing/Direct Sound tracked in #29 |
+| Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
+| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
+| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
+| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API and localStorage settings page; static synthetic demo only; no ROM/AOT/audio/save |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
@@ -69,13 +74,23 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
+cargo run -- audio --out output/<new-directory>/tone.wav [--frequency 440] [--seconds 2] [--volume 80] [--mute]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
 
+- `run --input FILE` replays `at:KEYS:hold` instruction-indexed input events
+  (for example `0:A+B+Start:20000000`). The `run` report always includes
+  `perf_*` wall-time, guest-instructions/second and real-time-factor lines with
+  the explicit non-cycle caveat.
+- `fixture input-tester` writes our own 4 KiB synthetic ROM. The committed
+  fixture, input script and expected frame live under `tests/roms/synthetic/`;
+  `scripts/input-tester.sh --visual` builds the native AOT artifact and compares
+  the frame with Playwright.
 - `info` parses the documented 192-byte header and prints diagnostics. It does
   not validate the Nintendo logo.
 - `demo` builds the synthetic direct-entry fixture, executes 230,411 guest

@@ -21,6 +21,15 @@ import {
   restoreFallbackNotice,
   statusForFallbackPage,
 } from "./lifecycle.mjs";
+import {
+  BUTTONS,
+  bindingLabel,
+  buttonForCode,
+  loadSettings,
+  maskForButtons,
+  normaliseSettings,
+  saveSettings,
+} from "./input.mjs";
 const POLL_MS = 500;
 
 const STATE_LABEL = {
@@ -504,4 +513,310 @@ async function loseContextWhenReady() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Windowed GBA shell: touch/pointer buttons, key bindings, fullscreen and the
+// persisted settings page. This layer maps documented KEYINPUT bits only; it
+// never uploads or reads cartridge data.
+
+const inputState = {
+  settings: loadSettings(window.localStorage),
+  pressed: new Set(),
+};
+
+function persistInputSettings() {
+  saveSettings(window.localStorage, inputState.settings);
+}
+
+function inputMask() {
+  return maskForButtons(inputState.pressed);
+}
+
+function renderInputStatus() {
+  const status = byId("input-status");
+  if (!status) return;
+  const mask = inputMask();
+  status.dataset.mask = String(mask);
+  status.textContent =
+    inputState.pressed.size === 0
+      ? "input: released"
+      : `input: ${[...inputState.pressed].join(" + ")} (0x${mask.toString(16).padStart(4, "0")})`;
+}
+
+function setButtonVisual(button, active) {
+  for (const element of document.querySelectorAll(`[data-gba-button="${button}"]`)) {
+    element.classList.toggle("is-active", active);
+    element.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function pressButton(button) {
+  if (!button) return;
+  inputState.pressed.add(button);
+  setButtonVisual(button, true);
+  renderInputStatus();
+}
+
+function releaseButton(button) {
+  if (!button) return;
+  inputState.pressed.delete(button);
+  setButtonVisual(button, false);
+  renderInputStatus();
+}
+
+function releaseAllButtons() {
+  for (const button of [...inputState.pressed]) releaseButton(button);
+}
+
+function renderSettings() {
+  const settings = inputState.settings;
+  const list = byId("binding-list");
+  if (list) {
+    list.replaceChildren();
+    for (const button of BUTTONS) {
+      const term = document.createElement("dt");
+      term.className = "font-medium";
+      term.textContent = button;
+      const value = document.createElement("dd");
+      value.className = "opacity-80 break-words";
+      value.textContent = bindingLabel(button, settings.bindings);
+      list.append(term, value);
+    }
+  }
+  byId("touch-toggle").checked = settings.touchControls;
+  byId("integer-toggle").checked = settings.integerScaling;
+  byId("fullscreen-toggle").checked = settings.fullscreen;
+  byId("volume-range").value = String(settings.masterVolume);
+  byId("volume-value").textContent = String(settings.masterVolume);
+  byId("mute-toggle").checked = settings.muted;
+  document.body.classList.toggle("touch-controls", settings.touchControls);
+  document.body.classList.toggle("integer-scaling", settings.integerScaling);
+  byId("settings-button").setAttribute(
+    "aria-expanded",
+    byId("settings-panel").hidden ? "false" : "true",
+  );
+}
+
+function showSettings(visible) {
+  const panel = byId("settings-panel");
+  panel.hidden = !visible;
+  byId("settings-button").setAttribute("aria-expanded", visible ? "true" : "false");
+  if (visible) panel.scrollIntoView({ block: "nearest" });
+}
+
+async function toggleFullscreen() {
+  const screen = byId("screen-slot");
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await screen.requestFullscreen();
+    }
+  } catch {
+    // Headless browsers and embedding contexts can deny the Fullscreen API.
+    // Keep a CSS-only windowed/fullscreen switch so the layout is testable.
+    document.body.classList.toggle("input-fullscreen");
+    inputState.settings.fullscreen = document.body.classList.contains("input-fullscreen");
+    persistInputSettings();
+    renderSettings();
+  }
+}
+
+let audioContext = null;
+
+function audioGain() {
+  const settings = inputState.settings;
+  return settings.muted ? 0 : settings.masterVolume / 100;
+}
+
+function playTestTone() {
+  const Context = window.AudioContext ?? window.webkitAudioContext;
+  if (!Context) return false;
+  audioContext ??= new Context();
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = "square";
+  oscillator.frequency.value = 440;
+  gain.gain.value = 0.2 * audioGain();
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.4);
+  return true;
+}
+
+function setupInputUi() {
+  renderSettings();
+  renderInputStatus();
+
+  byId("settings-button").addEventListener("click", () => {
+    showSettings(byId("settings-panel").hidden);
+  });
+  byId("close-settings").addEventListener("click", () => showSettings(false));
+  byId("fullscreen-button").addEventListener("click", () => {
+    void toggleFullscreen();
+  });
+  byId("apply-fullscreen").addEventListener("click", () => {
+    void toggleFullscreen();
+  });
+  byId("fullscreen-toggle").addEventListener("change", (event) => {
+    inputState.settings.fullscreen = event.target.checked;
+    persistInputSettings();
+    void toggleFullscreen();
+  });
+  byId("touch-toggle").addEventListener("change", (event) => {
+    inputState.settings.touchControls = event.target.checked;
+    persistInputSettings();
+    if (!event.target.checked) releaseAllButtons();
+    renderSettings();
+  });
+  byId("integer-toggle").addEventListener("change", (event) => {
+    inputState.settings.integerScaling = event.target.checked;
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("volume-range").addEventListener("input", (event) => {
+    inputState.settings.masterVolume = Number(event.target.value);
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("mute-toggle").addEventListener("change", (event) => {
+    inputState.settings.muted = event.target.checked;
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("test-tone").addEventListener("click", () => {
+    void playTestTone();
+  });
+  byId("reset-settings").addEventListener("click", () => {
+    inputState.settings = normaliseSettings();
+    persistInputSettings();
+    renderSettings();
+  });
+
+  document.addEventListener("fullscreenchange", () => {
+    const active = document.fullscreenElement !== null;
+    document.body.classList.toggle("input-fullscreen", active);
+    inputState.settings.fullscreen = active;
+    persistInputSettings();
+    byId("fullscreen-button").textContent = active ? "Windowed" : "Fullscreen";
+    renderSettings();
+  });
+
+  const isFormControl = (target) =>
+    ["SELECT", "INPUT", "TEXTAREA", "BUTTON", "A"].includes(target?.tagName ?? "");
+
+  const formControlHasFocus = () => isFormControl(document.activeElement);
+
+  // Keep keyboard-only backend selection deterministic across browser
+  // platforms. Native select popups differ (some open on Alt+ArrowDown and
+  // leave the value unchanged in headless mode), so a focused select steps its
+  // own value on ArrowUp/ArrowDown and commits immediately. Enter is swallowed
+  // because the value is already committed; other native keys still work.
+  const backendSelect = byId("backend-select");
+  backendSelect.addEventListener("keydown", (event) => {
+    if (event.altKey) {
+      event.preventDefault();
+      return;
+    }
+    if (event.code === "ArrowDown" || event.code === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.code === "ArrowDown" ? 1 : -1;
+      const next = Math.min(
+        backendSelect.options.length - 1,
+        Math.max(0, backendSelect.selectedIndex + delta),
+      );
+      backendSelect.selectedIndex = next;
+      backendSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    if (event.code === "Enter") {
+      event.preventDefault();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (isFormControl(event.target) || formControlHasFocus()) return;
+    if (event.code === "F1") {
+      event.preventDefault();
+      showSettings(byId("settings-panel").hidden);
+      return;
+    }
+    if (event.code === "F11" || (event.code === "Enter" && event.altKey)) {
+      event.preventDefault();
+      void toggleFullscreen();
+      return;
+    }
+    if (event.code === "KeyM") {
+      event.preventDefault();
+      inputState.settings.muted = !inputState.settings.muted;
+      persistInputSettings();
+      renderSettings();
+      return;
+    }
+    if (event.code === "Minus" || event.code === "Equal") {
+      event.preventDefault();
+      const delta = event.code === "Minus" ? -10 : 10;
+      inputState.settings.masterVolume = Math.min(
+        100,
+        Math.max(0, inputState.settings.masterVolume + delta),
+      );
+      persistInputSettings();
+      renderSettings();
+      return;
+    }
+    const button = buttonForCode(event.code, inputState.settings.bindings);
+    if (button) {
+      event.preventDefault();
+      pressButton(button);
+    }
+  });
+  document.addEventListener("keyup", (event) => {
+    if (isFormControl(event.target) || formControlHasFocus()) return;
+    const button = buttonForCode(event.code, inputState.settings.bindings);
+    if (button) {
+      event.preventDefault();
+      releaseButton(button);
+    }
+  });
+  window.addEventListener("blur", releaseAllButtons);
+
+  for (const element of document.querySelectorAll("[data-gba-button]")) {
+    const button = element.dataset.gbaButton;
+    element.setAttribute("aria-pressed", "false");
+    element.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      element.setPointerCapture?.(event.pointerId);
+      pressButton(button);
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      element.addEventListener(name, (event) => {
+        event.preventDefault?.();
+        releaseButton(button);
+      });
+    }
+    element.addEventListener("pointerleave", () => releaseButton(button));
+    element.addEventListener("contextmenu", (event) => event.preventDefault());
+  }
+
+  window.__gbaNative.input = {
+    mask: inputMask,
+    pressed: () => [...inputState.pressed],
+    settings: () => JSON.parse(JSON.stringify(inputState.settings)),
+    press: pressButton,
+    release: releaseButton,
+    showSettings,
+    fullscreen: () => document.fullscreenElement !== null || document.body.classList.contains("input-fullscreen"),
+  };
+  window.__gbaNative.audio = {
+    settings: () => ({
+      masterVolume: inputState.settings.masterVolume,
+      muted: inputState.settings.muted,
+      gain: audioGain(),
+    }),
+    playTestTone,
+    contextState: () => audioContext?.state ?? "closed",
+  };
+}
+
+setupInputUi();
 main();

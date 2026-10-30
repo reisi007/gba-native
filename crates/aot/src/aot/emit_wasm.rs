@@ -74,7 +74,14 @@ fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
     cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(ENTRY_THUMB);
-    let program = run_program(&mut cpu, &mut bus, BUDGET)?;
+    let mut audio = None;
+    let program = run_program(
+        &mut cpu,
+        &mut bus,
+        BUDGET,
+        &gba_native::input::InputScript::default(),
+        &mut audio,
+    )?;
     let mut report = String::new();
     report.push_str("status=ok\n");
     report.push_str(&format!("pc=0x{:08X}\n", cpu.pc()));

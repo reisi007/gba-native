@@ -1,14 +1,11 @@
 //! Contracts for the three-package default workspace and isolated frontends.
+use gba_native::{aot, bios, bus, cart, cpu, decode, demo, display, error, interpret, ir, render};
+use gba_native::{memory, semantics, sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
-
-use gba_native::{aot, bios, bus, cart, cpu, decode, demo, display, error, interpret, ir, render};
-use gba_native::{memory, semantics, sha256};
-
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 struct TempDir(PathBuf);
-
 impl TempDir {
     fn new(tag: &str) -> Self {
         let sequence = NEXT_TEMP.fetch_add(1, Ordering::SeqCst);
@@ -196,8 +193,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 481, "full workspace test inventory changed");
-    // Pins Mode 0 BG0, WASM, CLI, host I/O/DMA/VCOUNT, BIOS/IRQ, mask-ROM/serial and ARMv4 suites.
+    assert_eq!(total, 537, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -226,8 +222,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("display", 5),
         ("display_layers", 8),
         ("display_mode0", 8),
+        ("input_tester_fixture", 3),
         ("isa_golden", 4),
         ("irq_dispatch", 6),
+        ("local_name_entry", 1),
         ("psr_banking", 6),
         ("psr_field_mask", 4),
         ("psr_transfer", 10),
@@ -266,8 +264,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     ];
     let root_targets = [
         ("cli_aot_build", 2),
+        ("cli_audio", 3),
         ("cli_output", 5),
         ("cli_run", 9),
+        ("cli_run_input", 4),
         ("cli_run_options", 4),
         ("frontend_gates", 4),
         ("quality_counter", 10),
@@ -277,8 +277,8 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 85);
-    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 25);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 122);
+    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 29);
     baseline += assert_target_count(
         &root,
         &target,
@@ -288,7 +288,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         5,
     );
-    assert_eq!(baseline, 477, "selected package test inventory changed");
+    assert_eq!(baseline, 529, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,

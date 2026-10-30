@@ -165,7 +165,13 @@ fn native_irq_dispatch_and_return_match_reference_with_exact_fallbacks() {
         "the saved full-descending frame is restored in documented order"
     );
     assert_eq!(report.budget_used, budget);
-    assert_eq!(report.fallbacks, HANDLER_INSTRUCTIONS + 1);
+    assert_eq!(report.fallbacks, HANDLER_INSTRUCTIONS);
+    assert_eq!(report.irq_returns, 1);
+    assert_eq!(
+        report.native_instructions + report.fallbacks + report.irq_returns,
+        budget,
+        "native, fallback and modelled IRQ-return counters must close the budget"
+    );
     assert!(
         report
             .matches_reference(&cpu, &bus, budget)

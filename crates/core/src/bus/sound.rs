@@ -198,6 +198,12 @@ impl SoundState {
         }
     }
 
+    /// Snapshot of the write-only PSG register file (offsets from `0x04000060`).
+    /// The audio renderer is a host-side consumer; guest reads stay unchanged.
+    pub(super) fn register_file(&self) -> [u8; SOUND_LEN] {
+        self.regs
+    }
+
     pub(super) fn fifo_len(&self, fifo: SoundFifo) -> usize {
         self.fifo(fifo).len()
     }

@@ -35,6 +35,34 @@ jobs:
       - name: Full gate
         run: ./scripts/full.sh
 
+  # Synthetic input-tester ROM: build it for the Linux host through native AOT,
+  # run it with a committed input script and compare the actual frame with the
+  # committed expected frame. The visual step renders both frames in Chromium
+  # through the pinned Playwright tooling and compares every pixel. No retail
+  # ROM, BIOS image or save data is involved.
+  linux-input-tester:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Provision pinned Node, npm and Playwright Chromium
+        run: ./scripts/web-browsers-install.sh
+
+      - name: Native input-tester, Linux AOT and visual comparison
+        run: ./scripts/input-tester.sh --visual
+
+      - name: Upload input-tester evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-tester-linux
+          path: output/input-tester.*/
+          if-no-files-found: warn
+
   # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets
   # below compile the generated harness for the *installed host* triple, so this
   # job is only meaningful on an Apple-silicon runner. The host check makes an

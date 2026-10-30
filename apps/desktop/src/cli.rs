@@ -17,7 +17,7 @@ pub const MAX_SMOKE_PRESENTATIONS: u32 = 10_000;
 pub const USAGE: &str = "\
 gba-native-desktop: synthetic GPU presentation foundation
 
-usage: gba-native-desktop [--synthetic] [--size WxH] [--smoke N]
+usage: gba-native-desktop [--synthetic] [--size WxH] [--smoke N] [--settings PATH] [--fullscreen]
        gba-native-desktop --help
        gba-native-desktop --version
 
@@ -28,28 +28,39 @@ options:
   --smoke N     Request redraws until N render acknowledgements; print
                 adapter/presentation evidence, exit. N is 1..=10000. Counts are
                 Pixels::render acknowledgements, not visible or guest frames.
+  --settings P  Persisted settings file. Defaults to the per-user config path.
+  --fullscreen  Start in fullscreen (F11 or Alt+Enter toggles at runtime).
+  --audio-out P Write a one-second 440 Hz WAV at the persisted volume/mute.
   -h, --help    Show this help.
   --version     Show the frontend version.
 
 This is synthetic GPU presentation only; it is not a playable retail emulator.
 The guest image is static after the existing demo instruction budget. There is
-no --rom, input, audio, save, BIOS or retail-game mode in this foundation.
-The window runs at nearest/pixel-perfect integer scale, 3:2, black letterbox.
-Close with Escape or the window close control. The default event loop waits.
+no --rom or cartridge input, audio, save, BIOS or retail-game mode.
+The windowed mode draws a GBA shell with pointer/touch controls; fullscreen
+shows the guest image at 3x. F1 opens the persisted key-binding settings page.
+The nearest/pixel-perfect scale and black letterbox are unchanged. Close with
+Escape or the window close control. The default event loop waits.
 
 Runtime: Winit 0.30 with Pixels 0.17/WGPU 29, portable native window target.
 A separate browser/WebGPU synthetic foundation is available; it is not per-ROM.
 ";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
-    /// `None` means three times the guest image (720x480 for the demo).
+    /// `None` means the composed 800x600 shell/fullscreen canvas.
     pub initial_size: Option<(u32, u32)>,
     /// Successful render acknowledgement targets before an automatic clean exit.
     pub smoke: Option<u32>,
+    /// Explicit settings path; `None` uses the per-user default.
+    pub settings: Option<std::path::PathBuf>,
+    /// Override the persisted fullscreen preference for this launch.
+    pub fullscreen: bool,
+    /// Optional dependency-free WAV output for the synthetic tone.
+    pub audio_out: Option<std::path::PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Run(Options),
     Help,
@@ -81,12 +92,34 @@ where
     let mut args = args.into_iter();
     let mut initial_size = None;
     let mut smoke = None;
+    let mut settings = None;
+    let mut fullscreen = false;
+    let mut audio_out = None;
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "-h" | "--help" => return Ok(Command::Help),
             "--version" => return Ok(Command::Version),
             "--synthetic" => {}
+            "--fullscreen" => fullscreen = true,
+            "--settings" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| CliError::new("--settings needs a file path"))?;
+                settings = Some(std::path::PathBuf::from(value));
+            }
+            value if value.starts_with("--settings=") => {
+                settings = Some(std::path::PathBuf::from(&value["--settings=".len()..]));
+            }
+            "--audio-out" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| CliError::new("--audio-out needs a WAV path"))?;
+                audio_out = Some(std::path::PathBuf::from(value));
+            }
+            value if value.starts_with("--audio-out=") => {
+                audio_out = Some(std::path::PathBuf::from(&value["--audio-out=".len()..]));
+            }
             "--size" => {
                 let value = args
                     .next()
@@ -129,6 +162,9 @@ where
     Ok(Command::Run(Options {
         initial_size,
         smoke,
+        settings,
+        fullscreen,
+        audio_out,
     }))
 }
 
@@ -199,20 +235,45 @@ mod tests {
             parse_ok(&[]),
             Command::Run(Options {
                 initial_size: None,
-                smoke: None
+                smoke: None,
+                settings: None,
+                fullscreen: false,
+                audio_out: None,
             })
         );
         assert_eq!(parse_ok(&["--synthetic"]), parse_ok(&[]));
     }
 
     #[test]
-    fn accepts_size_and_smoke_in_both_spellings() {
+    fn accepts_size_smoke_settings_and_fullscreen() {
         let expected = Command::Run(Options {
             initial_size: Some((800, 600)),
             smoke: Some(3),
+            settings: Some(std::path::PathBuf::from("prefs.ini")),
+            fullscreen: true,
+            audio_out: None,
         });
-        assert_eq!(parse_ok(&["--size", "800x600", "--smoke", "3"]), expected);
-        assert_eq!(parse_ok(&["--size=800X600", "--smoke=3"]), expected);
+        assert_eq!(
+            parse_ok(&[
+                "--size",
+                "800x600",
+                "--smoke",
+                "3",
+                "--settings",
+                "prefs.ini",
+                "--fullscreen"
+            ]),
+            expected
+        );
+        assert_eq!(
+            parse_ok(&[
+                "--size=800X600",
+                "--smoke=3",
+                "--settings=prefs.ini",
+                "--fullscreen"
+            ]),
+            expected
+        );
     }
 
     #[test]

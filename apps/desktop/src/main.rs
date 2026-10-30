@@ -7,8 +7,11 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod audio_out;
 mod cli;
 mod presentation;
+mod settings;
+mod ui;
 
 use std::process::ExitCode;
 

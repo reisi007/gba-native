@@ -325,7 +325,13 @@ Implemented regions and widths:
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
   guest writes have no effect. This host setter provides no frame scheduler,
-  sampling guarantee or timing claim. BG0 scroll reads are
+  sampling guarantee or timing claim. The std-only `input` module adds the host
+  button/key-binding model, an 800x600 landscape and a portrait normalised touch
+  layout, the persisted settings document and instruction-indexed input
+  scripts. The synthetic desktop and browser frontends use that model for
+  keyboard/touch buttons, fullscreen and a settings page; they do not accept a
+  cartridge, save or audio stream, and the frontend input path is not a
+  retail-game or playability claim. BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
   A 32-bit I/O access is composed from two halfword accesses, as on hardware.
@@ -340,7 +346,8 @@ Implemented regions and widths:
   set of silently-dropped addresses small, inspectable and out of the digest.
   Mutable display-register and dynamic KEYINPUT state are included in
   `Bus::state_digest`. Sound registers remain storage-only apart from bounded
-  Sound A/B FIFO queues; timer counters, reload latches, controls and prescaler
+  Sound A/B FIFO queues and the host-side `audio` PSG renderer, which consumes a
+  register snapshot without changing guest reads; timer counters, reload latches, controls and prescaler
   phases are part of the instruction-budget timer model (below). There is no
   save-register state, no BG affine parameter state, and no serial shift engine.
   The serial registers `SIOCNT`/`RCNT`/`SIODATA*` are documented storage only: a
@@ -469,7 +476,9 @@ support explicit host consumption of one signed sample. `SOUNDCNT_H` FIFO reset
 bits clear their corresponding queues; RegisterRamReset group 6 clears both and
 group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
-audio output. There is no DMA arbitration, scanline/cycle timing, automatic
+automatic audio output. The separate `audio` module renders a bounded PSG mix
+from the register snapshot with a host volume/mute; it does not consume FIFO
+samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - The backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by default and
   only answers under the explicit `BackupPolicy::Sram32KVolatile` or

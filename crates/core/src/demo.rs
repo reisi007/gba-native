@@ -13,6 +13,13 @@ use crate::display::{Image, rgb555_to_rgb888};
 use crate::error::Result;
 use crate::interpret;
 
+pub mod input_tester;
+
+pub use input_tester::{
+    ENTRY as INPUT_TESTER_ENTRY, INPUT_TESTER_BUDGET, INPUT_TESTER_SAMPLE_MASK,
+    expected_input_tester_image, input_tester_cartridge,
+};
+
 pub const ENTRY: u32 = ROM_BASE;
 pub const DEMO_BUDGET: u64 = 230_411;
 pub const FALLBACK_BUDGET: u64 = 16;
@@ -197,6 +204,50 @@ fn arm_cmp_imm(rn: u32, imm8: u32) -> u32 {
 
 fn arm_strh(rd: u32, rn: u32, offset: u32) -> u32 {
     0xE1C0_00B0 | (rn << 16) | (rd << 12) | ((offset & 0xF0) << 4) | (offset & 0xF)
+}
+
+fn arm_ldrh(rd: u32, rn: u32, offset: u32) -> u32 {
+    0xE1D0_00B0 | (rn << 16) | (rd << 12) | ((offset & 0xF0) << 4) | (offset & 0xF)
+}
+
+fn arm_strh_post(rd: u32, rn: u32, offset: u32) -> u32 {
+    assert!(offset < 256);
+    0xE0C0_00B2 | (rn << 16) | (rd << 12) | offset
+}
+
+fn arm_mvn_reg(rd: u32, rm: u32) -> u32 {
+    0xE1E0_0000 | (rd << 12) | rm
+}
+
+fn arm_and_reg(rd: u32, rn: u32, rm: u32) -> u32 {
+    0xE000_0000 | (rn << 16) | (rd << 12) | rm
+}
+
+fn arm_tst_imm(rn: u32, imm8: u32) -> u32 {
+    0xE310_0000 | (rn << 16) | imm8
+}
+
+fn arm_moveq_reg(rd: u32, rm: u32) -> u32 {
+    0x01A0_0000 | (rd << 12) | rm
+}
+
+fn arm_movne_reg(rd: u32, rm: u32) -> u32 {
+    0x11A0_0000 | (rd << 12) | rm
+}
+
+fn arm_subs_imm(rd: u32, rn: u32, imm8: u32) -> u32 {
+    0xE250_0000 | (rn << 16) | (rd << 12) | imm8
+}
+
+fn arm_mov_reg_lsr_imm(rd: u32, rm: u32, rotation: u32) -> u32 {
+    assert!(rotation < 32);
+    0xE1A0_0000 | (rd << 12) | (rotation << 7) | (1 << 5) | rm
+}
+
+/// `mov rd, #imm8, #rotation` with an even rotation in bits.
+fn arm_mov_imm_rot(rd: u32, imm8: u32, rotation: u32) -> u32 {
+    assert!(rotation < 32 && rotation.is_multiple_of(2));
+    0xE3A0_0000 | (rd << 12) | ((rotation / 2) << 8) | imm8
 }
 
 fn thumb_add_imm3(rd: u32, rs: u32, imm3: u32) -> u16 {

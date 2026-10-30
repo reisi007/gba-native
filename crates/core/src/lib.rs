@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
 pub mod bios;
 pub mod bus;
 pub mod cart;
@@ -22,9 +23,11 @@ pub mod decode;
 pub mod demo;
 pub mod display;
 pub mod error;
+pub mod input;
 pub mod interpret;
 pub mod ir;
 pub mod memory;
+pub mod perf;
 pub mod render;
 pub mod semantics;
 pub mod sha256;

@@ -39,7 +39,7 @@ const SCREENSHOT_TIMEOUT_MS = 5_000;
 const WEBGPU_CONFIRMATION_TIMEOUT_MS = 1_000;
 const WEBGPU_STABILITY_STEP_TIMEOUT_MS = 3_000;
 const WEBGPU_STABILITY_FRAMES = 8;
-const DISCLAIMER = 'Experimental synthetic GPU demo; no playable ROM, saves or game input yet.';
+const DISCLAIMER = 'Experimental synthetic GPU demo; no playable ROM, cartridge input or saves.';
 
 type Fixtures = { failureDiagnostics: void; requests: string[] };
 

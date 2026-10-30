@@ -89,13 +89,26 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "/// reference interpreter with a fresh fetch/decode.").unwrap();
     writeln!(
         out,
-        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<ProgramReport> {{"
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<ProgramReport> {{"
     )
     .unwrap();
     writeln!(out, "    let mut remaining = budget;").unwrap();
     writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
     writeln!(out, "    let mut irq_returns = 0u64;").unwrap();
     writeln!(out, "    while remaining > 0 {{").unwrap();
+    writeln!(out, "        let executed = budget - remaining;").unwrap();
+    writeln!(out, "        if let Some(engine) = audio.as_mut() {{").unwrap();
+    writeln!(
+        out,
+        "            if executed % gba_native::input::AUDIO_CHUNK_INSTRUCTIONS == 0 {{ engine.advance(&bus.sound_registers(), gba_native::input::AUDIO_CHUNK_INSTRUCTIONS); }}"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        if !input.is_empty() {{ bus.set_pressed_keys(input.mask_at(executed)); }}"
+    )
+    .unwrap();
     writeln!(
         out,
         "        if gba_native::interpret::irq_dispatch_continuation(cpu) {{"
@@ -171,6 +184,19 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "        if next == Next::Halt {{").unwrap();
     writeln!(out, "            break;").unwrap();
     writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    bus.set_pressed_keys(0);").unwrap();
+    writeln!(out, "    if let Some(engine) = audio.as_mut() {{").unwrap();
+    writeln!(
+        out,
+        "        let remainder = (budget - remaining) % gba_native::input::AUDIO_CHUNK_INSTRUCTIONS;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if remainder != 0 {{ engine.advance(&bus.sound_registers(), remainder); }}"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    Ok(ProgramReport {{").unwrap();
     writeln!(out, "        budget_remaining: remaining,").unwrap();

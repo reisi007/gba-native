@@ -1326,3 +1326,128 @@ services and the IRQ dispatcher entry/return are HLE host models, not
 translated guest code; no BIOS bytes are fetched. The run depends on explicit
 synthetic device/HLE opt-ins and is a static post-budget snapshot, not a frame,
 boot, gameplay, timing or compatibility claim.
+
+## Round: synthetic input tester and native visual comparison (2026-10-30)
+
+The committed `tests/roms/synthetic/input-tester.gba` is a 4 KiB Mode 3 guest
+written from our own instruction words. It reads active-low KEYINPUT and draws
+ten 16-pixel bands in button order; a held button makes its band white. The
+source function, committed bytes, input script and expected PPM are pinned:
+
+- ROM SHA-256 `8a7667d43d9ec0333a5a7c0a032837919e101ca1c1893bdf5f95f51b27555539`
+- expected PPM SHA-256 `2824c8e9f509c1294c555af3318cec4d3fd4a37aa964f60e9ecc974721da941a`
+- expected RGB888 frame SHA-256 `5cbbd998a2bc5a026ebac07d91a0f058b769cb05dd14c09e30d52888ed80db8b`
+- script `0:A+B+Start:20000000`, budget 20,000,000 instructions
+
+The committed source is checked by
+`crates/core/tests/input_tester_fixture.rs`, which regenerates the bytes, checks
+both digests, runs the reference interpreter with the committed script and
+compares the frame with the independent expected-image function. The default
+`cargo test` gate stays offline; no browser, Node or retail ROM is required.
+
+`scripts/input-tester.sh` built the same fixture through native AOT for the host
+(`aarch64-apple-darwin`) and ran the generated executable with the committed
+script. The report recorded `budget_used=20000000`, `fallbacks=0`,
+`image_sha256=5cbb…db8b`, and an actual PPM byte-identical to the committed
+expected frame. The same gate runs `--audio` at volume 80 and requires
+`audio_audible=true` plus a non-empty WAV. With `--visual`, the pinned Chromium
+rendered expected and actual frames and reported `visual_compared=38400`,
+`visual_differences=0`, `visual_pixels_match=true`; the screenshot is kept in
+the owned `output/input-tester.*` workspace. The Linux CI job runs the same
+script on `ubuntu-latest` (the native target is its host triple), with the same
+digests and visual comparison.
+
+Performance report from that run (20,000,000 guest instructions):
+`perf_guest_instructions_per_second≈33.4M`, `perf_realtime_factor≈1.99`
+against the documented 16.777216 MHz clock, with the explicit caveat that one
+retired instruction is not one hardware cycle. This is a synthetic fixture
+measurement, not frame timing or a game-performance claim.
+
+Limits: the fixture exercises our own input path, not a retail game. It does not
+establish hardware conformance, audio, saves, link play, a playable emulator or
+a retail compatibility level.
+
+## Round: cross-target build matrix (2026-10-30)
+
+`scripts/cross.sh` built the synthetic input-tester artifact for:
+
+| Target | Result |
+| --- | --- |
+| `aarch64-apple-darwin` | Mach-O arm64; run with frame match and `audio_audible=true` |
+| `x86_64-apple-darwin` | Mach-O x86_64; built (host is arm64) |
+| `x86_64-unknown-linux-gnu` | ELF 64-bit x86-64 PIE; built with `zig cc` |
+| `x86_64-pc-windows-gnu` | PE32+ x86-64 console executable; built with mingw-w64 |
+| `wasm32-unknown-unknown` | 153,874-byte module; built with pinned wasm-bindgen 0.2.129 |
+
+The Linux artifact is build evidence on a macOS host; execution is covered by
+the Linux CI job. Windows MSVC, iOS and Android are not claimed; they need their
+own linker/SDK or packaging work (#11). A successful cross-build is not a
+platform-support, GPU, input or playability claim.
+
+## Round: local retail name-entry regression (2026-10-30)
+
+`crates/core/tests/local_name_entry.rs` is an ignored, environment-gated
+integration test for a user-supplied read-only ROM. It drives the reference
+runner from the title screen through the new-game intro, navigates the on-screen
+name keyboard, types characters, confirms with START and checks the confirmation
+dialog. The ROM path is supplied via `GBA_NATIVE_LOCAL_ROM`; the test never
+copies, commits or embeds ROM bytes. It is not part of `cargo test` or CI.
+
+The observed flow used START at instruction 460,000,000, periodic A presses
+through the intro, directional navigation on the name keyboard and START to
+confirm. The local frame and PC/DISPCNT values are a renderer-build golden, not
+a hardware or retail compatibility claim. Evidence is written under
+`output/local-name-entry-*` when the test is run locally.
+
+The local release run passed on 2026-10-30 with `pc=0x080008C8`,
+`dispcnt=0x1340` and image SHA-256
+`558ae1e3c9fb682f2031525cc5783c2445e3ca47ae0b39bef6f5b3255c1785f8`; the
+evidence directory is `output/local-name-entry-31759-*`. The test requires
+`GBA_NATIVE_LOCAL_ROM`, is `#[ignore]`d and is never part of CI.
+
+## Round: native audio generation, first slice (2026-10-30)
+
+`crates/core/src/audio.rs` is a std-only, dependency-free PSG mixer. It renders
+two square channels, the wave channel and the noise channel from the documented
+sound-register image, applies a 0..=100 master volume or digital mute, and can
+emit a canonical RIFF/WAVE file. `AudioEngine` keeps phase and LFSR state across
+instruction chunks, so changing a guest register during a run changes later PCM
+rather than replacing a static snapshot. This is generation from guest state,
+not a pre-recorded track.
+
+Evidence:
+
+- `cargo test -p gba-native-core --lib audio`: 8 mixer/engine/WAV tests pass,
+  including a 440 Hz square sign-crossing count, mute silence, volume scaling,
+  disabled-master silence and a stateful engine advance.
+- `gba-native audio --out output/audio-demo/tone.wav --frequency 440
+  --seconds 0.5 --volume 80` wrote 16,384 mono samples at 32,768 Hz
+  (32,812-byte WAV), `audible=true`, WAV SHA-256
+  `004fa5dde7355bc14b16e20a8f0aec6e9be60babea69a74cc87747b0f35fbf57`.
+- The same command with `--mute` reported `audible=false` and a different WAV
+  digest (`26babbf888706edddea4164b24cd61e70ca922ae830d7abcd2b45ed8b8c4c7b4`).
+  `tests/cli_audio.rs` additionally asserts that every muted data sample is
+  zero and that volume 20 differs from volume 80.
+
+The generated AOT harness accepts `--audio PATH`, `--volume 0..100` and
+`--mute` and writes WAV from the run's sound-register state; this is the
+cross-target artifact path. The browser frontend uses WebAudio instead. The
+persisted settings document now carries `master_volume` and `muted`.
+
+The committed input-tester guest now programs a 440 Hz square at boot. A
+2,000,000-instruction reference run with `--audio-out` reported
+`audio_samples=11718`, `audio_master_volume=80`, `audio_muted=false`,
+`audio_audible=true` and WAV SHA-256
+`7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`. The
+native AOT harness for `aarch64-apple-darwin` (`--audio`, volume 80) reported
+`audio_samples=32768`, `audio_audible=true`, `fallbacks=0` and
+`perf_realtime_factor=1.8584`, with WAV SHA-256
+`fb498e5dc824af31927f411b6e84896d5386f538bc15e7405517ba628342d5a0`. The frame
+still matched `5cbbd998…80b8b`. This is guest-state-driven audio from our own
+fixture, not a retail soundtrack claim.
+
+Limits: the mixer has no complete sweep/envelope/length frame sequencer, no
+Direct Sound FIFO sample clock and no cycle-accurate resampling. Live native
+speaker output is target-specific and not yet wired; the WAV artifact is the
+native output path in this slice. Full audio is tracked in issue #29 and is not
+a retail-audio, hardware-timing or BIOS-audio claim.

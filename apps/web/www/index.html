@@ -10,7 +10,7 @@
     />
     <meta
       name="description"
-      content="Experimental synthetic browser GPU foundation for the gba-native project. No playable ROM, saves or game input."
+      content="Experimental synthetic browser GPU foundation for the gba-native project. No playable ROM or saves; on-screen input maps documented buttons only."
     />
     <title>gba-native browser GPU foundation (synthetic only)</title>
     <link rel="icon" href="data:," />
@@ -28,6 +28,14 @@
         <h1 class="text-base font-semibold sm:text-lg">gba-native · browser GPU foundation</h1>
         <span class="badge badge-warning">Experimental synthetic demo</span>
         <span id="state-badge" class="badge badge-ghost" data-state="empty">Not started</span>
+        <span class="ml-auto flex flex-wrap gap-2">
+          <button id="settings-button" class="btn btn-sm btn-ghost" type="button" aria-controls="settings-panel" aria-expanded="false">
+            Settings
+          </button>
+          <button id="fullscreen-button" class="btn btn-sm btn-outline" type="button">
+            Fullscreen
+          </button>
+        </span>
       </div>
     </header>
 
@@ -42,23 +50,50 @@
           </div>
 
           <div id="screen-slot" class="screen-slot" aria-busy="false">
-            <canvas
-              id="gba-canvas"
-              class="screen-canvas"
-              width="240"
-              height="160"
-              aria-label="Synthetic 240 by 160 demo bitmap presented with nearest-neighbour scaling"
-            ></canvas>
-            <div id="screen-overlay" class="screen-overlay">
-              <span
-                id="overlay-spinner"
-                class="loading loading-spinner loading-lg hidden"
-                aria-hidden="true"
-              ></span>
-              <p id="overlay-title" class="font-medium">No frame displayed yet</p>
-              <p id="overlay-hint" class="max-w-sm text-xs opacity-80">
-                Press “Start synthetic demo”. Nothing is executed or drawn before that.
-              </p>
+              <canvas
+                id="gba-canvas"
+                class="screen-canvas"
+                width="240"
+                height="160"
+                aria-label="Synthetic 240 by 160 demo bitmap presented with nearest-neighbour scaling"
+              ></canvas>
+              <div id="screen-overlay" class="screen-overlay">
+                <span
+                  id="overlay-spinner"
+                  class="loading loading-spinner loading-lg hidden"
+                  aria-hidden="true"
+                ></span>
+                <p id="overlay-title" class="font-medium">No frame displayed yet</p>
+                <p id="overlay-hint" class="max-w-sm text-xs opacity-80">
+                  Press “Start synthetic demo”. Nothing is executed or drawn before that.
+                </p>
+              </div>
+          </div>
+
+          <div id="gba-shell" class="gba-shell" data-shell-mode="windowed">
+            <div class="gba-shell-top">
+              <span class="gba-brand">GBA-NATIVE</span>
+              <span id="input-status" class="gba-input-status" aria-live="polite">input: released</span>
+            </div>
+            <div id="touch-controls" class="gba-controls" role="group" aria-label="GBA touch controls">
+              <div class="gba-shoulders">
+                <button type="button" class="gba-button gba-shoulder" data-gba-button="L" aria-label="L button">L</button>
+                <button type="button" class="gba-button gba-shoulder" data-gba-button="R" aria-label="R button">R</button>
+              </div>
+              <div class="gba-dpad" aria-label="Directional pad">
+                <button type="button" class="gba-button gba-up" data-gba-button="Up" aria-label="Up">▲</button>
+                <button type="button" class="gba-button gba-left" data-gba-button="Left" aria-label="Left">◀</button>
+                <button type="button" class="gba-button gba-right" data-gba-button="Right" aria-label="Right">▶</button>
+                <button type="button" class="gba-button gba-down" data-gba-button="Down" aria-label="Down">▼</button>
+              </div>
+              <div class="gba-face">
+                <button type="button" class="gba-button gba-b" data-gba-button="B" aria-label="B button">B</button>
+                <button type="button" class="gba-button gba-a" data-gba-button="A" aria-label="A button">A</button>
+              </div>
+              <div class="gba-menu">
+                <button type="button" class="gba-button gba-pill" data-gba-button="Select" aria-label="Select">SELECT</button>
+                <button type="button" class="gba-button gba-pill" data-gba-button="Start" aria-label="Start">START</button>
+              </div>
             </div>
           </div>
 
@@ -117,6 +152,56 @@
         </section>
       </aside>
 
+      <section
+        id="settings-panel"
+        class="card min-w-0 max-w-full bg-base-200 shadow-sm lg:col-span-2"
+        aria-labelledby="settings-heading"
+        hidden
+      >
+        <div class="card-body gap-3 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="settings-heading" class="card-title text-base">Settings</h2>
+            <button id="close-settings" class="btn btn-sm btn-ghost" type="button">Close</button>
+          </div>
+          <p class="text-xs opacity-70">
+            Saved in this browser via <code>localStorage</code>. The same defaults are used by the
+            native frontend; no account or remote storage is involved.
+          </p>
+          <dl id="binding-list" class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm"></dl>
+          <div class="flex flex-wrap gap-4 pt-2">
+            <label class="label cursor-pointer justify-start gap-2">
+              <input id="touch-toggle" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Touch controls</span>
+            </label>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input id="integer-toggle" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Integer scaling</span>
+            </label>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input id="fullscreen-toggle" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Fullscreen</span>
+            </label>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="form-control">
+              <span class="label-text">Master volume <span id="volume-value">80</span>%</span>
+              <input id="volume-range" class="range range-sm" type="range" min="0" max="100" step="1" value="80" />
+            </label>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input id="mute-toggle" type="checkbox" class="checkbox checkbox-sm" />
+              <span class="label-text">Mute</span>
+            </label>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="test-tone" class="btn btn-sm btn-secondary" type="button">Test tone</button>
+            <button id="reset-settings" class="btn btn-sm btn-outline" type="button">Reset defaults</button>
+            <button id="apply-fullscreen" class="btn btn-sm btn-primary" type="button">
+              Apply fullscreen
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section class="card min-w-0 max-w-full bg-base-200 shadow-sm lg:col-span-2" aria-labelledby="limits-heading">
         <div class="card-body gap-2 p-4">
           <h2 id="limits-heading" class="card-title text-base">Capabilities and honest limits</h2>
@@ -144,8 +229,11 @@
               available on WebGL2; none are claimed.
             </li>
             <li>
-              No playable ROM, cartridge picker, save data, audio or game input in this foundation.
-              Touch controls, remapping and Android/iOS packages remain open work (#25).
+              No playable ROM, cartridge picker, save data or audio in this foundation. The
+              windowed shell exposes touch/pointer buttons, keyboard bindings, fullscreen and a
+              persisted settings page; these map the documented KEYINPUT bits to the synthetic
+              demo UI and are not a retail-game input path. Android/iOS packages remain open work
+              (#11, #25).
             </li>
           </ul>
         </div>
@@ -154,7 +242,7 @@
 
     <footer class="mx-auto max-w-5xl px-4 pb-6 text-xs opacity-70">
       <p class="font-medium">
-        Experimental synthetic GPU demo; no playable ROM, saves or game input yet.
+        Experimental synthetic GPU demo; no playable ROM, cartridge input or saves.
       </p>
       <p>
         Adapter values are what this browser instance reported. A software rasterizer such as

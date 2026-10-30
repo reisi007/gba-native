@@ -76,16 +76,37 @@ pub(super) fn emit_driver(
         "    let args: Vec<String> = std::env::args().skip(1).collect();"
     )
     .unwrap();
-    writeln!(out, "    if args.len() != 2 || args[0] != \"--rom\" {{").unwrap();
+    writeln!(out, "    let mut rom: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut input: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut snapshot: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut audio: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut volume: u8 = 80;").unwrap();
+    writeln!(out, "    let mut muted = false;").unwrap();
+    writeln!(out, "    let mut index = 0usize;").unwrap();
+    writeln!(out, "    while index < args.len() {{").unwrap();
+    writeln!(out, "        match args[index].as_str() {{").unwrap();
+    writeln!(out, "            \"--rom\" => {{ index += 1; rom = Some(args.get(index).ok_or_else(|| Error::Args(\"--rom needs a path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--input\" => {{ index += 1; input = Some(args.get(index).ok_or_else(|| Error::Args(\"--input needs a script path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--snapshot\" => {{ index += 1; snapshot = Some(args.get(index).ok_or_else(|| Error::Args(\"--snapshot needs a PPM path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--audio\" => {{ index += 1; audio = Some(args.get(index).ok_or_else(|| Error::Args(\"--audio needs a WAV path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--volume\" => {{ index += 1; volume = args.get(index).ok_or_else(|| Error::Args(\"--volume needs 0..=100\".to_string()))?.parse().map_err(|_| Error::Args(\"invalid --volume\".to_string()))?; if volume > 100 {{ return Err(Error::Args(\"--volume must be 0..=100\".to_string())); }} }}").unwrap();
+    writeln!(out, "            \"--mute\" => muted = true,").unwrap();
     writeln!(
         out,
-        "        return Err(Error::Args(\"usage: harness --rom PATH (the ROM is not embedded)\".to_string()));"
+        "            other => return Err(Error::Args(format!(\"usage: harness --rom PATH [--input SCRIPT] [--snapshot PPM] [--audio WAV] [--volume 0..100] [--mute] (the ROM is not embedded); unknown option {{other}}\"))),"
     )
     .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        index += 1;").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    let cart = Cartridge::from_path(std::path::Path::new(&args[1]))?;"
+        "    let rom = rom.ok_or_else(|| Error::Args(\"usage: harness --rom PATH [--input SCRIPT] (the ROM is not embedded)\".to_string()))?;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let cart = Cartridge::from_path(std::path::Path::new(rom))?;"
     )
     .unwrap();
     writeln!(out, "    verify_binding(&cart)?;").unwrap();
@@ -138,12 +159,30 @@ pub(super) fn emit_driver(
     writeln!(out, "    cpu.initialize_bios_stacks();").unwrap();
     writeln!(out, "    cpu.set_pc(ENTRY);").unwrap();
     writeln!(out, "    cpu.set_thumb(ENTRY_THUMB);").unwrap();
+    writeln!(out, "    let script = match input {{").unwrap();
+    writeln!(out, "        Some(path) => {{").unwrap();
+    writeln!(out, "            let text = std::fs::read_to_string(path).map_err(|error| Error::Args(format!(\"cannot read input script {{path}}: {{error}}\")))?;").unwrap();
+    writeln!(out, "            gba_native::input::InputScript::parse(&text).map_err(|error| Error::Args(format!(\"invalid input script: {{error}}\")))?").unwrap();
+    writeln!(out, "        }}").unwrap();
     writeln!(
         out,
-        "    let program = run_program(&mut cpu, &mut bus, BUDGET)?;"
+        "        None => gba_native::input::InputScript::default(),"
+    )
+    .unwrap();
+    writeln!(out, "    }};").unwrap();
+    writeln!(out, "    let audio_path = audio;").unwrap();
+    writeln!(out, "    let mut audio_engine = audio_path.map(|_| gba_native::audio::AudioEngine::new(gba_native::audio::AudioSettings::new(volume, muted)));").unwrap();
+    writeln!(out, "    let started = std::time::Instant::now();").unwrap();
+    writeln!(
+        out,
+        "    let program = run_program(&mut cpu, &mut bus, BUDGET, &script, &mut audio_engine)?;"
     )
     .unwrap();
     writeln!(out, "    let image = display::snapshot(&bus)?;").unwrap();
+    writeln!(out, "    if let Some(path) = snapshot {{").unwrap();
+    writeln!(out, "        std::fs::write(path, gba_native::render::to_ppm(&image)).map_err(|error| Error::Args(format!(\"cannot write snapshot {{path}}: {{error}}\")))?;").unwrap();
+    writeln!(out, "        println!(\"snapshot={{}}\", path);").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "    println!(\"status=ok\");").unwrap();
     writeln!(
         out,
@@ -208,6 +247,40 @@ pub(super) fn emit_driver(
     writeln!(
         out,
         "    println!(\"native_instructions={{}}\", BUDGET - program.budget_remaining - program.fallbacks - program.irq_returns);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    if let (Some(path), Some(engine)) = (audio_path, audio_engine.as_ref()) {{"
+    )
+    .unwrap();
+    writeln!(out, "        let wav = engine.wav();").unwrap();
+    writeln!(out, "        std::fs::write(path, &wav).map_err(|error| Error::Args(format!(\"cannot write audio {{path}}: {{error}}\")))?;").unwrap();
+    writeln!(out, "        println!(\"audio={{}}\", path);").unwrap();
+    writeln!(
+        out,
+        "        println!(\"audio_sample_rate={{}}\", gba_native::audio::SAMPLE_RATE);"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        println!(\"audio_samples={{}}\", engine.samples().len());"
+    )
+    .unwrap();
+    writeln!(out, "        println!(\"audio_master_volume={{volume}}\");").unwrap();
+    writeln!(out, "        println!(\"audio_muted={{muted}}\");").unwrap();
+    writeln!(out, "        println!(\"audio_audible={{}}\", !muted && engine.samples().iter().any(|sample| *sample != 0));").unwrap();
+    writeln!(out, "        println!(\"audio_wav_sha256={{}}\", gba_native::sha256::hex(&gba_native::sha256::digest(&wav)));").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    let stats = gba_native::perf::PerfStats::new(").unwrap();
+    writeln!(out, "        BUDGET - program.budget_remaining,").unwrap();
+    writeln!(out, "        program.irq_returns,").unwrap();
+    writeln!(out, "        program.fallbacks,").unwrap();
+    writeln!(out, "        started.elapsed(),").unwrap();
+    writeln!(out, "    );").unwrap();
+    writeln!(
+        out,
+        "    for line in stats.report_lines() {{ println!(\"{{line}}\"); }}"
     )
     .unwrap();
     writeln!(

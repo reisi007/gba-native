@@ -207,7 +207,18 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `crates/core/src/display.rs`, `display/` (`text.rs`, `affine.rs`, `obj.rs`,
   `window.rs`, `blend.rs`, `layer.rs`), `render.rs`: static Mode 0/1 and bitmap
   snapshot compositor, nearest/letterbox, PPM.
-- `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
+- `crates/core/src/demo.rs`, `demo/input_tester.rs`: entirely synthetic ROM
+  fixtures, including the committed Mode 3 input-tester guest (ten KEYINPUT
+  bands, deterministic expected frame).
+- `crates/core/src/input/` (`mod.rs`, `keys.rs`, `touch.rs`, `settings.rs`,
+  `script.rs`): portable button/key-binding model, normalised touch layout,
+  persisted settings text format and instruction-indexed input scripts.
+- `crates/core/src/perf.rs`: wall-time, guest instructions/second and the stated
+  real-time factor against the documented GBA clock.
+- `crates/core/src/audio.rs`: dependency-free PSG mixer, stateful `AudioEngine`,
+  volume/mute settings and a WAV sink. It has no platform dependency; native
+  live playback is target-specific and the browser uses WebAudio. Full PSG
+  timing and Direct Sound FIFO playback are tracked in #29.
 - `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
   `arithmetic.rs`, `memory.rs`), the opt-in documented decompression formats
   (`decompress.rs`) and `BgAffineSet`/`ObjAffineSet` (`affine.rs`, `affine/`),
@@ -228,10 +239,14 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `apps/desktop/`: optional, separately excluded synthetic Winit/Pixels/WGPU
   package with its own workspace/lockfile. It depends directly on
   `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
-  crate or the root facade, and has no ROM surface.
+  crate or the root facade, and has no ROM surface. `ui.rs` composes the
+  windowed GBA shell, fullscreen frame and persisted settings page; `settings.rs`
+  owns the per-user file; `app/input.rs` handles keyboard, pointer and touch.
 - `apps/web/`: optional, separately excluded synthetic WASM/WebGPU/WebGL2
   package with its own Cargo/npm locks. It depends directly on `crates/core`,
-  not the AOT crate or root facade; it accepts no ROM, save, audio or game input.
+  not the AOT crate or root facade; it accepts no ROM, save or audio. Its
+  committed `www/input.mjs` maps browser keys and touch buttons to KEYINPUT and
+  persists the same settings document in localStorage.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
@@ -240,6 +255,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `tests/roms/gba-tests/`: optional MIT-licensed local black-box ROM tests;
   immutable inputs, not part of `cargo test` or CI. See the directory README for
   cross-target execution instructions and visible-pass criteria.
+- `tests/roms/synthetic/`: our own committed 4 KiB input-tester ROM, input
+  script and expected frame. `crates/core/tests/input_tester_fixture.rs` checks
+  the generator/digests and reference frame; `scripts/input-tester.sh` builds and
+  runs the native AOT artifact (visual Playwright comparison with `--visual`).
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.
@@ -248,6 +267,13 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   build regression and the native AOT proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
+- `scripts/cross.sh`: optional local cross-build matrix for macOS arm64/x86_64,
+  Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; it reports a
+  missing linker instead of claiming success.
+- `scripts/input-tester.sh`: native input-tester gate, optionally with the
+  pinned Chromium/Playwright pixel comparison.
+- `crates/core/tests/local_name_entry.rs`: ignored, environment-gated local
+  retail name-entry regression (`GBA_NATIVE_LOCAL_ROM`); never part of CI.
 - `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
   `scripts/bootstrap-web-tools.sh`: isolated browser build/E2E/review flow and
   pinned repository-owned tooling.
