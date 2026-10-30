@@ -251,6 +251,15 @@ cargo test -p gba-native
 cargo run --bin quality-counter -- oversized --root . --max 500 --hard
 ```
 
+The local-only name-entry regression is ignored by default and never runs in
+CI. It needs a user-supplied, read-only retail ROM and writes evidence only
+under `output/`:
+
+```text
+GBA_NATIVE_LOCAL_ROM=/path/to/read-only.gba \
+  cargo test -p gba-native-core --release --test local_name_entry -- --ignored --nocapture
+```
+
 The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and
 `cargo test --release`. The root workspace lists the root package,
