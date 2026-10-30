@@ -1358,7 +1358,7 @@ script on `ubuntu-latest` (the native target is its host triple), with the same
 digests and visual comparison.
 
 Performance report from that run (20,000,000 guest instructions):
-`perf_guest_instructions_per_second≈32.1M`, `perf_realtime_factor≈1.92`
+`perf_guest_instructions_per_second≈31.9M`, `perf_realtime_factor≈1.90`
 against the documented 16.777216 MHz clock, with the explicit caveat that one
 retired instruction is not one hardware cycle. This is a synthetic fixture
 measurement, not frame timing or a game-performance claim.
