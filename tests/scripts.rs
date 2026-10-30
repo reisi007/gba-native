@@ -247,7 +247,9 @@ fn the_ratchet_version_is_pinned_and_a_mismatch_fails() {
     let output = run("short.sh", &path_with_cargo(temp.path()), Some(&wrong));
     assert!(!output.status.success());
     let message = stderr(&output);
-    assert!(message.contains("expected ratchet 0.5.0"), "{message}");
+    // The version itself lives in scripts/lib.sh; the test asserts the
+    // shape of the message, so a bump does not have to touch it.
+    assert!(message.contains("expected ratchet "), "{message}");
     assert!(message.contains("9.9.9"), "{message}");
 }
 
