@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 
 use super::artifact::AotArtifact;
+use super::policy::HarnessPolicy;
 use gba_native::error::Result;
 
 /// Emit the native harness driver around the target-neutral program section.
@@ -9,7 +10,12 @@ use gba_native::error::Result;
 /// digest+length binding, the state report and exit codes. The program section
 /// owns translated blocks and fallback dispatch. Known blocks are direct calls;
 /// only undiscovered targets use the reference interpreter.
-pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact, budget: u64) -> Result<()> {
+pub(super) fn emit_driver(
+    out: &mut String,
+    artifact: &AotArtifact,
+    budget: u64,
+    policy: HarnessPolicy,
+) -> Result<()> {
     writeln!(out).unwrap();
     writeln!(
         out,
@@ -83,7 +89,51 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact, budget: u64)
     )
     .unwrap();
     writeln!(out, "    verify_binding(&cart)?;").unwrap();
-    writeln!(out, "    let mut bus = Bus::new(cart);").unwrap();
+    if policy.bios_zero_fill {
+        writeln!(
+            out,
+            "    let mut bus = Bus::with_synthetic_bios_zero_fill(cart);"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "    let mut bus = Bus::new(cart);").unwrap();
+    }
+    if policy.bios_rom_writes {
+        writeln!(
+            out,
+            "    bus = bus.with_bios_write_policy(gba_native::bus::BiosWritePolicy::RomWritesDropped);"
+        )
+        .unwrap();
+    }
+    if policy.rom_writes_dropped {
+        writeln!(
+            out,
+            "    bus = bus.with_rom_write_policy(gba_native::bus::RomWritePolicy::Dropped);"
+        )
+        .unwrap();
+    }
+    if policy.backup != gba_native::bus::BackupPolicy::Strict {
+        writeln!(
+            out,
+            "    bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::{});",
+            backup_variant(policy)
+        )
+        .unwrap();
+    }
+    if policy.decompression {
+        writeln!(
+            out,
+            "    bus = bus.with_decompression_policy(gba_native::bios::DecompressionPolicy::DocumentedFormats);"
+        )
+        .unwrap();
+    }
+    if policy.affine {
+        writeln!(
+            out,
+            "    bus = bus.with_affine_policy(gba_native::bios::AffinePolicy::Documented);"
+        )
+        .unwrap();
+    }
     writeln!(out, "    let mut cpu = Cpu::direct_entry();").unwrap();
     writeln!(out, "    cpu.initialize_bios_stacks();").unwrap();
     writeln!(out, "    cpu.set_pc(ENTRY);").unwrap();
@@ -95,6 +145,36 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact, budget: u64)
     .unwrap();
     writeln!(out, "    let image = display::snapshot(&bus)?;").unwrap();
     writeln!(out, "    println!(\"status=ok\");").unwrap();
+    writeln!(
+        out,
+        "    println!(\"bios_data_policy={{}}\", bus.bios_data_policy().name());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"bios_write_policy={{}}\", bus.bios_write_policy().name());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"rom_write_policy={{}}\", bus.rom_write_policy().name());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"backup_policy={{}}\", bus.backup_policy().name());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"decompression_policy={{}}\", bus.decompression_policy().name());"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    println!(\"affine_policy={{}}\", bus.affine_policy().name());"
+    )
+    .unwrap();
     writeln!(out, "    println!(\"pc=0x{{:08X}}\", cpu.pc());").unwrap();
     writeln!(out, "    println!(\"cpsr=0x{{:08X}}\", cpu.cpsr());").unwrap();
     writeln!(
@@ -150,4 +230,14 @@ pub(super) fn emit_driver(out: &mut String, artifact: &AotArtifact, budget: u64)
     writeln!(out, "    Ok(())").unwrap();
     writeln!(out, "}}").unwrap();
     Ok(())
+}
+
+fn backup_variant(policy: HarnessPolicy) -> &'static str {
+    use gba_native::bus::BackupPolicy;
+    match policy.backup {
+        BackupPolicy::Strict => "Strict",
+        BackupPolicy::Sram32KVolatile => "Sram32KVolatile",
+        BackupPolicy::Sram64KVolatile => "Sram64KVolatile",
+        BackupPolicy::Flash128KVolatile => "Flash128KVolatile",
+    }
 }

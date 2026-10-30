@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::artifact::AotArtifact;
@@ -67,13 +68,13 @@ pub fn emit_program_module(cart: &Cartridge, artifact: &AotArtifact) -> Result<S
     for block in &artifact.blocks {
         emit_block(&mut out, block)?;
     }
-    emit_program_runner(&mut out, artifact);
+    emit_program_runner(&mut out, artifact)?;
     Ok(out)
 }
 
 /// Emit `run_program`, the target-neutral dispatch loop. It returns the
 /// remaining budget and fallback count instead of printing or exiting.
-fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
+fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(
         out,
         "/// Execute the program against an initialized CPU/bus until the budget is"
@@ -93,28 +94,71 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
     writeln!(out, "    let mut remaining = budget;").unwrap();
     writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
     writeln!(out, "    while remaining > 0 {{").unwrap();
+    writeln!(
+        out,
+        "        if gba_native::interpret::irq_dispatch_continuation(cpu) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            gba_native::interpret::return_from_irq_dispatch(cpu, bus)?;"
+    )
+    .unwrap();
+    writeln!(out, "            bus.tick_frame();").unwrap();
+    writeln!(out, "            remaining -= 1;").unwrap();
+    writeln!(out, "            continue;").unwrap();
+    writeln!(out, "        }}").unwrap();
     writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
+    let mut groups: BTreeMap<(u32, bool), Vec<&super::artifact::AotBlock>> = BTreeMap::new();
     for block in &artifact.blocks {
-        writeln!(
-            out,
-            "            (0x{:08X}, {}) => {}(cpu, bus, &mut remaining)?,",
-            block.addr,
-            block.thumb,
-            block_name(block.addr, block.thumb)
-        )
-        .unwrap();
+        groups
+            .entry((block.addr, block.thumb))
+            .or_default()
+            .push(block);
+    }
+    for ((addr, thumb), variants) in groups {
+        if variants.len() == 1 && !variants[0].sealed {
+            writeln!(
+                out,
+                "            (0x{addr:08X}, {thumb}) => {}(cpu, bus, &mut remaining)?,",
+                block_name(variants[0])
+            )
+            .unwrap();
+            continue;
+        }
+        if variants.iter().any(|block| !block.sealed) {
+            return Err(Error::Aot(format!(
+                "block at 0x{addr:08X} mixes sealed and ROM variants"
+            )));
+        }
+        let fetch = if thumb { "fetch16" } else { "fetch32" };
+        writeln!(out, "            (0x{addr:08X}, {thumb}) => {{").unwrap();
+        writeln!(out, "                let raw = bus.{fetch}(0x{addr:08X})?;").unwrap();
+        writeln!(out, "                match raw {{").unwrap();
+        for block in variants {
+            let raw = block.instructions[0].raw;
+            let literal = if thumb {
+                format!("0x{raw:04X}u16")
+            } else {
+                format!("0x{raw:08X}u32")
+            };
+            writeln!(
+                out,
+                "                    {literal} => {}(cpu, bus, &mut remaining)?,",
+                block_name(block)
+            )
+            .unwrap();
+        }
+        writeln!(out, "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?,").unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
     }
     writeln!(out, "            _ => {{").unwrap();
     writeln!(
         out,
-        "                interpret::deliver_pending_irq(cpu, bus)?;"
+        "                fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?"
     )
     .unwrap();
-    writeln!(out, "                interpret::step(cpu, bus)?;").unwrap();
-    writeln!(out, "                bus.tick_frame();").unwrap();
-    writeln!(out, "                remaining -= 1;").unwrap();
-    writeln!(out, "                fallbacks += 1;").unwrap();
-    writeln!(out, "                Next::Continue").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }};").unwrap();
     writeln!(out, "        if next == Next::Halt {{").unwrap();
@@ -126,4 +170,22 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
     writeln!(out, "        fallbacks,").unwrap();
     writeln!(out, "    }})").unwrap();
     writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "fn fallback_step(cpu: &mut Cpu, bus: &mut Bus, remaining: &mut u64, fallbacks: &mut u64) -> Result<Next> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    gba_native::interpret::deliver_pending_irq(cpu, bus)?;"
+    )
+    .unwrap();
+    writeln!(out, "    gba_native::interpret::step(cpu, bus)?;").unwrap();
+    writeln!(out, "    bus.tick_frame();").unwrap();
+    writeln!(out, "    *remaining -= 1;").unwrap();
+    writeln!(out, "    *fallbacks += 1;").unwrap();
+    writeln!(out, "    Ok(Next::Continue)").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
 }

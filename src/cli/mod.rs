@@ -25,7 +25,7 @@ usage:
   gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
-  gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
+  gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.

@@ -9,7 +9,8 @@
 
 use std::path::{Path, PathBuf};
 
-use gba_native::aot::{self, NativeHarness};
+use gba_native::aot::{self, HarnessPolicy, NativeHarness};
+use gba_native::bus::BackupPolicy;
 use gba_native::cart::{Cartridge, ROM_BASE};
 use gba_native::error::{Error, Result};
 
@@ -23,6 +24,8 @@ struct BuildRequest {
     target: String,
     out: Option<PathBuf>,
     budget: u64,
+    trace: Option<PathBuf>,
+    policy: HarnessPolicy,
 }
 
 pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
@@ -32,6 +35,9 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut target: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut budget = DEFAULT_BUDGET;
+    let mut trace = None;
+    let mut policy = HarnessPolicy::default();
+    let mut backup_flags = 0u8;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--target" => {
@@ -53,8 +59,35 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
                     .parse()
                     .map_err(|_| Error::Args(format!("invalid budget {value}")))?;
             }
+            "--trace" => {
+                trace = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    Error::Args("--trace needs a path".to_string())
+                })?));
+            }
+            "--synthetic-bios-zero-fill" => policy.bios_zero_fill = true,
+            "--synthetic-bios-rom-writes" => policy.bios_rom_writes = true,
+            "--synthetic-rom-writes-ignored" => policy.rom_writes_dropped = true,
+            "--synthetic-backup-sram" => {
+                policy.backup = BackupPolicy::Sram32KVolatile;
+                backup_flags += 1;
+            }
+            "--synthetic-backup-sram64k" => {
+                policy.backup = BackupPolicy::Sram64KVolatile;
+                backup_flags += 1;
+            }
+            "--synthetic-backup-flash128k" => {
+                policy.backup = BackupPolicy::Flash128KVolatile;
+                backup_flags += 1;
+            }
+            "--synthetic-bios-decompress" => policy.decompression = true,
+            "--synthetic-bios-affine" => policy.affine = true,
             _ => return Err(Error::Args(format!("unknown aot build option {argument}"))),
         }
+    }
+    if backup_flags > 1 {
+        return Err(Error::Args(
+            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k or --synthetic-backup-flash128k".to_string(),
+        ));
     }
     let target = target.ok_or_else(|| {
         Error::Args(
@@ -73,6 +106,8 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
         target,
         out,
         budget,
+        trace,
+        policy,
     };
     if request.target == aot::WASM_TARGET {
         build_wasm_module(request)
@@ -87,8 +122,17 @@ fn build_native_artifact(request: BuildRequest) -> Result<()> {
     // it once for discovery/emission; the generated artifact binds SHA-256 and
     // length and re-reads a caller-supplied path at runtime.
     let cart = Cartridge::from_path(Path::new(&request.rom))?;
-    let artifact = aot::discover(&cart, ROM_BASE, false, aot::Limits::default())?;
-    let source = aot::emit_native_module(&cart, &artifact, request.budget)?;
+    let artifact = match &request.trace {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|error| Error::Args(format!("cannot read --trace {path:?}: {error}")))?;
+            let seeds = aot::parse_trace_seeds(&text)?;
+            aot::trace_artifact(&cart, ROM_BASE, false, &seeds)?
+        }
+        None => aot::discover(&cart, ROM_BASE, false, aot::Limits::default())?,
+    };
+    let source =
+        aot::emit_native_module_with_policy(&cart, &artifact, request.budget, request.policy)?;
 
     // Every run owns a fresh workspace: the default allocates a unique
     // directory, and an explicit --out must be a new path below output/.
@@ -129,6 +173,14 @@ fn build_native_artifact(request: BuildRequest) -> Result<()> {
     println!("budget={}", request.budget);
     println!("blocks={}", artifact.stats.blocks);
     println!("translated_instructions={}", artifact.stats.instructions);
+    println!("sealed_blocks={}", artifact.stats.sealed_blocks);
+    println!("rejected_seeds={}", artifact.stats.rejected_seeds);
+    println!("bios_data_policy={}", request.policy.bios_zero_fill as u8);
+    println!("bios_write_policy={}", request.policy.bios_rom_writes as u8);
+    println!("rom_write_policy={}", request.policy.rom_writes_dropped as u8);
+    println!("backup_policy={}", request.policy.backup.name());
+    println!("decompression_policy={}", request.policy.decompression as u8);
+    println!("affine_policy={}", request.policy.affine as u8);
     println!("generated_dir={}", work.display());
     println!("generated_source={}", generated.display());
     println!("executable={}", harness.executable().display());
@@ -145,6 +197,12 @@ fn build_native_artifact(request: BuildRequest) -> Result<()> {
 
 /// WASM branch: ROM-bound execution module plus importable JS glue.
 fn build_wasm_module(request: BuildRequest) -> Result<()> {
+    if request.trace.is_some() || !request.policy.is_strict() {
+        return Err(Error::Args(
+            "--trace and synthetic device policies are supported only for native targets"
+                .to_string(),
+        ));
+    }
     // Resolve and verify the pinned wasm-bindgen CLI before reading the ROM or
     // creating output, so a missing/mismatched tool leaves no side effects.
     let bindgen = aot::wasm_bindgen_cli()?;
@@ -196,6 +254,14 @@ fn build_wasm_module(request: BuildRequest) -> Result<()> {
     println!("budget={}", request.budget);
     println!("blocks={}", artifact.stats.blocks);
     println!("translated_instructions={}", artifact.stats.instructions);
+    println!("sealed_blocks={}", artifact.stats.sealed_blocks);
+    println!("rejected_seeds={}", artifact.stats.rejected_seeds);
+    println!("bios_data_policy={}", request.policy.bios_zero_fill as u8);
+    println!("bios_write_policy={}", request.policy.bios_rom_writes as u8);
+    println!("rom_write_policy={}", request.policy.rom_writes_dropped as u8);
+    println!("backup_policy={}", request.policy.backup.name());
+    println!("decompression_policy={}", request.policy.decompression as u8);
+    println!("affine_policy={}", request.policy.affine as u8);
     println!("generated_dir={}", work.display());
     println!("generated_source={}", generated.display());
     println!("wasm_module={}", module.wasm().display());

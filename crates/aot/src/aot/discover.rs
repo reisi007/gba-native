@@ -188,6 +188,7 @@ pub fn discover(
             blocks.push(AotBlock {
                 addr: block_addr,
                 thumb: block_thumb,
+                sealed: false,
                 instructions,
             });
             stats.blocks = blocks.len();

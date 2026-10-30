@@ -4,22 +4,34 @@ use super::artifact::{AotArtifact, AotBlock};
 use super::emit_driver::emit_driver;
 use super::emit_ops::instruction_body;
 use super::emit_program::emit_program_module;
+use super::policy::HarnessPolicy;
 use gba_native::cart::Cartridge;
 use gba_native::error::Result;
 use gba_native::ir::{Cond, IrInstr, Op};
 
-/// Emit a self-contained native harness: the target-neutral program section
-/// plus the native driver that binds an external ROM and reports the result.
-/// Known blocks become direct statements; only unknown targets call the
-/// reference interpreter.
+/// Emit a self-contained native harness with the default fail-closed runtime
+/// policy. Known blocks become direct statements; only unknown targets call
+/// the reference interpreter.
 pub fn emit_native_module(cart: &Cartridge, artifact: &AotArtifact, budget: u64) -> Result<String> {
+    emit_native_module_with_policy(cart, artifact, budget, HarnessPolicy::default())
+}
+
+/// Emit a self-contained native harness with explicit synthetic device
+/// policies. A non-default policy must be requested by the caller; generated
+/// source reports the effective names at run time.
+pub fn emit_native_module_with_policy(
+    cart: &Cartridge,
+    artifact: &AotArtifact,
+    budget: u64,
+    policy: HarnessPolicy,
+) -> Result<String> {
     let mut out = emit_program_module(cart, artifact)?;
-    emit_driver(&mut out, artifact, budget)?;
+    emit_driver(&mut out, artifact, budget, policy)?;
     Ok(out)
 }
 
 pub(super) fn emit_block(out: &mut String, block: &AotBlock) -> Result<()> {
-    let name = block_name(block.addr, block.thumb);
+    let name = block_name(block);
     writeln!(
         out,
         "fn {name}(cpu: &mut Cpu, bus: &mut Bus, budget: &mut u64) -> Result<Next> {{"
@@ -201,8 +213,22 @@ fn indent(text: &str, spaces: usize) -> String {
         .collect()
 }
 
-pub(super) fn block_name(addr: u32, thumb: bool) -> String {
-    format!("block_{addr:08x}_{}", if thumb { "thumb" } else { "arm" })
+pub(super) fn block_name(block: &AotBlock) -> String {
+    if block.sealed {
+        let raw = block.instructions[0].raw;
+        format!(
+            "block_{:08x}_{}_{:08x}",
+            block.addr,
+            if block.thumb { "thumb" } else { "arm" },
+            raw
+        )
+    } else {
+        format!(
+            "block_{:08x}_{}",
+            block.addr,
+            if block.thumb { "thumb" } else { "arm" }
+        )
+    }
 }
 
 #[cfg(test)]

@@ -23,13 +23,20 @@ pub fn decode_at(bus: &Bus, addr: u32, thumb: bool) -> Result<IrInstr> {
 
 /// Execute one guest instruction, conditional no-op or modeled IRQ return step.
 pub fn step(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
-    if cpu.mode() == Mode::Irq && !cpu.thumb() && cpu.pc() == IRQ_DISPATCH_CONTINUATION {
+    if irq_dispatch_continuation(cpu) {
         return return_from_irq_dispatch(cpu, bus);
     }
     let addr = cpu.pc();
     let thumb = cpu.thumb();
     let instr = decode_at(bus, addr, thumb)?;
     execute(cpu, bus, instr)
+}
+
+/// Whether the PC is the modelled BIOS IRQ dispatcher continuation rather
+/// than a guest instruction address. Generated native code uses this to keep
+/// the dispatcher return native instead of counting it as a fallback.
+pub fn irq_dispatch_continuation(cpu: &Cpu) -> bool {
+    cpu.mode() == Mode::Irq && !cpu.thumb() && cpu.pc() == IRQ_DISPATCH_CONTINUATION
 }
 
 /// Deliver a pending enabled IRQ before the next guest instruction when the
@@ -83,7 +90,7 @@ pub fn deliver_pending_irq(cpu: &mut Cpu, bus: &mut Bus) -> Result<bool> {
     Ok(true)
 }
 
-fn return_from_irq_dispatch(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
+pub fn return_from_irq_dispatch(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
     let frame_sp = cpu.reg(13);
     if frame_sp & 3 != 0 {
         return Err(crate::error::Error::IrqStack {
