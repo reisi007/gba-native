@@ -275,18 +275,14 @@ fn psr_source_value(cpu: &Cpu, src: PsrSrc) -> u32 {
 
 /// Execute at most `budget` instructions. Exhausting the budget is not evidence
 /// that a game booted or produced a frame.
+///
+/// IRQ delivery is unsupported. A pending enabled request observed by the
+/// controller stays latched and remains readable through the I/O registers; it
+/// never redirects execution, even when the guest published a handler pointer
+/// at `0x03007FFC` and the CPSR I bit is clear.
 pub fn run_budget(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<u64> {
     let mut used = 0;
     while used < budget {
-        // Deliver a pending interrupt between instructions. Without a handler
-        // pointer at 0x03007FFC there is nowhere to dispatch, so the request
-        // stays latched instead of being dropped.
-        if !cpu.irq_masked()
-            && bus.irq_pending()
-            && let Some(handler) = bus.irq_handler()
-        {
-            cpu.enter_irq(handler);
-        }
         step(cpu, bus)?;
         bus.tick_frame();
         used += 1;

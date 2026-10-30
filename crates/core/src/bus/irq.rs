@@ -169,7 +169,8 @@ impl Bus {
     }
 
     /// The documented IRQ handler pointer at `0x03007FFC`, when the guest wrote
-    /// one. Without it there is nowhere to dispatch, so delivery stays off.
+    /// one. The pointer is recorded and remains readable, but this model does
+    /// not deliver IRQs, so it never redirects execution.
     pub fn irq_handler(&self) -> Option<u32> {
         let bytes: [u8; 4] = self.iwram.get(0x7FFC..0x8000)?.try_into().ok()?;
         let handler = u32::from_le_bytes(bytes);
@@ -249,5 +250,48 @@ mod tests {
         bus.write16(DISPSTAT_ADDR, 0xFFFF).expect("dispstat");
         // Only the documented enable bits 3..5 are stored.
         assert_eq!(bus.read16(DISPSTAT_ADDR).expect("dispstat"), 0x0038);
+    }
+
+    #[test]
+    fn run_budget_keeps_a_pending_irq_latched_instead_of_entering_irq() {
+        use crate::bus::{EWRAM_BASE, IWRAM_BASE};
+        use crate::cpu::{Cpu, Mode};
+        use crate::interpret;
+        use crate::ir::{PSR_FIELD_C, Psr};
+
+        const HANDLER: u32 = 0x0300_2750;
+        let mut bus = bus();
+        // Synthetic ARM: MOV r0,#1; MOV r1,#2.
+        bus.write32(EWRAM_BASE, 0xE3A0_0001).expect("code");
+        bus.write32(EWRAM_BASE + 4, 0xE3A0_1002).expect("code");
+        // Every condition for delivery is present: a handler pointer, IME/IE
+        // enabled and a pending request.
+        bus.write32(IWRAM_BASE + 0x7FFC, HANDLER)
+            .expect("handler pointer");
+        bus.write16(IE_ADDR, 1).expect("ie");
+        bus.write16(IME_ADDR, 1).expect("ime");
+        bus.tick_frames(FRAME_INSTRUCTIONS - VBLANK_INSTRUCTIONS);
+        assert!(bus.irq_pending(), "synthetic request is pending");
+        assert_eq!(bus.irq_handler(), Some(HANDLER));
+
+        let mut cpu = Cpu::direct_entry();
+        cpu.set_pc(EWRAM_BASE);
+        cpu.set_thumb(false);
+        cpu.write_psr(Psr::Cpsr, PSR_FIELD_C, Mode::System.bits())
+            .expect("unmask IRQs");
+
+        assert_eq!(
+            interpret::run_budget(&mut cpu, &mut bus, 1).expect("one instruction"),
+            1
+        );
+        // The synthetic instruction ran in System mode at the current PC; no
+        // exception entry redirected control to the handler.
+        assert_eq!(cpu.mode(), Mode::System);
+        assert_eq!(cpu.reg(0), 1);
+        assert_eq!(cpu.reg(1), 0);
+        assert_eq!(cpu.pc(), EWRAM_BASE + 4);
+        // The request is still observable at the controller.
+        assert!(bus.irq_pending());
+        assert_eq!(bus.read16(IF_ADDR).expect("if") & IF_VBLANK, IF_VBLANK);
     }
 }
