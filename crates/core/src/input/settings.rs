@@ -1,9 +1,10 @@
 //! Persisted host settings: key bindings, fullscreen and touch preferences.
 //!
 //! The representation is a small ordered `key=value` text format with no paths,
-//! timestamps or platform data, so a desktop settings file and the browser
-//! `localStorage` payload are byte-identical. Parsing is strict about known
-//! fields and ignores comments/blank lines.
+//! timestamps or platform data. The desktop frontend persists this document;
+//! the browser frontend stores the same fields inside a JSON `localStorage`
+//! payload and normalises them into the same model. Parsing is strict about
+//! known fields and ignores comments/blank lines.
 
 use std::fmt;
 

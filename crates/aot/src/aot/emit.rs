@@ -34,7 +34,7 @@ pub(super) fn emit_block(out: &mut String, block: &AotBlock) -> Result<()> {
     let name = block_name(block);
     writeln!(
         out,
-        "fn {name}(cpu: &mut Cpu, bus: &mut Bus, budget: &mut u64) -> Result<Next> {{"
+        "fn {name}(cpu: &mut Cpu, bus: &mut Bus, budget: &mut u64, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<Next> {{"
     )
     .unwrap();
     for instruction in &block.instructions {
@@ -200,6 +200,11 @@ fn condition_expression(cond: Cond) -> String {
 
 fn emit_tick(out: &mut String, indent: &str) {
     writeln!(out, "{indent}bus.tick_frame();").unwrap();
+    writeln!(
+        out,
+        "{indent}if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+    )
+    .unwrap();
     writeln!(out, "{indent}*budget -= 1;").unwrap();
     writeln!(out, "{indent}if *budget == 0 {{").unwrap();
     writeln!(out, "{indent}    return Ok(Next::Halt);").unwrap();

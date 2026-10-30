@@ -1377,7 +1377,7 @@ a retail compatibility level.
 | `x86_64-apple-darwin` | Mach-O x86_64; built (host is arm64) |
 | `x86_64-unknown-linux-gnu` | ELF 64-bit x86-64 PIE; built with `zig cc` |
 | `x86_64-pc-windows-gnu` | PE32+ x86-64 console executable; built with mingw-w64 |
-| `wasm32-unknown-unknown` | 153,874-byte module; built with pinned wasm-bindgen 0.2.129 |
+| `wasm32-unknown-unknown` | 161,980-byte module; built with pinned wasm-bindgen 0.2.129 |
 
 The Linux artifact is build evidence on a macOS host; execution is covered by
 the Linux CI job. Windows MSVC, iOS and Android are not claimed; they need their

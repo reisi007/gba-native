@@ -122,7 +122,6 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     .unwrap();
     writeln!(out, "            continue;").unwrap();
     writeln!(out, "        }}").unwrap();
-    writeln!(out, "        let before = remaining;").unwrap();
     writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
     let mut groups: BTreeMap<(u32, bool), Vec<&super::artifact::AotBlock>> = BTreeMap::new();
     for block in &artifact.blocks {
@@ -135,7 +134,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
         if variants.len() == 1 && !variants[0].sealed {
             writeln!(
                 out,
-                "            (0x{addr:08X}, {thumb}) => {}(cpu, bus, &mut remaining)?,",
+                "            (0x{addr:08X}, {thumb}) => {}(cpu, bus, &mut remaining, audio)?,",
                 block_name(variants[0])
             )
             .unwrap();
@@ -159,14 +158,14 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
             };
             writeln!(
                 out,
-                "                    {literal} => {}(cpu, bus, &mut remaining)?,",
+                "                    {literal} => {}(cpu, bus, &mut remaining, audio)?,",
                 block_name(block)
             )
             .unwrap();
         }
         writeln!(
             out,
-            "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?,"
+            "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks, audio)?,"
         )
         .unwrap();
         writeln!(out, "                }}").unwrap();
@@ -175,16 +174,11 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "            _ => {{").unwrap();
     writeln!(
         out,
-        "                fallback_step(cpu, bus, &mut remaining, &mut fallbacks)?"
+        "                fallback_step(cpu, bus, &mut remaining, &mut fallbacks, audio)?"
     )
     .unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }};").unwrap();
-    writeln!(
-        out,
-        "        if let Some(engine) = audio.as_mut() {{ engine.advance(&bus.sound_registers(), before - remaining); }}"
-    )
-    .unwrap();
     writeln!(out, "        if next == Next::Halt {{").unwrap();
     writeln!(out, "            break;").unwrap();
     writeln!(out, "        }}").unwrap();
@@ -199,7 +193,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out).unwrap();
     writeln!(
         out,
-        "fn fallback_step(cpu: &mut Cpu, bus: &mut Bus, remaining: &mut u64, fallbacks: &mut u64) -> Result<Next> {{"
+        "fn fallback_step(cpu: &mut Cpu, bus: &mut Bus, remaining: &mut u64, fallbacks: &mut u64, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<Next> {{"
     )
     .unwrap();
     writeln!(
@@ -209,6 +203,11 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     .unwrap();
     writeln!(out, "    gba_native::interpret::step(cpu, bus)?;").unwrap();
     writeln!(out, "    bus.tick_frame();").unwrap();
+    writeln!(
+        out,
+        "    if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+    )
+    .unwrap();
     writeln!(out, "    *remaining -= 1;").unwrap();
     writeln!(out, "    *fallbacks += 1;").unwrap();
     writeln!(out, "    Ok(Next::Continue)").unwrap();

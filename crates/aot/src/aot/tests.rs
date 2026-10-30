@@ -190,6 +190,24 @@ fn program_module_dispatches_translated_blocks_and_falls_back() {
 }
 
 #[test]
+fn emitted_blocks_advance_audio_at_every_instruction_boundary() {
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let source = emit_program_module(&cart, &artifact).expect("emit program");
+    let ticks = source
+        .matches("engine.advance_instruction(&bus.sound_registers());")
+        .count();
+    assert!(
+        ticks >= artifact.stats.instructions as usize,
+        "every translated instruction must advance the audio clock"
+    );
+    assert!(
+        !source.contains("engine.advance(&bus.sound_registers(),"),
+        "the dispatcher must not advance audio once per block with a block-end snapshot"
+    );
+}
+
+#[test]
 fn native_module_composes_program_with_binding_driver() {
     let cart = demo::demo_cartridge();
     let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");

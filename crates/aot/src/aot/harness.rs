@@ -111,6 +111,31 @@ impl NativeHarness {
         }
         NativeReport::parse(&String::from_utf8_lossy(&output.stdout))
     }
+
+    /// Run the harness with additional arguments after `--rom` and return stdout.
+    ///
+    /// Used by tests that exercise optional paths such as `--input` and
+    /// `--audio` without duplicating the executable invocation.
+    pub fn run_with<I, S>(&self, rom: &Path, extra: I) -> Result<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        let mut command = Command::new(&self.exe);
+        command.arg("--rom").arg(rom);
+        for argument in extra {
+            command.arg(argument);
+        }
+        let output = command.output()?;
+        if !output.status.success() {
+            return Err(Error::Native(format!(
+                "exit {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
 }
 
 fn cargo() -> std::ffi::OsString {

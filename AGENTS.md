@@ -246,7 +246,7 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   package with its own Cargo/npm locks. It depends directly on `crates/core`,
   not the AOT crate or root facade; it accepts no ROM, save or audio. Its
   committed `www/input.mjs` maps browser keys and touch buttons to KEYINPUT and
-  persists the same settings document in localStorage.
+  persists the same settings fields in a JSON localStorage payload.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
