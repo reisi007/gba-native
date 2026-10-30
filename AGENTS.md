@@ -226,3 +226,15 @@ No license has been selected yet. After the content/history audit, the owner
 may make the repository public before the first CI push; automation does not
 change visibility. Do not publish ROMs, BIOS files, save data, generated
 retail-derived translations or vendor SDK/model weights.
+
+## Gates
+
+Regeln dieser Ebene. Was nur ein Verzeichnis betrifft, gehört in die
+`AGENTS.md` **dieses** Verzeichnisses — sie wird geladen, wenn eine Datei
+daraus gelesen wird.
+
+Ein Plan in `docs/plans/` beginnt mit `**Status:** Plan | In Arbeit | Done |
+Empfehlung, nicht implementiert`.
+
+Die kanonischen Agent-Regeln laufen über `ratchet` (Preset `agent-rules`):
+`ratchet check` vor jedem Commit und in der CI.

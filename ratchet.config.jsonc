@@ -3,6 +3,7 @@
 // report. The baseline is machine-written by `ratchet baseline init/update`
 // and is never hand-edited.
 [
+  { "preset": "agent-rules" },
   {
     "name": "gba-native",
     "tiers": {

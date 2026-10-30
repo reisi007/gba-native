@@ -1,6 +1,9 @@
 {
   "version": 1,
   "rules": {
+    "gates-untouched": {
+      "value": 0
+    },
     "native-consistency": {
       "value": 1,
       "reason": "initial zero-debt baseline after the 500-line refactor"
@@ -9,9 +12,24 @@
       "value": 0,
       "reason": "initial zero-debt baseline after the 500-line refactor"
     },
+    "plan-status-line": {
+      "value": 0
+    },
+    "rule-file-max-lines": {
+      "value": 240
+    },
+    "rule-file-name": {
+      "value": 0
+    },
+    "rule-file-present": {
+      "value": 1
+    },
     "rust-source-population": {
       "value": 36,
       "reason": "initial zero-debt baseline after the 500-line refactor"
+    },
+    "unverified-commits": {
+      "value": 10
     }
   }
 }
