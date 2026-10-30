@@ -1433,7 +1433,9 @@ Evidence:
 
 The generated AOT harness accepts `--audio PATH`, `--volume 0..100` and
 `--mute` and writes WAV from the run's sound-register state; this is the
-cross-target artifact path. The browser frontend uses WebAudio instead. The
+cross-target guest-audio artifact path. The browser frontend persists the same
+volume/mute fields and can play a fixed 440 Hz WebAudio test tone, but it does
+not yet stream guest PCM; that sink remains outstanding in issue #29. The
 persisted settings document now carries `master_volume` and `muted`.
 
 The committed input-tester guest now programs a 440 Hz square at boot. A

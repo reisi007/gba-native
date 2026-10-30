@@ -885,10 +885,12 @@ contains no platform dependency:
 - `wav_bytes` is a deterministic RIFF/WAVE sink. `render_tone` is a synthetic
   test signal, not game audio.
 
-The first host paths are a WAV artifact from the reference runner/AOT harness and
-a WebAudio sink in the browser. Native live playback is target-specific and must
-not add a default-workspace dependency or unsafe code. The current mixer is
-deliberately bounded: it has no full sweep/envelope/length frame sequencer, no
-Direct Sound FIFO sample clock and no cycle-accurate resampling. Those gaps and
-the cross-target acceptance tests are tracked in issue #29. This is not a
-retail-audio or hardware-timing claim.
+The first guest-state host path is a WAV artifact from the reference runner and
+the AOT harness. The browser frontend persists the same volume/mute fields and
+can play a fixed 440 Hz WebAudio test tone, but it does not yet stream guest PCM;
+that sink remains outstanding in issue #29. Native live playback is
+target-specific and must not add a default-workspace dependency or unsafe code.
+The current mixer is deliberately bounded: it has no full
+sweep/envelope/length frame sequencer, no Direct Sound FIFO sample clock and no
+cycle-accurate resampling. Those gaps and the cross-target acceptance tests are
+tracked in issue #29. This is not a retail-audio or hardware-timing claim.
