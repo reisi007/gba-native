@@ -1543,3 +1543,24 @@ test('PCM buffers shaped like the wasm module output play through WebAudio', asy
   expect(result.empty).toBe(false);
   expect(['running', 'suspended']).toContain(result.state);
 });
+
+test('the Save tone WAV button downloads the shared audio artifact', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#save-tone').click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('gba-native-tone.wav');
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const bytes = Buffer.concat(chunks);
+  expect(bytes.subarray(0, 4).toString('ascii')).toBe('RIFF');
+  expect(bytes.subarray(8, 12).toString('ascii')).toBe('WAVE');
+  expect(bytes.readUInt16LE(20)).toBe(1);
+  expect(bytes.readUInt16LE(22)).toBe(1);
+  expect(bytes.readUInt16LE(34)).toBe(16);
+  expect(bytes.readUInt32LE(24)).toBe(32768);
+  expect(bytes.length).toBe(44 + 32768 * 2);
+});
