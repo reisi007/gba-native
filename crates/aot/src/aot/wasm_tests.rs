@@ -4,7 +4,7 @@ use super::target_build::ToolchainFacts;
 use super::wasm_build::{WASM_TARGET, validate_build_target};
 use super::wasm_meta::{wasm_artifact_metadata, wasm_build_metadata, wasm_readme};
 use super::wasm_tool::{WASM_BINDGEN_VERSION, resolve_wasm_bindgen, verify_wasm_bindgen_version};
-use super::{Limits, discover, emit_wasm_module};
+use super::{HarnessPolicy, Limits, discover, emit_wasm_module, emit_wasm_module_with_policy};
 
 fn fixture() -> (gba_native::cart::Cartridge, super::AotArtifact, String) {
     let cart = demo::demo_cartridge();
@@ -18,6 +18,9 @@ fn wasm_module_embeds_binding_constants_without_rom_bytes() {
     let (_cart, artifact, source) = fixture();
     assert!(source.contains("#[wasm_bindgen]"));
     assert!(source.contains("pub fn run_rom(bytes: Vec<u8>)"));
+    assert!(source.contains("pub fn run_rom_audio(bytes: Vec<u8>)"));
+    assert!(source.contains("let mut bus = Bus::new(cart);"));
+    assert!(source.contains("pub fn audio_sample_rate() -> u32"));
     assert!(source.contains(&format!(
         "const ROM_SHA256: &str = \"{}\";",
         artifact.rom_sha256_hex()
@@ -31,8 +34,39 @@ fn wasm_module_embeds_binding_constants_without_rom_bytes() {
         );
     }
     // The target-neutral program section stays unchanged and usable.
-    assert!(source.contains("pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64)"));
+    assert!(source.contains(
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>)"
+    ));
     assert!(source.contains("interpret::step(cpu, bus)?;"));
+}
+
+#[test]
+fn wasm_module_binds_explicit_device_policies() {
+    use gba_native::bus::BackupPolicy;
+
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let policy = HarnessPolicy {
+        bios_zero_fill: true,
+        bios_rom_writes: true,
+        rom_writes_dropped: true,
+        backup: BackupPolicy::Flash128KVolatile,
+        decompression: true,
+        affine: true,
+    };
+    let source =
+        emit_wasm_module_with_policy(&cart, &artifact, 424_242, policy).expect("emit wasm policy");
+    for marker in [
+        "Bus::with_synthetic_bios_zero_fill(cart)",
+        "BiosWritePolicy::RomWritesDropped",
+        "RomWritePolicy::Dropped",
+        "BackupPolicy::Flash128KVolatile",
+        "DecompressionPolicy::DocumentedFormats",
+        "AffinePolicy::Documented",
+    ] {
+        assert!(source.contains(marker), "missing policy marker {marker:?}");
+    }
+    assert!(!source.contains("ROM_BYTES"));
 }
 
 #[test]
@@ -203,6 +237,9 @@ fn wasm_readme_documents_the_callable_module_and_external_binding() {
     let hash = cart.sha256_hex();
     for marker in [
         "run_rom(bytes)",
+        "run_rom_audio",
+        "audio_sample_rate()",
+        "PSG and Direct Sound",
         "Uint8Array",
         "input.files[0].arrayBuffer()",
         "browser-local `File`",

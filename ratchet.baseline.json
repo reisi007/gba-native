@@ -5,18 +5,16 @@
       "value": 0
     },
     "native-consistency": {
-      "value": 1,
-      "reason": "initial zero-debt baseline after the 500-line refactor"
+      "value": 1
     },
     "oversized-rust-file": {
-      "value": 0,
-      "reason": "initial zero-debt baseline after the 500-line refactor"
+      "value": 0
     },
     "plan-status-line": {
       "value": 0
     },
     "rule-file-max-lines": {
-      "value": 240
+      "value": 218
     },
     "rule-file-name": {
       "value": 0
@@ -25,11 +23,10 @@
       "value": 1
     },
     "rust-source-population": {
-      "value": 134,
-      "reason": "initial zero-debt baseline after the 500-line refactor"
+      "value": 204
     },
     "unverified-commits": {
-      "value": 10
+      "value": 7
     }
   }
 }

@@ -12,7 +12,6 @@
 //! width-checked `Bus` calls so byte accesses are real byte accesses.
 
 use crate::cpu::Cpu;
-use crate::error::{Error, Result};
 use crate::ir::{MemOffset, Shift};
 use crate::semantics;
 
@@ -133,16 +132,16 @@ pub fn block_written_back(base: u32, count: u32, add: bool) -> u32 {
     }
 }
 
-/// Bounded policy: GBATEK states that block/stack low bits are ignored, but it
-/// does not establish whether writeback is derived from the original or the
-/// aligned base. This prototype rejects an unaligned base before any access
-/// instead of inventing one of those results.
-pub fn require_aligned_block_base(base: u32, thumb: bool) -> Result<()> {
-    if base & 3 == 0 {
-        Ok(())
-    } else {
-        Err(Error::UnalignedBlockBase { addr: base, thumb })
-    }
+/// Transfer base for ARM/Thumb block and stack transfers. GBATEK documents that
+/// the low address bits of a block/stack base are ignored, so the addressing
+/// mode is evaluated against `base & !3`.
+///
+/// **Design policy:** the public document does not establish whether writeback
+/// derives from the original or the aligned base. This prototype aligns only
+/// the transfer address; `block_written_back` and the stack update always use
+/// the original, unmodified base register.
+pub fn aligned_block_base(base: u32) -> u32 {
+    base & !3
 }
 
 /// Number of words moved by a Thumb PUSH/POP: the low-register list plus the
@@ -168,11 +167,13 @@ mod tests {
     }
 
     #[test]
-    fn unaligned_block_base_is_an_explicit_error() {
-        assert!(require_aligned_block_base(0x0200_0000, false).is_ok());
-        assert!(matches!(
-            require_aligned_block_base(0x0200_0002, true),
-            Err(Error::UnalignedBlockBase { thumb: true, .. })
-        ));
+    fn block_transfer_address_ignores_low_base_bits_but_writeback_does_not() {
+        assert_eq!(aligned_block_base(0x0200_0000), 0x0200_0000);
+        assert_eq!(aligned_block_base(0x0200_0001), 0x0200_0000);
+        assert_eq!(aligned_block_base(0x0200_0002), 0x0200_0000);
+        assert_eq!(aligned_block_base(0x0200_0003), 0x0200_0000);
+        // The Design policy keeps writeback on the original base.
+        assert_eq!(block_written_back(0x0200_0002, 2, true), 0x0200_000A);
+        assert_eq!(block_written_back(0x0200_0002, 2, false), 0x01FF_FFFA);
     }
 }

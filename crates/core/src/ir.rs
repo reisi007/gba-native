@@ -322,16 +322,19 @@ impl IrInstr {
     }
 
     /// A control-field write to the current CPSR can change the active register
-    /// bank. Discovery must not carry cached r8-r14 values across it.
+    /// bank. Discovery must not carry cached r8-r14 values across it. The
+    /// documented `S=1` `Rd=PC` exception return restores the whole CPSR,
+    /// including its control byte, from the current mode's SPSR.
     pub fn writes_cpsr_control(self) -> bool {
-        matches!(
-            self.op,
-            Op::Msr {
-                psr: Psr::Cpsr,
-                fields,
-                ..
-            } if fields & PSR_FIELD_C != 0
-        )
+        self.op.restores_spsr()
+            || matches!(
+                self.op,
+                Op::Msr {
+                    psr: Psr::Cpsr,
+                    fields,
+                    ..
+                } if fields & PSR_FIELD_C != 0
+            )
     }
 }
 

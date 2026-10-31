@@ -89,8 +89,21 @@ fn arm_immediate_payload_is_never_reinterpreted_as_extra_transfer() {
 
 #[test]
 fn rejects_arm_multiply_and_block_space() {
-    // UMULL shares the low-nibble 1001b shape and stays unsupported.
-    assert!(decode_arm(0, 0xE080_0091).is_err());
+    // UMULL shares the low-nibble 1001b shape and now decodes as a long
+    // multiply; UMAAL (opcode 2) remains unsupported.
+    assert!(matches!(
+        decode_arm(0, 0xE083_2190).expect("UMULL").op,
+        Op::MultiplyLong {
+            signed: false,
+            accumulate: false,
+            set_flags: false,
+            rd_hi: 3,
+            rd_lo: 2,
+            rs: 1,
+            rm: 0,
+        }
+    ));
+    assert!(decode_arm(0, 0xE040_0091).is_err());
     // A plain STMDB sp!,{lr} is now implemented; the still-unsupported S=1
     // user-bank form and an empty list stay explicit errors.
     assert!(matches!(
@@ -106,10 +119,16 @@ fn rejects_arm_multiply_and_block_space() {
     ));
     assert!(decode_arm(0, 0xE96D_4000).is_err());
     assert!(decode_arm(0, 0xE92D_0000).is_err());
-    // SWP shares the 00010b/bit20=0 shape with PSR transfers but must be
-    // reported as multiply/swap, never as a malformed MRS.
-    let swp = decode_arm(0, 0xE100_0091).expect_err("SWP rejected");
-    assert!(format!("{swp}").contains("multiply/swap"));
+    // SWP shares the multiply/PSR decode region but has its own typed operation.
+    assert_eq!(
+        decode_arm(0, 0xE100_1092).expect("SWP r1,r2,[r0]").op,
+        Op::Swap {
+            rd: 1,
+            rm: 2,
+            rn: 0,
+            byte: false,
+        }
+    );
 }
 
 #[test]

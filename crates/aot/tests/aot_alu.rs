@@ -88,7 +88,7 @@ fn data_shift(
 
 fn fixture() -> Cartridge {
     let mut rom = vec![0u8; 0x200];
-    let words = [
+    let words: [u32; 26] = [
         ldr_literal(0, 0x000, 0x100),
         ldr_literal(1, 0x004, 0x104),
         0xE1C0_10B0,                          // STRH r1,[r0]
@@ -281,4 +281,59 @@ fn native_dynamic_pc_write_falls_back_fresh_and_binds_the_return_state() {
     assert_eq!(report.regs[2], 0x55);
     assert_eq!(report.pc, 0x0800_0024);
     assert_eq!(report.budget_used, 4);
+}
+
+#[test]
+fn native_mul_and_mla_rd_eq_rm_match_the_explicit_reference_design_policy() {
+    let mut rom = vec![0u8; 0x200];
+    let words: [u32; 5] = [
+        0xE3A0_0007, // MOV r0,#7
+        0xE3A0_1006, // MOV r1,#6
+        0xE010_0190, // MULS r0,r0,r1 (architecturally unpredictable alias)
+        0xE030_0190, // MLAS r0,r0,r1,r0 (architecturally unpredictable alias)
+        0xEAFF_FFFE, // B .
+    ];
+    for (index, word) in words.iter().enumerate() {
+        let offset = index * 4;
+        rom[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    let cart = Cartridge::from_bytes(rom).expect("synthetic multiply-alias fixture");
+    let artifact = aot::discover(&cart, ENTRY, false, aot::Limits::default())
+        .expect("discover multiply-alias fixture");
+    assert_eq!(artifact.stats.instructions, 6);
+    assert_eq!(artifact.stats.blocks, 2);
+
+    let budget = 5;
+    let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit multiply aliases");
+    assert!(source.contains("cpu.reg(0).wrapping_mul(cpu.reg(1))"));
+    assert!(source.contains("wrapping_add(cpu.reg(0))"));
+    assert!(!source.contains("ROM_BYTES"));
+
+    let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
+    expected_cpu.set_pc(ENTRY);
+    let mut expected_bus = Bus::new(cart.clone());
+    assert_eq!(
+        interpret::run_budget(&mut expected_cpu, &mut expected_bus, budget),
+        Ok(budget)
+    );
+    assert_eq!(expected_cpu.reg(0), 294);
+    assert_eq!(expected_cpu.flags(), (false, false, false, false));
+
+    let temp = TempDir::new("multiply-alias");
+    let fixture_path = temp.path().join("fixture.gba");
+    std::fs::write(&fixture_path, cart.bytes()).expect("write synthetic fixture");
+    let harness = NativeHarness::build(&source, &temp.path().join("harness"))
+        .expect("build multiply-alias harness");
+    let report = harness
+        .run(&fixture_path)
+        .expect("run multiply-alias harness");
+    assert_eq!(report.regs[0], 294);
+    assert_eq!(report.budget_used, budget);
+    assert_eq!(report.fallbacks, 0);
+    assert!(
+        report
+            .matches_reference(&expected_cpu, &expected_bus, budget)
+            .expect("parity")
+    );
 }

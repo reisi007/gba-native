@@ -230,23 +230,60 @@ fn arm_and_thumb_multiply_keep_the_low_32_bits() {
 }
 
 #[test]
+fn arm_mul_and_mla_rd_eq_rm_use_pre_instruction_values_as_a_design_policy() {
+    // MULS r0,r0,r1 is architecturally unpredictable on ARM7TDMI. The bounded
+    // prototype policy reads both old operands, writes their low-word product,
+    // and updates only N/Z while preserving C/V.
+    let (mut cpu, mut bus) = arm(&[0xE010_0190]);
+    cpu.set_reg(0, 7);
+    cpu.set_reg(1, 6);
+    cpu.set_nzcv(true, false, true, true);
+    interpret::step(&mut cpu, &mut bus).expect("design-policy MUL alias");
+    assert_eq!(cpu.reg(0), 42);
+    assert_eq!(cpu.flags(), (false, false, true, true));
+    assert_eq!(cpu.pc(), EWRAM_BASE + 4);
+
+    // MLAS r0,r0,r1,r0 also reads the old accumulator before replacing r0.
+    let (mut cpu, mut bus) = arm(&[0xE030_0190]);
+    cpu.set_reg(0, 7);
+    cpu.set_reg(1, 6);
+    cpu.set_nzcv(true, false, true, true);
+    interpret::step(&mut cpu, &mut bus).expect("design-policy MLA alias");
+    assert_eq!(cpu.reg(0), 49);
+    assert_eq!(cpu.flags(), (false, false, true, true));
+    assert_eq!(cpu.pc(), EWRAM_BASE + 4);
+}
+
+#[test]
 fn unsupported_encodings_are_rejected_without_state_progress() {
-    let (mut cpu, mut bus) = arm(&[0xE080_0091]); // UMULL
+    let (mut cpu, mut bus) = arm(&[0xE040_0091]); // UMAAL
     let error = interpret::step(&mut cpu, &mut bus).expect_err("multiply rejected");
     assert!(matches!(
         error,
         Error::UnsupportedInstruction {
-            raw: 0xE080_0091,
+            raw: 0xE040_0091,
             thumb: false,
             ..
         }
     ));
     assert_eq!(cpu.pc(), EWRAM_BASE);
 
-    let (mut cpu, mut bus) = arm(&[0xE1B0_F000]); // MOVS pc,r0 needs SPSR restore
+    // S=1 with Rd=PC decodes, but direct-entry SYSTEM/USER has no SPSR to
+    // restore: the exception return fails explicitly instead of fabricating one.
+    let (mut cpu, mut bus) = arm(&[0xE1B0_F000]); // MOVS pc,r0
+    let before = cpu.clone();
+    let error = interpret::step(&mut cpu, &mut bus).expect_err("SYSTEM has no SPSR");
+    assert!(matches!(error, Error::Psr(_)), "unexpected error: {error}");
+    assert_eq!(
+        cpu, before,
+        "a failed exception return must not mutate state"
+    );
+
+    // MOVS pc,#0 has the same CPU behavior with an immediate operand.
+    let (mut cpu, mut bus) = arm(&[0xE3B0_F000]);
     assert!(matches!(
         interpret::step(&mut cpu, &mut bus),
-        Err(Error::UnsupportedInstruction { .. })
+        Err(Error::Psr(_))
     ));
 
     // A word LDR PC is implemented; the narrow byte form into PC stays an

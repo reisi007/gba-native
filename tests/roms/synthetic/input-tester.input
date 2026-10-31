@@ -1,0 +1,3 @@
+# Synthetic input-tester ROM: hold A, B and Start for the whole run.
+# The final frame lights bands 0 (A), 1 (B) and 3 (Start).
+0:A+B+Start:20000000

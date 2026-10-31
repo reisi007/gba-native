@@ -166,7 +166,9 @@ fn program_module_has_no_host_boundary_or_rom_binding() {
             "program section must not contain {marker:?}"
         );
     }
-    assert!(source.contains("pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64)"));
+    assert!(source.contains(
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>)"
+    ));
     assert!(source.contains("pub struct ProgramReport"));
     assert!(source.contains("pub budget_remaining: u64,"));
     assert!(source.contains("pub fallbacks: u64,"));
@@ -188,6 +190,24 @@ fn program_module_dispatches_translated_blocks_and_falls_back() {
 }
 
 #[test]
+fn emitted_blocks_advance_audio_at_every_instruction_boundary() {
+    let cart = demo::demo_cartridge();
+    let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
+    let source = emit_program_module(&cart, &artifact).expect("emit program");
+    let ticks = source
+        .matches("engine.advance_instruction_bus(bus)?;")
+        .count();
+    assert!(
+        ticks >= artifact.stats.instructions as usize,
+        "every translated instruction must advance the audio clock"
+    );
+    assert!(
+        !source.contains("engine.advance_bus(bus,"),
+        "the dispatcher must not advance audio once per block with a block-end snapshot"
+    );
+}
+
+#[test]
 fn native_module_composes_program_with_binding_driver() {
     let cart = demo::demo_cartridge();
     let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
@@ -197,10 +217,15 @@ fn native_module_composes_program_with_binding_driver() {
         source.starts_with(&program),
         "native source must reuse the program section"
     );
-    assert!(source.contains("run_program(&mut cpu, &mut bus, BUDGET)?;"));
+    assert!(
+        source.contains("run_program(&mut cpu, &mut bus, BUDGET, &script, &mut audio_engine)?;")
+    );
     assert!(source.contains("fn main()"));
     assert!(source.contains("verify_binding(&cart)?;"));
     assert!(source.contains("--rom"));
+    assert!(source.contains("--play"));
+    assert!(source.contains("fn play_audio(path: &str)"));
+    assert!(source.contains("audio_played=true"));
     assert!(source.contains("ROM_LEN"));
     assert!(!source.contains("ROM_BYTES"));
 }

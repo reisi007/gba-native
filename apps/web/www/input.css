@@ -3,7 +3,158 @@
 @source "./index.html";
 @source "./app.js";
 
+[hidden] {
+  display: none !important;
+}
+
 @layer components {
+  /* Windowed GBA shell: body, screen bezel, shoulders, D-pad, face and menu
+     buttons. Fullscreen keeps the screen only. Pointer/touch targets are real
+     <button> elements, so keyboard focus and assistive labels work. */
+  .gba-shell {
+    position: relative;
+    padding: 0;
+    border-radius: 1.25rem;
+    border: 1px solid var(--color-base-300);
+    background:
+      radial-gradient(circle at 50% 0%, rgb(255 255 255 / 0.06), transparent 55%),
+      #2b2b3a;
+    color: #f0f0f4;
+  }
+
+  .gba-shell-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+  }
+
+  .gba-brand {
+    color: #7fd4ff;
+    font-weight: 700;
+  }
+
+  .gba-input-status {
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .gba-controls {
+    position: relative;
+    min-height: 9.5rem;
+    margin: 0.75rem;
+    padding-inline: 0.25rem;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .gba-button {
+    position: absolute;
+    display: grid;
+    place-content: center;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    background: #555568;
+    color: #f0f0f4;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+  }
+
+  .gba-button.is-active {
+    background: #8fe28f;
+    color: #1b1b24;
+  }
+
+  .gba-shoulders {
+    position: absolute;
+    inset: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .gba-shoulder {
+    position: static;
+    width: 18%;
+    height: 1.5rem;
+    border-radius: 0.5rem;
+  }
+
+  .gba-dpad {
+    position: absolute;
+    left: 2%;
+    top: 22%;
+    width: 8.5rem;
+    height: 8.5rem;
+  }
+
+  .gba-dpad .gba-button {
+    width: 2.8rem;
+    height: 2.8rem;
+  }
+
+  .gba-up { left: 2.85rem; top: 0; border-radius: 0.4rem 0.4rem 0 0; }
+  .gba-down { left: 2.85rem; bottom: 0; border-radius: 0 0 0.4rem 0.4rem; }
+  .gba-left { left: 0; top: 2.85rem; border-radius: 0.4rem 0 0 0.4rem; }
+  .gba-right { right: 0; top: 2.85rem; border-radius: 0 0.4rem 0.4rem 0; }
+
+  .gba-face {
+    position: absolute;
+    right: 3%;
+    top: 24%;
+    width: 8.5rem;
+    height: 7rem;
+  }
+
+  .gba-face .gba-button {
+    width: 3.2rem;
+    height: 3.2rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+  }
+
+  .gba-a { right: 0; top: 0; }
+  .gba-b { left: 1.2rem; bottom: 0; }
+
+  .gba-menu {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    display: flex;
+    gap: 1rem;
+    transform: translateX(-50%);
+  }
+
+  .gba-pill {
+    position: static;
+    min-width: 4.5rem;
+    height: 1.6rem;
+    padding-inline: 0.6rem;
+    border-radius: 999px;
+    font-size: 0.6rem;
+  }
+
+  .screen-slot:fullscreen,
+  body.input-fullscreen .screen-slot {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    aspect-ratio: auto;
+    border: 0;
+    border-radius: 0;
+  }
+
+  body.input-fullscreen .gba-shell {
+    display: none;
+  }
+
+  body:not(.touch-controls) .gba-controls {
+    display: none;
+  }
+
   /* The screen area is deliberately not 3:2: the guest image is integer-scaled
      and centred inside it, so the black letterbox is real and visible. */
   .screen-slot {

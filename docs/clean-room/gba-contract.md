@@ -13,7 +13,10 @@ not a roadmap promise and not a retail-game compatibility statement.
 - No BIOS is supplied or executed; direct entry is a test policy. BIOS data
   reads fail closed by default; `--synthetic-bios-zero-fill` is an explicit
   experimental opt-in for zero data reads only (see below), never authentic BIOS
-  data, opcodes or executable BIOS. The core can
+  data, opcodes or executable BIOS. BIOS stores fail closed by default;
+  `--synthetic-bios-rom-writes` is a separate explicit opt-in that models the
+  documented mask-ROM "store has no effect" behavior without storing any BIOS
+  byte. The core can
   receive a host-injected pressed-key mask through `Bus::set_pressed_keys`, but
   this is not interactive game support and has no frame-sampling guarantee.
 - The documented ARMv4T data-processing ALU, barrel shifter, PC-operand rules,
@@ -23,16 +26,18 @@ not a roadmap promise and not a retail-game compatibility statement.
   word/byte/half/signed transfers, SP-relative word transfers and Thumb
   `PUSH`/`POP`/`LDMIA`/`STMIA` are implemented for the policy below. ARM7TDMI
   PSR transfers and MSR-driven register banking are implemented for this
-  subset. Typed ARM/Thumb SWI reaches the six documented BIOS HLE services via
-  explicit SVC entry, a saved handler frame, SYSTEM-mode service execution and
-  architectural SWI return. Other exception classes, the long and halfword
-  multiply group, swap and BIOS boot remain absent.
+  subset. Typed ARM/Thumb SWI reaches the six default documented BIOS HLE
+  services, plus explicit decompression and affine opt-ins, via explicit SVC
+  entry, a saved handler frame, SYSTEM-mode service execution and architectural
+  SWI return. Other exception classes, halfword-multiply instructions and BIOS
+  boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
   `apps/desktop` and `apps/web` packages present the same static synthetic
   snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
   depend directly on the std-only `gba-native-core` package, accept no cartridge
-  or save data, are not playable/per-ROM frontends, and stay outside the default
-  CLI and its headless PPM output.
+  or retail save data, are not playable/per-ROM frontends, and stay outside the
+  default CLI and its headless PPM output. The browser panel manages synthetic
+  raw save images locally; it does not execute guest saves.
 - `aot build` compiles a headless release executable for a locally supported
   Cargo target from an externally bound ROM. It is an experimental artifact, not
   a playable game, GUI frontend, save-aware application, final app or browser
@@ -69,18 +74,28 @@ masked), SP `0x03007F00`, PC `0x08000000`, and all other registers zero. This is
 not BIOS reset execution. `Cpu::direct_entry()` remains unchanged; callers that
 execute guest SWIs initialize the documented USER/SYS, IRQ and SVC stack tops
 explicitly. The CLI guest runner and generated AOT harness do so. The
-interpreter supports typed ARM/Thumb SWIs only for the six HLE services below:
-it enters SVC at vector `0x08` without fetching BIOS bytes, frames handler state,
-runs the service in SYSTEM mode and returns through full CPSR restoration.
-Other exception classes, IRQ delivery and BIOS instruction fetch remain
-unsupported. BIOS data reads are governed by the policy below.
+interpreter supports typed ARM/Thumb SWIs for the six default HLE services
+below; the explicit decompression and affine opt-ins add the services listed in
+the same section. It enters SVC at vector `0x08` without fetching BIOS bytes, frames
+handler state, runs the service in SYSTEM mode and returns through full CPSR
+restoration.
+Other exception classes and BIOS instruction fetch remain unsupported. The
+bounded behavior-only VBlank/timer-overflow IRQ dispatcher and return are
+described below; they do not execute or reconstruct BIOS code. BIOS data reads
+are governed by the policy below.
 
 - Instruction fetch is allowed only from ROM, EWRAM and IWRAM. Fetching from
   I/O, palette, VRAM, OAM, BIOS or unmapped memory returns `NonExecutable`.
-- RAM is executable but is **never AOT-translated**, so self-modifying RAM code
-  is decoded freshly by the interpreter on every execution.
-- The CPU is instruction-budgeted. There is no scheduler, cycle count, scanline
-  timing or frame completion concept.
+- RAM is executable but is **never statically AOT-discovered**, so
+  self-modifying RAM code is decoded freshly by the interpreter on every
+  execution, except for explicit trace-seeded sealed single-instruction blocks
+  whose live encoding exactly matches the captured word (see "Hybrid AOT").
+- The CPU is instruction-budgeted. There is no scheduler, cycle count, HBlank
+  or drawing-period timing, or rendered-frame concept. The host-driven model
+  derives a read-only `VCOUNT` line from a fixed per-line instruction budget and
+  advances timer counters from the same nominal three-cycle instruction mapping
+  (below); those mappings are approximations, not hardware scanline or cycle
+  timing.
 
 ## Synthetic BIOS data policy (Design)
 
@@ -92,29 +107,105 @@ zero for `read8`, `read16` and `read32` across exactly that 16 KiB region, after
 the usual halfword/word alignment checks. This deterministic zero fill is an
 experimental fallback for bounded execution experiments; it is not authentic
 BIOS data, supplies no instruction bytes and is not a claim about any Nintendo
-BIOS or hardware behavior. Under **both** policies, `fetch16`/`fetch32` from
-BIOS return `NonExecutable`, BIOS writes return `BiosAccess`, and no other
-address or width is affected. The policy is host configuration, not guest state,
-and is excluded from `Bus::state_digest`. The only CLI surface is
-`run --synthetic-bios-zero-fill` (default remains strict); successful output and
-the optional snapshot report print the selected `bios_data_policy` and, under
-the opt-in, an explicit non-authentic note. Tests use synthetic fixtures only.
+BIOS or hardware behavior. Under both data policies, `fetch16`/`fetch32` from
+BIOS return `NonExecutable`; under the default write policy a BIOS store returns
+`BiosAccess`; and no other address or width is affected. The policy is host configuration, not guest state,
+and is excluded from `Bus::state_digest`.
+
+BIOS **stores** have a separate policy, `BiosWritePolicy`. The default `Strict`
+reports `BiosAccess`; the explicit `RomWritesDropped` opt-in completes the store
+with no effect, matching mask ROM. It never makes BIOS data readable or
+executable and does not affect the Game Pak ROM window, whose stores keep
+reporting `RomWrite`. The HLE copy services accept a BIOS destination only under
+that opt-in.
+
+A third policy, `RomWritePolicy`, covers stores into the Game Pak ROM window.
+The default `Strict` reports `RomWrite`; the explicit `Dropped` opt-in models the
+documented no-effect store of a ROM-only cartridge. It never writes cartridge
+bytes and does not itself model a flash command engine. The backup window is
+governed by its own device policy, not by this one.
+
+A fourth policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
+(`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access there
+as `UnsupportedSave`. Three explicit opt-ins model documented devices: the
+byte-wide, volatile 32 KiB or 64 KiB SRAM (`run --synthetic-backup-sram`,
+`run --synthetic-backup-sram64k`) and a volatile 128 KiB flash
+(`run --synthetic-backup-flash128k`) with two 64 KiB banks and the documented
+autoselect (`0x90`), bank-switch (`0xB0`), program (`0xA0`), sector-erase
+(`0x30`) and chip-erase (`0x10`) subset. Autoselect returns the Sanyo 128K ID
+`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. All three start erased and the device model itself does not write to disk; a
+host caller may persist or restore the raw image through the save library
+(`core::save::SaveLibrary`, `run --save-dir/--save-slot`, AOT `--save`). Wider
+accesses and the window beyond the selected device capacity stay explicit
+`UnsupportedSave` errors. This is a device model for bounded progress
+experiments, not a save-device compatibility claim; the storage bytes and flash
+command/bank state are guest state included in `Bus::state_digest`, while the
+selected policy is host configuration and is not hashed. Selecting more than one
+backup-device flag is an argument error.
+
+The CLI surfaces are `run --synthetic-bios-zero-fill`,
+`run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
+`run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`,
+`run --synthetic-backup-flash128k`, `run --synthetic-bios-decompress` and
+`run --synthetic-bios-affine` (all default
+to strict). Successful output prints all six policy values
+(`bios_data_policy`, `bios_write_policy`, `rom_write_policy`, `backup_policy`,
+`decompression_policy`, `affine_policy`) plus an explicit non-authentic
+assumption line for each selected opt-in; the optional snapshot report prints
+the six policy values, the BIOS data/write notes and the decompression/affine
+notes. Tests use synthetic fixtures only.
 
 ## BIOS HLE services and guest SWI framing
 
-`gba_native::bios::call(service, &mut cpu, &mut bus)` exposes exactly six
-documented, timing-independent services as direct Rust primitives derived from
-S1. Guest ARM/Thumb SWIs dispatch to those same services through
+`gba_native::bios::call(service, &mut cpu, &mut bus)` exposes the six
+documented, timing-independent default services as direct Rust primitives
+derived from S1. Guest ARM/Thumb SWIs dispatch to those same services through
 `bios::execute_swi`:
 
 | SWI | Service | Boundary |
 | --- | --- | --- |
-| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, applies the specified group-6 sound effects and modelled group-7 I/O reset, always forces blank, and ignores bits 8..31; group 5 (SIO) has no modeled state |
+| `01h` | `RegisterRamReset` | Clears selected memory groups 0..4, applies the specified group-6 sound effects and modelled group-7 I/O reset, always forces blank, and ignores bits 8..31; group 5 (SIO) clears the modelled serial registers and selects general-purpose mode |
 | `06h` | `Div` | Signed truncated quotient, dividend-signed remainder, unsigned quotient magnitude; zero divisor and `MIN / -1` error before mutation |
 | `07h` | `DivArm` | `Div` with the documented reversed r0/r1 argument order |
 | `08h` | `Sqrt` | Floor unsigned integer square root of r0 |
 | `0Bh` | `CpuSet` | Halfword/word copy or fill with prevalidated ranges |
 | `0Ch` | `CpuFastSet` | Word copy or fill rounded up to 8-word blocks before range validation |
+
+The default policy exposes exactly these six services. A separate host policy,
+`DecompressionPolicy::DocumentedFormats` (`run --synthetic-bios-decompress`),
+adds the documented decompression SWIs `11h`/`12h` (LZ77, byte/halfword stores),
+`14h`/`15h` (run-length), `16h`/`17h` (8-bit diff) and `18h` (16-bit diff).
+The HLE is rebuilt from the public GBATEK format descriptions; no BIOS byte or
+code is read. It requires a 4-byte-aligned source, a header whose reserved
+nibble and compressed type match the service, and a destination wholly inside
+the policy's writable regions. Byte variants accept only EWRAM/IWRAM; halfword
+variants additionally accept palette/VRAM/OAM but require a halfword-aligned
+destination and an even decompressed size. The LZ77 halfword variant rejects
+`disp=000h`, which GBATEK documents as not working for the Vram function.
+Decode failures (invalid header/back-reference or an exhausted readable source)
+are explicit errors and the output is built in a host buffer before the first
+destination store, so a failed decode leaves the destination untouched. A
+structurally valid stream that simply describes different bytes cannot be
+detected without a checksum. Preconditions (policy, header, destination range)
+are rejected before the SVC frame; a decode failure can occur after frame entry
+but before any destination store. `10h` BitUnPack and `13h` Huffman remain unsupported. The default
+`Strict` policy keeps every decompression SWI an explicit `UnsupportedService`
+error.
+
+A second documented-service opt-in, `AffinePolicy::Documented`
+(`run --synthetic-bios-affine`), adds SWI `0Eh` `BgAffineSet` and SWI `0Fh`
+`ObjAffineSet`. `ObjAffineSet` reads the documented six-byte source entries
+(s16 scale X, s16 scale Y, u16 angle), writes PA/PB/PC/PD at the documented
+`offset` stride (the next calculation starts `4*offset` bytes later), uses the
+upper 8 angle bits and a 256-entry Q12 sine table generated from the
+mathematical definition. `BgAffineSet` reads the 20-byte source
+(origin X/Y, display X/Y, scale X/Y, angle) and writes the 16-byte
+PA/PB/PC/PD/start-X/start-Y entry. Source/destination ranges, alignment and
+the even Object offset of at least 2 are validated before the first store. The
+default `AffinePolicy::Strict` keeps both SWIs explicit
+`UnsupportedService` values. The sine
+table is not copied from a BIOS image and the HLE does not claim bit-identical
+results to a particular BIOS table or rounding.
 
 The direct `bios::call` API does not consume an instruction, advance PC, enter
 SVC/IRQ mode, write SPSR, fetch a vector, count cycles or model wait states. A
@@ -122,8 +213,9 @@ guest SWI consumes exactly one guest instruction and performs the framed SVC
 path described below; service internals add no budget, cycle or wait-state
 accounting. Every other service number is an explicit
 `BiosError::UnsupportedService`; Halt/IntrWait/VBlankIntrWait, Stop/Sleep,
-SoftReset/HardReset and decompression are not implemented. Unsupported requests
-are never successful no-ops. See `docs/clean-room/hle-services.md` for exact
+SoftReset/HardReset, BitUnPack, Huffman and BgAffineSet remain unimplemented,
+and the LZ77/RL/diff services and ObjAffineSet are unsupported unless their
+opt-in is selected. Unsupported requests are never successful no-ops. See `docs/clean-room/hle-services.md` for exact
 policies and tests.
 
 ### Guest SWI/SVC path
@@ -154,9 +246,40 @@ is misaligned, underflows, or is outside work RAM is rejected before framing.
 SP to `0x03007FA0`, and SVC SP to `0x03007FE0`. It is not implicit in
 `Cpu::direct_entry()`. The `run` command and generated AOT harness initialize
 these stack tops; synthetic direct-entry tests remain unchanged unless they opt
-in. This model has no IRQ delivery, BIOS code fetch, cycle timing, scheduler or
-wait-state accounting inside the HLE handler. A bus failure after exception
-entry is terminal and is not rolled back.
+in. HLE handler internals have no cycle, scheduler or wait-state accounting. A
+bus failure after exception entry is terminal and is not rolled back.
+
+### Bounded IRQ dispatcher and return (partial; Design)
+
+The host-driven instruction-count frame model raises the VBlank request once when
+line 160 of its 228-line `VCOUNT` progression is entered (see the `VCOUNT` model
+under Bus). Between guest instructions, the runner enters a handler only when
+IRQs are unmasked, IME and a matching IE/IF bit are set, and the nonzero handler
+pointer at `0x03007FFC` is present. The pointer must be word-aligned and
+executable ARM memory; invalid pointers fail explicitly before CPU or bus
+mutation. A six-word full-descending frame must fit in aligned EWRAM or IWRAM
+before entry begins.
+
+The behavior-only dispatcher saves ascending-address words `{r0,r1,r2,r3,r12,
+LR_irq}` at `SP_irq-24`, where the saved IRQ link is the interrupted PC + 4. It
+saves the old CPSR in `SPSR_irq`, enters ARM IRQ mode with I set and F preserved,
+sets the IRQ stack pointer to the frame and calls the handler with `LR_irq` set
+to the modeled continuation `0x00000138`. A guest handler acknowledges IF and
+returns with `BX LR`. Only IRQ-mode ARM execution at `0x00000138` is recognized
+as the dispatcher epilogue: it restores the six saved values and IRQ SP, then
+restores the interrupted CPSR and resumes at saved `LR_irq-4`. It performs this
+as one modeled runtime step and never fetches or synthesizes BIOS instructions.
+Entry consumes no guest instruction budget; guest-handler instructions and the
+modeled epilogue each consume one.
+
+This behavior-only model follows the public BIOS interrupt-handling contract;
+it is not BIOS execution or a claim to reproduce BIOS bytes. Three request
+sources are generated: the VBlank request once per frame at the modelled
+line-160 transition, modelled timer overflow requests on `IF` bits 3..6, and the
+V-Counter match request on `IF` bit 2 (see the `VCOUNT` model below). The
+`0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
+HBlank IRQs, cycle timing and BIOS boot remain unsupported. Do not interpret
+this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -177,22 +300,42 @@ Implemented regions and widths:
   `RomOverread`. ROM bytes cannot be mutated through the bus.
 - Work RAM mirrors its bank across the documented 16 MiB window: 256 KiB EWRAM
   over `0x02000000..=0x02FFFFFF` and 32 KiB IWRAM over `0x03000000..=0x03FFFFFF`
-  (`#gba-memory-map`). No other mirroring is modelled: VRAM/palette/OAM addresses
-  just outside their exact regions are `Unmapped`, and no open-bus behaviour is
-  claimed.
+  (`#gba-memory-map`). By explicit prototype policies recorded in D22/D26, the
+  1 KiB palette array aliases across `0x05000000..=0x05FFFFFF`, and VRAM uses a
+  repeating 128 KiB aperture across `0x06000000..=0x06FFFFFF`. In tiled modes
+  0..=2 the aperture's `0x18000..=0x1FFFF` hole aliases the last physical 32 KiB;
+  that hole remains unmapped in bitmap modes. These test-driven extensions
+  satisfy local black-box mirror cases, while GBATEK labels addresses outside
+  the physical palette/VRAM regions unused; they are not hardware-map claims.
+  OAM has one additional narrow prototype alias at
+  `0x07000400..=0x070007FF`, mapping to its first 1 KiB; the following addresses
+  remain unmapped. This test-driven extension satisfies a local black-box mirror
+  case while GBATEK labels the alias unused, and is not a hardware-map claim.
+  Other unmapped reads remain explicit errors and no open-bus behavior is claimed.
 - Alignment: 16-bit bus accesses require even addresses and 32-bit accesses
   require 4-byte alignment. I/O uses register-specific 8/16-bit access, and a
   32-bit access composes two halfword accesses (including across register pairs).
-- Implemented I/O: DISPCNT halfword read/write; BG0CNT (`0x04000008`)
-  halfword read/write; BG0HOFS/BG0VOFS (`0x04000010`/`0x04000012`) halfword
-  writes; KEYINPUT halfword read (`0x04000130`); WAITCNT (`0x04000204`) halfword
-  read/write, retaining only documented bits 0..13; and the four DMA channels
-  `0x040000B0..0x040000DF` (see below). The host injects a `u16`
+- Implemented I/O: DISPCNT halfword read/write; BG0-BG3CNT (`0x04000008`/
+  `0x0A`/`0x0C`/`0x0E`) halfword read/write; BG0-BG3HOFS/VOFS halfword writes;
+  BG2/BG3 affine `PA`..`PD` halfword read/write and `X`/`Y` 32-bit read/write;
+  `WIN0H`/`WIN1H`/`WIN0V`/`WIN1V`/`WININ`/`WINOUT`/`MOSAIC` and
+  `BLDCNT`/`BLDALPHA`/`BLDY` halfword read/write; KEYINPUT halfword read
+  (`0x04000130`); WAITCNT (`0x04000204`) halfword read/write, retaining only
+  documented bits 0..13; and the four DMA channels `0x040000B0..0x040000DF`
+  (see below). BG scroll registers are write-only; guest reads remain
+  `UnsupportedIoRead`. The host injects a `u16`
   pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
   guest writes have no effect. This host setter provides no frame scheduler,
-  sampling guarantee or timing claim. BG0 scroll reads are
+  sampling guarantee or timing claim. The std-only `input` module adds the host
+  button/key-binding model, an 800x600 landscape and a portrait normalised touch
+  layout, the persisted settings document and instruction-indexed input
+  scripts. The synthetic desktop and browser frontends use that model for
+  keyboard/touch buttons, fullscreen and a settings page; they do not accept a
+  cartridge, retail save data or guest audio stream. The browser panel manages
+  synthetic raw save images locally, and the frontend input path is not a
+  retail-game or playability claim. BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
   A 32-bit I/O access is composed from two halfword accesses, as on hardware.
@@ -207,22 +350,107 @@ Implemented regions and widths:
   set of silently-dropped addresses small, inspectable and out of the digest.
   Mutable display-register and dynamic KEYINPUT state are included in
   `Bus::state_digest`. Sound registers remain storage-only apart from bounded
-  Sound A/B FIFO queues; timer registers are storage-only. There is no serial or
-  save-register state, and no BG affine parameter state.
-- `VCOUNT` byte lanes: the host-driven frame model already exposes a read-only
-  `VCOUNT` halfword at `0x04000006`. This change adds an 8-bit read path for
+  Sound A/B FIFO queues and the host-side `audio` PSG renderer, which consumes a
+  register snapshot without changing guest reads; timer counters, reload latches, controls and prescaler
+  phases are part of the instruction-budget timer model (below). There is no
+  save-register state, no BG affine parameter state, and no serial shift engine.
+  The serial registers `SIOCNT`/`RCNT`/`SIODATA*` are documented storage only: a
+  transfer started with no link partner finishes immediately with SI read as
+  high and received bits all ones, because that is the documented state of a
+  disconnected port. A normal-mode start with the internal shift clock is
+  answered that way; an externally clocked start stays pending with the start
+  bit set, because no partner supplies SC edges. Multiplay and UART starts stay
+  explicit `UnsupportedIoWrite` errors instead of fabricated transfers, and
+  general-purpose/JOY-BUS mode treats `SIOCNT` as unused storage. No serial IRQ
+  is delivered.
+- `VCOUNT` and the instruction-count line model: the host-driven frame model
+  exposes a read-only `VCOUNT` halfword at `0x04000006` with an 8-bit path for
   exactly that register: `0x04000006` returns its low byte and `0x04000007` its
-  high byte. The model reports `0` in the active phase and `160` in the modelled
-  VBlank phase, so the high byte is always `0` and the halfword value is
-  unchanged by the byte path. The pre-existing byte-addressed sound-register
-  reads are unchanged, and every other I/O address keeps the existing
-  register-specific dispatch. Otherwise-unmodelled reads remain explicit
-  `UnsupportedIoRead { width: 8 }` errors, including the neighbouring `DISPSTAT`
-  lanes and the byte above `VCOUNT`. This follows GBATEK `#gba-io-map` and
-  `#lcd-io-interrupts-and-status` for the documented 8/16/32-bit I/O access and
-  the `VCOUNT` bit layout, but it is not scanline timing: the model has no 228
-  scanlines, HBlank or per-line counter. Byte writes to `VCOUNT` remain
-  ignored-and-recorded like any other unmodelled I/O write.
+  high byte. `VCOUNT` progresses through all 228 documented lines `0..=227` and
+  wraps from 227 to 0 once per frame, so the high byte is always `0` and the
+  halfword value is unchanged by the byte path. The total frame budget stays
+  `FRAME_INSTRUCTIONS` = 93,632 guest instructions (280,896 documented cycles at
+  a nominal three cycles per instruction). GBATEK `#lcd-dimensions-and-timings`
+  gives 228 equally long lines of 1232 cycles, so the budget is spread evenly:
+  each line owns `93632 / 228 = 410` instructions, and the 152-instruction
+  remainder is distributed one instruction at a time across the frame
+  (`bus::line_instructions`, `bus::instructions_until_line`). The 228 line
+  budgets therefore sum to exactly 93,632 with no lost remainder. A fresh bus
+  starts on line 0 with that line's full budget ahead; `Bus::tick_frame`
+  advances one guest instruction and `Bus::tick_frames` produces exactly the
+  same sequence as repeated single ticks. The DISPSTAT VBlank flag (bit 0) is
+  set on lines `160..=226` and clear on line 227, matching GBATEK
+  `#lcd-io-interrupts-and-status` ("set in line 160..226; not 227"); the VBlank
+  IRQ request latches once when line 160 is entered. This replaces the earlier
+  two-value `0`/`160` placeholder and its undocumented one-tenth VBlank phase.
+  **Design approximation, not a timing claim:** a line is an instruction-count
+  slice, not hardware timing. One guest instruction is not three cycles, lines
+  do not model drawing or HBlank periods, the 152 remainder instructions are
+  spread evenly instead of at their exact cycle positions, and no instruction
+  observes a mid-line split. The DISPSTAT V-Count setting (bits 8..15) is
+  writable and compared against the current line: GBATEK
+  `#lcd-io-interrupts-and-status` says "when its value is identical to the
+  content of the VCOUNT register then the V-Counter flag is set (Bit 2), and
+  (if enabled in Bit 5) an interrupt is requested". The model implements
+  exactly that: the read-only match flag (bit 2) reads set while they are
+  equal, and with the V-Counter IRQ enable (bit 5) a line transition into the
+  matching line latches the V-Counter request in `IF` bit 2. A write that makes
+  the setting match the current line raises the request immediately; the cited
+  section states the flag/request condition for `LYC == VCOUNT` but not when a
+  write is evaluated, so this immediate evaluation is an implementation choice,
+  not a quoted rule. All `LYC` values `0..=255` are accepted, but only the
+  modelled lines `0..=227` can match. There is no HBlank, per-line interrupt
+  scheduling beyond this match, wait-state/cycle accounting or scanline
+  renderer. The
+  pre-existing byte-addressed sound-register reads are unchanged, every other
+  I/O address keeps the existing register-specific dispatch, and
+  otherwise-unmodelled reads remain explicit `UnsupportedIoRead { width: 8 }`
+  errors, including the neighbouring `DISPSTAT` lanes and the byte above
+  `VCOUNT`. Byte writes to `VCOUNT` remain ignored-and-recorded like any other
+  unmodelled I/O write. The DISPSTAT V-Counter match model is the one described
+  above; no other per-line interrupt source exists.
+
+### Timers
+
+`TM0..TM3` expose the documented 16-bit counter/reload halfword and control
+halfword at `0x04000100 + 4*n`. Each retired guest instruction contributes
+`bus::INSTRUCTION_CYCLES` = 3 nominal cycles to every **enabled** timer. A normal
+timer increments whenever its selected prescaler (`F/1`, `F/64`, `F/256`,
+`F/1024`) accumulates that many cycles; a cascaded Timer 1..3 ignores its own
+prescaler and increments once for each previous-timer overflow. Cascades are
+evaluated in timer order, so an overflow can propagate through consecutive
+timers in one nominal cycle. Disabled timers do not advance.
+
+The documented latch behavior is implemented. Writing `TMxCNT_L` changes only
+the reload value and never the current counter. Reading `TMxCNT_L` returns the
+current counter, or the frozen counter after disable. The reload value is copied
+to the counter on overflow and on a `0 -> 1` start edge in `TMxCNT_H`. A 32-bit
+I/O write is composed low halfword first, so a simultaneously written reload is
+the value used by the start edge. A stop freezes the counter; a later start
+reloads it. Changing only the prescaler or count-up selection on a running timer
+keeps the counter but discards the partial prescaler phase.
+
+Prescaler bits `0..1`, the count-up bit `2`, the overflow-IRQ bit `6` and the
+start bit `7` are modelled. Reserved control bits are stored as zero. Timer 0's
+count-up bit is documented as not used: it is accepted, ignored and reads back
+as zero, while Timer 1..3 use it for count-up. With the IRQ-enable bit set, an
+overflow latches the matching `IF` bit (3..6); the existing `IME`/`IE` gate and
+dispatcher decide delivery. Without that bit the overflow still reloads and
+still drives a cascade, but raises no request.
+
+**Design approximation, not a timing claim:** instruction lengths, waitstates,
+bus arbitration and mid-instruction reads are absent. A poll observes only
+completed instruction ticks. The timer model itself does not consume Sound FIFO
+samples, start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video
+capture or any other peripheral. The host audio engine reads only timer 0/1's
+nominal overflow rate as the Direct Sound sample clock and then consumes FIFO
+bytes and requests sound-timed DMA refills through the explicit bus APIs.
+`SOUNDCNT_H` timer-select bits choose timer 0 or 1 for that host audio clock; the
+documented `VCOUNT`-related timing sections are not used to derive prescaler
+phase. RegisterRamReset group 7 returns all four timers to their stopped, zeroed
+default state. Timer access stays halfword-oriented: an 8-bit timer read remains
+the existing explicit `UnsupportedIoRead { width: 8 }`, and an 8-bit timer write
+follows the bus-wide ignored-and-recorded policy for unmodelled byte I/O.
 
 ### DMA channels
 
@@ -255,12 +483,16 @@ support explicit host consumption of one signed sample. `SOUNDCNT_H` FIFO reset
 bits clear their corresponding queues; RegisterRamReset group 6 clears both and
 group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
-audio output. There is no DMA arbitration, scanline/cycle timing, automatic
+automatic audio output. The separate `audio` module renders a bounded PSG mix
+from the register snapshot with a host volume/mute; it does not consume FIFO
+samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
-- Save hardware (`0x0E000000..=0x0E00FFFF`) is unsupported. BIOS reads/writes
-  and unmapped addresses are errors; the only exception is the explicit
-  synthetic zero-fill opt-in, which changes BIOS **data reads** to zero and
-  leaves BIOS fetch/write errors and every other address unchanged.
+- The backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by default and
+  only answers under the explicit `BackupPolicy::Sram32KVolatile` or
+  `Sram64KVolatile` opt-in (see the backup policy above). BIOS reads/writes and unmapped addresses are errors;
+  the only exception is the explicit synthetic zero-fill opt-in, which changes
+  BIOS **data reads** to zero and leaves BIOS fetch/write errors and every other
+  address unchanged.
 - CPU data-transfer rules actually implemented and tested:
   - A byte load/store uses `read8`/`write8` and the byte's exact address. It is
     never emulated as a wider access plus extraction. Byte stores to
@@ -299,28 +531,40 @@ Condition fields 0..14 are evaluated from NZCV. Field 1111b is the reserved
 unconditional/newer space on ARMv4T and is rejected explicitly; it is not a
 sixteenth condition. A false condition is a no-op that still consumes one
 instruction and advances PC, including for a PSR transfer whose executed form
-would be restricted. Multiply-long, halfword multiply, swap, coprocessor, ARMv5
+would be restricted. Multiply-long, halfword multiply, coprocessor, ARMv5
 `BLX`/`BXJ` and other newer encodings are rejected with address/state/raw word
 and are never NOPs.
-Typed SWI is handled only by the bounded six-service path above; unsupported
-service numbers and SVC-origin nesting are explicit errors.
+Typed SWI is handled only by the bounded default-service path above (plus the
+explicit decompression/affine opt-ins); unsupported service numbers and SVC-origin
+nesting are explicit errors.
 
 | Family | Implemented | Rejected |
 | --- | --- | --- |
-| Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands and `S=0` PC destinations | `S=1` with `Rd=PC` (needs SPSR restore), ARMv2 P-variant test ops, ARMv5/newer |
+| Data processing | all sixteen operations: `AND`, `EOR`, `SUB`, `RSB`, `ADD`, `ADC`, `SBC`, `RSC`, `TST`, `TEQ`, `CMP`, `CMN`, `ORR`, `MOV`, `BIC`, `MVN`; register or rotated-immediate operand; LSL/LSR/ASR/ROR/RRX shifted register by immediate or by register; `S` honored; PC operands, `S=0` PC destinations and the documented `S=1, Rd=PC` exception return | `S=1` with `Rd=PC` in USER/SYSTEM (no SPSR) or with an invalid saved mode, test-op encodings with nonzero `Rd` (SBZ; nonzero is UNPREDICTABLE), ARMv5/newer |
 | Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
 | Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
-| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base, unaligned base (bounded runtime policy) |
-| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/return, SPSR restore, PC destination, T-bit or invalid-mode changes |
-| Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six-service HLE dispatch and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
-| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product, documented `Rd`/`Rm` and R15 restrictions | `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, the halfword multiplies, `SWP` |
-| Everything else | none | multiply-long/halfword multiply, swap, coprocessor, unconditional/newer space |
+| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base |
+| PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
+| Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression and affine opt-ins) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
+| Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; `UMULL`/`UMLAL`/`SMULL`/`SMLAL` with a 64-bit result/accumulator and `S`-driven 64-bit N/Z; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `RdHi=RdLo`, halfword multiplies |
+| Swap | ARM `SWP`/`SWPB`; `Rd=Rm` is allowed; unaligned word SWP rotates the loaded value by `8 * address[1:0]` but stores the source unrotated; SWPB zero-extends the loaded byte; destination and PC update only after both bus accesses succeed | R15 operands, `Rn=Rd` or `Rn=Rm` (UNPREDICTABLE), nonzero SBZ bits [11:8] |
+| Everything else | none | halfword multiply, coprocessor, unconditional/newer space |
 
 `MUL`/`MLA` set N/Z from the result and leave V unaffected. GBATEK documents C
 as "destroyed" on ARMv4, which has no defined value; this prototype preserves
 the previous C bit as a stated **Design** choice, so no test may depend on C
-after a multiply.
+after a multiply. `MUL Rd=Rm` is architecturally unpredictable on ARM7TDMI; this
+prototype explicitly reads both pre-instruction operands and writes their low
+32-bit product. For `MLA Rd=Rm`, the accumulator is also read from the
+pre-instruction state before the low 32-bit sum is written. These are
+compatibility-oriented design extensions, not hardware-behavior claims.
+
+`SWP`/`SWPB` use the ARMv4T forms specified by DDI0100E §4.1.51–52. Address
+and source registers are snapshotted before the bus accesses, which preserves
+the documented `Rd=Rm` case. A bus error on either access leaves `Rd` and PC
+unchanged. The instruction is one indivisible guest step in this non-timed
+runtime; cycle-accurate bus arbitration and mid-instruction DMA are not modeled.
 
 Immediate data-processing encodings are classified by bit 25 before any
 `bits 7..4` inspection: for an immediate, `bits 11..0` are the rotated imm8
@@ -385,11 +629,13 @@ this prototype is willing to generalize:
   stores the old base when it is the first (lowest) entry and the new base
   otherwise; LDM has no additional writeback and the loaded base value wins
   (documented ARMv4 behavior).
-- Block/stack base alignment is a **Design** policy: GBATEK says low bits are
-  ignored for LDM/STM/PUSH/POP, but it does not establish whether writeback is
-  derived from the original or the aligned base. This prototype rejects an
-  unaligned base before any access or writeback instead of choosing one result.
-  The same policy applies to Thumb SP and `LDMIA`/`STMIA` bases.
+- Block/stack base alignment is a **Design** policy: GBATEK says low address
+  bits are ignored for LDM/STM/PUSH/POP. This prototype aligns only the transfer
+  address (`base & !3`) before applying the addressing mode; writeback, and the
+  PUSH/POP SP update, are always computed from the original, unmodified base
+  register. The public document does not establish that writeback source, so
+  this is not a hardware-conformance claim. The same policy applies to Thumb SP
+  and `LDMIA`/`STMIA` bases.
 - Thumb implements word/byte register-offset forms, half/signed
   register-offset forms, immediate word/byte transfer forms, the existing
   immediate halfword form, SP-relative word transfers and the preserved literal
@@ -397,7 +643,12 @@ this prototype is willing to generalize:
   order and the LR/PC bit; `POP PC` clears bit 0 and keeps Thumb state.
   `LDMIA`/`STMIA` use the ARMv4 base-in-list special documented for Thumb:
   STM stores the old base if it is the first entry, otherwise the new base;
-  LDM's loaded base wins. Empty lists are explicit errors.
+  LDM's loaded base wins. For the documented ARMv4 empty-list quirk, empty
+  `LDMIA`/`STMIA` transfers R15 as the sole word and writes `Rb+0x40`; empty
+  `PUSH`/`POP` remain explicit errors. Empty-list LDM loads an even-aligned PC
+  and retains Thumb state; empty-list STM stores the instruction address plus 6,
+  matching the following Thumb instruction's visible PC as checked by ROM test
+  229.
 - No CPU data-abort exception is modeled. A bus error ends the run; a partial
   multi-access leaves earlier transfers visible, performs no writeback and
   never claims atomicity.
@@ -440,9 +691,14 @@ Implemented from GBATEK `#arm-opcodes-psr-transfer-mrs-msr`,
   FIQ. R13/R14 are banked per exception mode; USER and SYSTEM share one bank.
   FIQ/IRQ/SVC/ABT/UND each have an independent SPSR. An MSR control write
   switches the visible bank atomically with the mode bits.
-- **Boundary:** only the documented SWI-to-HLE path performs SVC entry, a bounded
-  saved frame and exception return. Other exception classes/vectoring, IRQ
-  delivery, BIOS execution and other SPSR-restoring PC writes remain unsupported.
+- **Boundary:** the documented SWI-to-HLE path performs exception entry, a
+  bounded saved SVC frame and its SWI return. The behavior-only VBlank and
+  timer-overflow IRQ model above saves the documented IRQ frame and models the
+  handler return without
+  BIOS execution, covering the modelled VBlank and timer-overflow requests.
+  ARM data-processing `S=1, Rd=PC` can restore an already existing valid SPSR
+  but performs no exception entry. Other exception
+  classes/vectoring and BIOS execution remain unsupported.
 
 Pipeline offsets are documented. ARM operands reading R15 use
 `instruction address + 8`, or `+12` when the instruction uses a
@@ -452,11 +708,16 @@ value. Direct branch targets are forced to 4-byte (ARM) or 2-byte (Thumb)
 alignment.
 
 ARM ALU/MOV writes to PC with `S=0` are allowed, force-align the low two bits
-and keep the ARM state; `S=1` with `Rd=PC` is explicitly unsupported because it
-would require an SPSR restore. Thumb `MOV PC,Rs`/`ADD PC,Rs` force-align the low
-bit and keep Thumb state. `BX` bit 0 is the only state switch. `BX PC` follows
-GBATEK's ARM7 behavior (ARM `$+8`; Thumb `(($+4) AND NOT 2)`, switching to ARM);
-GBATEK notes that this case is not officially defined as predictable.
+and keep the ARM state. The documented `S=1` with `Rd=PC` exception return
+restores CPSR from the current mode's SPSR and uses the computed result as the
+PC aligned for the restored T bit; ordinary ALU NZCV results are discarded
+because the restored CPSR replaces them. A missing SPSR in USER/SYSTEM or an
+invalid saved mode errors before any state mutation. This restores existing CPU
+state only: it does not perform exception entry or fetch BIOS code. Thumb
+`MOV PC,Rs`/`ADD PC,Rs` force-align the low bit and keep Thumb state. `BX` bit 0
+is the only other state switch. `BX PC` follows GBATEK's ARM7 behavior (ARM
+`$+8`; Thumb `(($+4) AND NOT 2)`, switching to ARM); GBATEK notes that this case
+is not officially defined as predictable.
 
 ## Implemented Thumb subset
 
@@ -471,8 +732,8 @@ GBATEK notes that this case is not officially defined as predictable.
 | PC-relative | `LDR` literal | — |
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |
 | Halfword/signed | immediate `LDRH`/`STRH`; register-offset `LDRH`/`STRH` and sign-extended `LDSB`/`LDSH` | ARMv5/newer encodings outside these formats |
-| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six documented HLE services | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
-| Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, unaligned SP/base (bounded runtime policy), ARMv5/newer |
+| Branch | conditional `B` (`cond != 14/15`), unconditional `B`, `BL` as two half instructions; typed SWI to the six default HLE services, with the decompression and affine opt-ins carried into the generated harness policy only when explicitly selected | ARMv5 `BLX` second half, unsupported SWI services, undefined `cond=14` |
+| Block/stack | `PUSH`/`POP` with low list plus LR/PC; `LDMIA`/`STMIA` low-register lists with writeback and documented base-in-list specials | empty lists, ARMv5/newer |
 
 Thumb `PC = instruction address + 4`; branch targets are forced to 2-byte
 alignment. `BX` alone changes ARM/Thumb state. High-register `ADD`/`MOV` never
@@ -514,38 +775,55 @@ Native image is 240x160, converted from RGB555 to RGB888 by bit replication
 (`(v << 3) | (v >> 2)` per channel). This is a static state snapshot, not a
 scanline PPU, frame renderer or timing claim.
 
-- Mode 0 implements BG0 text-background snapshots only. After unsupported-layer
-  validation, BG0 disabled yields the backdrop (BG palette entry 0); forced
-  blank (DISPCNT bit 7) yields white. Other enabled BG layers, OBJ, windows and
-  CGB mode return `UnsupportedPpuFeature`. Otherwise nonblank Modes 1 and 2
-  remain `UnsupportedDisplayMode`.
-- BG0CNT priority is read and ignored because only one layer is composed.
-  Character base (bits 2..3) selects a 16 KiB unit, color depth (bit 7) selects
-  4bpp/8bpp, screen base (bits 8..12) selects a 2 KiB unit, and size (bits
-  14..15) selects 256x256, 512x256, 256x512 or 512x512 pixels. Mosaic (bit 6)
-  returns `UnsupportedBgControl`; reserved bits 4..5 and 13 also fail explicitly
-  when enabled BG0 is rendered.
-- Text maps use 32x32-entry (2 KiB) screen blocks. Larger sizes select SC0..SC3
-  in row-major screen-block order at base +0, +2 KiB, +4 KiB and +6 KiB. BG0
-  scroll uses the low nine bits of each write-only offset register and wraps at
-  the selected background dimensions. Map entries select a tile, horizontal
-  and vertical flip, and (in 4bpp mode) one of 16 palette banks.
-- 4bpp tiles use 32 bytes and low-nibble-first left pixels; 8bpp tiles use 64
-  bytes and one palette index per pixel. Palette index 0 is transparent in
-  either depth and reveals the backdrop, which is BG palette entry 0. Nonzero
-  indices read the selected BG palette entries and convert RGB555 to RGB888.
-- Mode 0 BG maps and tile data are restricted to the first 64 KiB of VRAM.
-  Selecting a map/tile byte outside that documented BG allocation returns
-  `BgVramOutOfRange`; it does not read the separate OBJ allocation or wrap.
+- Mode 0 composes BG0-BG3 text backgrounds and OBJ sprites. Mode 1 composes
+  BG0/BG1 text backgrounds, the BG2 affine background and OBJ sprites. Both
+  modes implement window 0, the OBJ window and BLDCNT alpha/brightness
+  blending. Mode 2 remains `UnsupportedDisplayMode`; Modes 3-5 retain the
+  bitmap paths below.
+- Layer priority is the documented low-number-wins rule; equal priorities are
+  ordered OBJ > BG0 > BG1 > BG2 > BG3. Disabled layers and transparent pixels
+  reveal the next layer or the backdrop (BG palette entry 0).
+- BGxCNT priority, character base (bits 2..3, 16 KiB units), color depth
+  (bit 7), screen base (bits 8..12, 2 KiB units) and size (bits 14..15) are
+  decoded per layer. Text maps use 32x32-entry screen blocks; larger sizes
+  select SC0..SC3 in row-major order. Text scroll uses the low nine bits and
+  wraps at the selected dimensions. Map entries select a tile, both flips and
+  (4bpp) a palette bank. 4bpp tiles are 32 bytes, 8bpp tiles 64 bytes; palette
+  index 0 is transparent. Mosaic (bit 6), reserved bits and a 4bpp affine BG
+  fail explicitly.
+- The BG2 affine layer is 8bpp only. Its 8-bit map and 8bpp tiles use the
+  documented character/screen bases; size selects 128, 256, 512 or 1024 pixels
+  per axis; bit 13 enables wrapping. `BG2PA`..`BG2PD` and `BG2X`/`BG2Y` are
+  8.8 fixed point and sample the map for the current static state.
+- OBJ supports normal and affine sprites with 1D tile mapping, 4/8bpp tiles,
+  horizontal/vertical flips (normal sprites), affine matrix groups and
+  per-sprite priority/transparency. 2D tile mapping, OBJ mosaic and double-size
+  affine sprites are explicit errors. OBJ mode 2 sprites form the OBJ-window
+  mask and are not displayed, as documented.
+- Window 0 uses `WIN0H`/`WIN0V` with the documented garbage-clamping rules and
+  selects BG/OBJ visibility from `WININ`; outside pixels use `WINOUT`. The OBJ
+  window uses the upper `WINOUT` bits. Window 1 is not implemented and is an
+  explicit error.
+- `BLDCNT` mode 1 alpha-blends the first target only when the immediately next
+  lower non-transparent layer is a second target; if the next lower layer is
+  not a second target, only the top pixel is displayed. With no lower layer,
+  the backdrop participates only when its second-target bit is set. `BLDALPHA`
+  EVA/EVB values 17..31 clamp to 16/16. Modes 2/3 apply `BLDY` brightness-up/
+  down to the first target. The arithmetic operates on the final 8-bit
+  channels as a stated **Design** approximation of the 5-bit hardware channels
+  and clamps at 255.
+- Mode 0/1 BG maps and tile data are restricted to the first 64 KiB of VRAM;
+  OBJ data uses the documented `0x06010000` 1D allocation and is bounds-checked
+  against the 96 KiB VRAM size. Out-of-range reads return `BgVramOutOfRange`.
 - Modes 3, 4 and 5 retain the existing bitmap paths: Mode 3 is 240x160 direct
   RGB555 at VRAM offset 0; Mode 4 is 240x160 palette indices with frame 0 at 0
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
-  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop. Bits 5/6
-  remain accepted because they do not affect these implemented snapshots.
-- OBJ rendering, other BG layers, OAM, windows, blending, BG0 mosaic,
-  nonidentity affine transforms and scanline effects remain absent. Unsupported
-  registers still fail through the I/O bus rather than being treated as no-ops.
+  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
+- Mosaic, 2D OBJ tile mapping, OBJ double-size affine sprites, window 1,
+  nonidentity bitmap/affine combinations and scanline effects remain absent.
+  Unsupported registers or layers fail explicitly rather than being treated as
+  no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output
@@ -608,7 +886,20 @@ does not write PC and does not itself end the block.
   block and is not followed statically; a false condition still makes its
   fallthrough discoverable. The same applies to ARM `LDM` with PC and Thumb
   `POP PC`. This prevents translating instructions that are only reachable
-  through a dynamic computed target. RAM is never discovered or translated.
+  through a dynamic computed target. RAM is never statically discovered or
+  followed. The separate trace-seeded mode below may translate observed
+  work-RAM instructions only as sealed, live-guarded single-instruction blocks.
+- Trace seeding (`aot build --trace`) is an explicit, bounded alternative to
+  static discovery. A one-time reference trace supplies `(address, state, raw
+  encoding)` seeds. ROM seeds are decoded from the immutable cartridge image and
+  a stale word is a hard error. Work-RAM seeds become sealed one-instruction
+  blocks: the generated dispatcher re-reads the live encoding at the seeded
+  address and calls the native block only when it exactly matches the captured
+  word. Any mismatch uses the reference interpreter with a fresh fetch/decode
+  and is counted as a fallback. Sealed blocks never span more than one
+  instruction, never embed a RAM or ROM snapshot, and never cause follow-on RAM
+  discovery. This is profile-guided translation of an observed path, not
+  general RAM translation or a whole-ROM coverage claim.
 - A typed SWI terminates its block and queues the known next-instruction
   continuation, because a supported HLE service returns there. `DiscoveryStats`
   counts SWIs separately. Native emission calls the framed

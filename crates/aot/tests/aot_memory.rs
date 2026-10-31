@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::display::{HEIGHT, Image, WIDTH};
@@ -360,4 +360,74 @@ fn native_memory_fixture_uses_direct_widths_and_matches_hand_expected_state() {
     assert_eq!(report.image_width, WIDTH);
     assert_eq!(report.image_height, HEIGHT);
     assert_eq!(report.image_sha256, expected_image.sha256_hex());
+}
+
+#[test]
+fn native_palette_mirror_fixture_matches_independent_alias_expectations() {
+    let mut rom = vec![0u8; 0x200];
+    let words = [
+        ldr_literal(0, 0x00, 0x40), // r0 = PALETTE_BASE
+        ldr_literal(1, 0x04, 0x44), // r1 = 0xAABBCCDD
+        str_imm(1, 0, 0x10),
+        ldr_imm(2, 0, 0x10),
+        ldr_literal(3, 0x10, 0x48), // r3 = PALETTE_BASE+0x400
+        ldr_imm(4, 3, 0x10),
+        0xEAFF_FFFE, // B .
+    ];
+    for (index, word) in words.iter().enumerate() {
+        rom[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    for (index, word) in [PALETTE_BASE, 0xAABB_CCDDu32, PALETTE_BASE + 0x400]
+        .iter()
+        .enumerate()
+    {
+        let offset = 0x40 + index * 4;
+        rom[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    let cart = finish(rom, b"GBA-PMIR\0");
+    let artifact = aot::discover(&cart, ENTRY, false, aot::Limits::default())
+        .expect("discover palette mirror fixture");
+    let budget = 6;
+    let source =
+        aot::emit_native_module(&cart, &artifact, budget).expect("emit palette mirror fixture");
+
+    let mut expected_cpu = Cpu::direct_entry();
+    expected_cpu.initialize_bios_stacks();
+    expected_cpu.set_pc(ENTRY);
+    let mut expected_bus = Bus::new(cart.clone());
+    assert_eq!(
+        interpret::run_budget(&mut expected_cpu, &mut expected_bus, budget),
+        Ok(budget)
+    );
+    assert_eq!(expected_cpu.reg(2), 0xAABB_CCDD);
+    assert_eq!(expected_cpu.reg(4), 0xAABB_CCDD);
+
+    let mut independent_bus = Bus::new(cart.clone());
+    independent_bus
+        .write32(PALETTE_BASE + 0x10, 0xAABB_CCDD)
+        .expect("independent palette store");
+    assert_eq!(
+        independent_bus.read32(PALETTE_BASE + 0x410),
+        Ok(0xAABB_CCDD)
+    );
+
+    let temp = TempDir::new("palette-mirror");
+    let path = temp.path().join("fixture.gba");
+    std::fs::write(&path, cart.bytes()).expect("write synthetic fixture");
+    let harness = NativeHarness::build(&source, &temp.path().join("harness"))
+        .expect("build palette mirror harness");
+    let report = harness.run(&path).expect("run palette mirror harness");
+    assert_eq!(report.regs[2], 0xAABB_CCDD);
+    assert_eq!(report.regs[4], 0xAABB_CCDD);
+    assert_eq!(report.budget_used, budget);
+    assert_eq!(report.fallbacks, 0);
+    assert!(
+        report
+            .matches_reference(&expected_cpu, &expected_bus, budget)
+            .expect("parity")
+    );
+    assert_eq!(
+        report.bus_sha256,
+        sha256::hex(&independent_bus.state_digest())
+    );
 }

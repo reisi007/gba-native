@@ -9,8 +9,8 @@
 
 use crate::bios::BiosError;
 use crate::bus::{
-    Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE, IWRAM_LEN, OAM_BASE, OAM_LEN,
-    PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
+    BiosWritePolicy, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, IWRAM_BASE, IWRAM_LEN, OAM_BASE,
+    OAM_LEN, PALETTE_BASE, PALETTE_LEN, VRAM_BASE, VRAM_LEN,
 };
 use crate::cpu::Cpu;
 use crate::error::{Error, Result};
@@ -56,7 +56,13 @@ pub(super) fn cpu_set(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         return Ok(());
     }
     let fill = control & FILL_BIT != 0;
-    validate_destination(super::SERVICE_CPU_SET, destination, units, width)?;
+    validate_destination(
+        super::SERVICE_CPU_SET,
+        destination,
+        units,
+        width,
+        bus.bios_write_policy(),
+    )?;
     // A fill reads only the first source unit; a copy reads the whole range.
     let source_units = if fill { 1 } else { units };
     validate_source(bus, super::SERVICE_CPU_SET, source, source_units, width)?;
@@ -81,7 +87,13 @@ fn validate_cpu_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
         return Ok(());
     }
     let fill = control & FILL_BIT != 0;
-    validate_destination(super::SERVICE_CPU_SET, destination, units, width)?;
+    validate_destination(
+        super::SERVICE_CPU_SET,
+        destination,
+        units,
+        width,
+        bus.bios_write_policy(),
+    )?;
     validate_source(
         bus,
         super::SERVICE_CPU_SET,
@@ -112,7 +124,13 @@ pub(super) fn cpu_fast_set(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         return Ok(());
     }
     let fill = control & FILL_BIT != 0;
-    validate_destination(super::SERVICE_CPU_FAST_SET, destination, units, 4)?;
+    validate_destination(
+        super::SERVICE_CPU_FAST_SET,
+        destination,
+        units,
+        4,
+        bus.bios_write_policy(),
+    )?;
     let source_units = if fill { 1 } else { units };
     validate_source(bus, super::SERVICE_CPU_FAST_SET, source, source_units, 4)?;
     copy_or_fill(bus, source, destination, units, 4, fill)
@@ -136,7 +154,13 @@ fn validate_cpu_fast_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
         return Ok(());
     }
     let fill = control & FILL_BIT != 0;
-    validate_destination(super::SERVICE_CPU_FAST_SET, destination, units, 4)?;
+    validate_destination(
+        super::SERVICE_CPU_FAST_SET,
+        destination,
+        units,
+        4,
+        bus.bios_write_policy(),
+    )?;
     validate_source(
         bus,
         super::SERVICE_CPU_FAST_SET,
@@ -150,8 +174,9 @@ fn validate_cpu_fast_set(cpu: &Cpu, bus: &Bus) -> Result<()> {
 /// top 512 bytes of IWRAM, reset the modelled I/O groups and always force blank
 /// via DISPCNT=0080h.
 ///
-/// Group 5 (SIO) has no modelled state, group 6 resets the modelled sound
-/// register storage, and group 7 resets exactly the modelled "other I/O" set.
+/// Group 5 clears the modelled serial register storage and selects the
+/// documented general-purpose mode, group 6 resets the modelled sound register
+/// storage, and group 7 resets exactly the modelled "other I/O" set.
 /// Bits 8..31 carry no documented meaning and are ignored, matching the
 /// documented BIOS behaviour instead of rejecting them.
 pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
@@ -173,6 +198,9 @@ pub(super) fn register_ram_reset(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
         // Zero-filling OAM does not by itself disable objects; DISPCNT bit 6
         // (OBJ enable) and the OAM attribute state are separate.
         fill_halfwords(bus, OAM_BASE, OAM_LEN)?;
+    }
+    if flags & 0x20 != 0 {
+        bus.reset_group5_sio();
     }
     if flags & 0x40 != 0 {
         bus.reset_group6_sound();
@@ -238,7 +266,13 @@ fn require_alignment(service: u8, addr: u32, align: u32) -> Result<()> {
     }
 }
 
-fn validate_source(bus: &Bus, service: u8, addr: u32, units: u32, width: u32) -> Result<()> {
+pub(super) fn validate_source(
+    bus: &Bus,
+    service: u8,
+    addr: u32,
+    units: u32,
+    width: u32,
+) -> Result<()> {
     let (start, end) = expanded_range(service, addr, units, width)?;
     if start < BIOS_END {
         // Fail closed instead of reading a non-existent BIOS or silently
@@ -269,8 +303,21 @@ fn validate_source(bus: &Bus, service: u8, addr: u32, units: u32, width: u32) ->
     Ok(())
 }
 
-fn validate_destination(service: u8, addr: u32, units: u32, width: u32) -> Result<()> {
+fn validate_destination(
+    service: u8,
+    addr: u32,
+    units: u32,
+    width: u32,
+    bios_policy: BiosWritePolicy,
+) -> Result<()> {
     let (start, end) = expanded_range(service, addr, units, width)?;
+    // A destination wholly inside the 16 KiB BIOS mask ROM is not writable
+    // storage, but hardware does not raise a CPU-visible error either: the
+    // stores have no effect. Only the explicit opt-in accepts that documented
+    // behavior; the default policy stays fail-closed.
+    if bios_policy == BiosWritePolicy::RomWritesDropped && start < BIOS_END && end < BIOS_END {
+        return Ok(());
+    }
     let region = region_of(start).ok_or(Error::Bios(BiosError::UnsupportedDestination {
         service,
         addr: start,

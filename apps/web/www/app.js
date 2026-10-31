@@ -7,7 +7,8 @@
 //     required because a canvas context type cannot change).
 //   - One automatic WebGPU -> WebGL2 compatibility retry, recorded once.
 //   - Restart budget: at most three explicit restarts per 30 seconds.
-// No ROM, save, upload, remote asset or game-input path exists here.
+// No ROM, retail save data, upload, remote asset or game-input path exists
+// here; the save panel is a host-side library for synthetic backup images.
 
 import init, { poll_gpu_status, set_status_sink, start } from "./pkg/gba_native_web.js";
 import {
@@ -21,6 +22,16 @@ import {
   restoreFallbackNotice,
   statusForFallbackPage,
 } from "./lifecycle.mjs";
+import { SYNTHETIC_SAVE_ROM, SaveStore, validSlotName } from "./saves.mjs";
+import {
+  BUTTONS,
+  bindingLabel,
+  buttonForCode,
+  loadSettings,
+  maskForButtons,
+  normaliseSettings,
+  saveSettings,
+} from "./input.mjs";
 const POLL_MS = 500;
 
 const STATE_LABEL = {
@@ -504,4 +515,447 @@ async function loseContextWhenReady() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Windowed GBA shell: touch/pointer buttons, key bindings, fullscreen and the
+// persisted settings page. This layer maps documented KEYINPUT bits only; it
+// never uploads or reads cartridge data.
+
+const inputState = {
+  settings: loadSettings(window.localStorage),
+  pressed: new Set(),
+};
+
+function persistInputSettings() {
+  saveSettings(window.localStorage, inputState.settings);
+}
+
+function inputMask() {
+  return maskForButtons(inputState.pressed);
+}
+
+function renderInputStatus() {
+  const status = byId("input-status");
+  if (!status) return;
+  const mask = inputMask();
+  status.dataset.mask = String(mask);
+  status.textContent =
+    inputState.pressed.size === 0
+      ? "input: released"
+      : `input: ${[...inputState.pressed].join(" + ")} (0x${mask.toString(16).padStart(4, "0")})`;
+}
+
+function setButtonVisual(button, active) {
+  for (const element of document.querySelectorAll(`[data-gba-button="${button}"]`)) {
+    element.classList.toggle("is-active", active);
+    element.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function pressButton(button) {
+  if (!button) return;
+  inputState.pressed.add(button);
+  setButtonVisual(button, true);
+  renderInputStatus();
+}
+
+function releaseButton(button) {
+  if (!button) return;
+  inputState.pressed.delete(button);
+  setButtonVisual(button, false);
+  renderInputStatus();
+}
+
+function releaseAllButtons() {
+  for (const button of [...inputState.pressed]) releaseButton(button);
+}
+
+function renderSettings() {
+  const settings = inputState.settings;
+  const list = byId("binding-list");
+  if (list) {
+    list.replaceChildren();
+    for (const button of BUTTONS) {
+      const term = document.createElement("dt");
+      term.className = "font-medium";
+      term.textContent = button;
+      const value = document.createElement("dd");
+      value.className = "opacity-80 break-words";
+      value.textContent = bindingLabel(button, settings.bindings);
+      list.append(term, value);
+    }
+  }
+  byId("touch-toggle").checked = settings.touchControls;
+  byId("integer-toggle").checked = settings.integerScaling;
+  byId("fullscreen-toggle").checked = settings.fullscreen;
+  byId("volume-range").value = String(settings.masterVolume);
+  byId("volume-value").textContent = String(settings.masterVolume);
+  byId("mute-toggle").checked = settings.muted;
+  document.body.classList.toggle("touch-controls", settings.touchControls);
+  document.body.classList.toggle("integer-scaling", settings.integerScaling);
+  byId("settings-button").setAttribute(
+    "aria-expanded",
+    byId("settings-panel").hidden ? "false" : "true",
+  );
+}
+
+function showSettings(visible) {
+  const panel = byId("settings-panel");
+  panel.hidden = !visible;
+  byId("settings-button").setAttribute("aria-expanded", visible ? "true" : "false");
+  if (visible) panel.scrollIntoView({ block: "nearest" });
+}
+
+async function toggleFullscreen() {
+  const screen = byId("screen-slot");
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await screen.requestFullscreen();
+    }
+  } catch {
+    // Headless browsers and embedding contexts can deny the Fullscreen API.
+    // Keep a CSS-only windowed/fullscreen switch so the layout is testable.
+    document.body.classList.toggle("input-fullscreen");
+    inputState.settings.fullscreen = document.body.classList.contains("input-fullscreen");
+    persistInputSettings();
+    renderSettings();
+  }
+}
+
+let audioContext = null;
+
+function audioGain() {
+  const settings = inputState.settings;
+  return settings.muted ? 0 : settings.masterVolume / 100;
+}
+
+function playTestTone() {
+  const Context = window.AudioContext ?? window.webkitAudioContext;
+  if (!Context) return false;
+  audioContext ??= new Context();
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = "square";
+  oscillator.frequency.value = 440;
+  gain.gain.value = 0.2 * audioGain();
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.4);
+  return true;
+}
+
+// Play mono signed 16-bit PCM from the wasm AOT module's run_rom_audio output.
+// The caller owns the sample source and pacing; this only schedules one buffer.
+function playPcm(samples, sampleRate = 32768) {
+  const Context = window.AudioContext ?? window.webkitAudioContext;
+  if (!Context || !samples || samples.length === 0) return false;
+  audioContext ??= new Context();
+  const buffer = audioContext.createBuffer(1, samples.length, sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < samples.length; index += 1) {
+    const value = Number(samples[index]) / 32768;
+    channel[index] = Math.max(-1, Math.min(1, value));
+  }
+  const source = audioContext.createBufferSource();
+  const gain = audioContext.createGain();
+  source.buffer = buffer;
+  gain.gain.value = audioGain();
+  source.connect(gain);
+  gain.connect(audioContext.destination);
+  source.start();
+  return true;
+}
+
+const saveStore = new SaveStore();
+let saveStatus = "";
+
+function saveSlots() {
+  return saveStore.list(SYNTHETIC_SAVE_ROM.sha);
+}
+
+function renderSaves() {
+  const list = byId("save-list");
+  list.replaceChildren();
+  const slots = saveSlots();
+  for (const slot of slots) {
+    const item = document.createElement("li");
+    item.className = "flex flex-wrap items-center gap-2";
+    item.dataset.slot = slot.name;
+    const label = document.createElement("span");
+    label.textContent = `${slot.name} · ${slot.bytes.length} B${slot.default ? " · default" : ""}`;
+    if (slot.default) label.className = "font-semibold";
+    const use = document.createElement("button");
+    use.type = "button";
+    use.className = "btn btn-xs btn-outline";
+    use.textContent = "Use";
+    use.addEventListener("click", () => {
+      saveStore.setDefault(SYNTHETIC_SAVE_ROM.sha, slot.name);
+      saveStatus = `default=${slot.name}`;
+      renderSaves();
+    });
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "btn btn-xs btn-ghost";
+    exportButton.textContent = "Export";
+    exportButton.addEventListener("click", () => {
+      exportSave(slot.name);
+    });
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "btn btn-xs btn-error btn-outline";
+    removeButton.textContent = "Delete";
+    removeButton.addEventListener("click", () => {
+      const next = saveStore.remove(SYNTHETIC_SAVE_ROM.sha, slot.name);
+      saveStatus = `deleted=${slot.name} default=${next}`;
+      renderSaves();
+    });
+    item.append(label, use, exportButton, removeButton);
+    list.append(item);
+  }
+  byId("save-status").textContent =
+    saveStatus || (slots.length === 0 ? "No save slots yet." : `${slots.length} slot(s)`);
+}
+
+function exportSave(name) {
+  const slot = saveSlots().find((candidate) => candidate.name === name);
+  if (!slot) {
+    saveStatus = `unknown slot ${name}`;
+    renderSaves();
+    return false;
+  }
+  const url = URL.createObjectURL(new Blob([slot.bytes], { type: "application/octet-stream" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${SYNTHETIC_SAVE_ROM.name}-${name}.sav`;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  saveStatus = `exported=${name}`;
+  renderSaves();
+  return true;
+}
+
+function importSaveBytes(name, bytes) {
+  if (!validSlotName(name)) {
+    saveStatus = "invalid slot name";
+    renderSaves();
+    return false;
+  }
+  try {
+    saveStore.save(SYNTHETIC_SAVE_ROM.sha, name, bytes);
+  } catch (error) {
+    saveStatus = String(error.message ?? error);
+    renderSaves();
+    return false;
+  }
+  saveStatus = `imported=${name}`;
+  renderSaves();
+  return true;
+}
+
+async function importSaveFile() {
+  const file = byId("save-file").files?.[0];
+  if (!file) {
+    saveStatus = "choose a .sav file";
+    renderSaves();
+    return false;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return importSaveBytes(byId("save-name").value.trim(), bytes);
+}
+
+function setupInputUi() {
+  renderSettings();
+  renderInputStatus();
+  renderSaves();
+
+  byId("settings-button").addEventListener("click", () => {
+    showSettings(byId("settings-panel").hidden);
+  });
+  byId("close-settings").addEventListener("click", () => showSettings(false));
+  byId("fullscreen-button").addEventListener("click", () => {
+    void toggleFullscreen();
+  });
+  byId("apply-fullscreen").addEventListener("click", () => {
+    void toggleFullscreen();
+  });
+  byId("fullscreen-toggle").addEventListener("change", (event) => {
+    inputState.settings.fullscreen = event.target.checked;
+    persistInputSettings();
+    void toggleFullscreen();
+  });
+  byId("touch-toggle").addEventListener("change", (event) => {
+    inputState.settings.touchControls = event.target.checked;
+    persistInputSettings();
+    if (!event.target.checked) releaseAllButtons();
+    renderSettings();
+  });
+  byId("integer-toggle").addEventListener("change", (event) => {
+    inputState.settings.integerScaling = event.target.checked;
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("volume-range").addEventListener("input", (event) => {
+    inputState.settings.masterVolume = Number(event.target.value);
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("mute-toggle").addEventListener("change", (event) => {
+    inputState.settings.muted = event.target.checked;
+    persistInputSettings();
+    renderSettings();
+  });
+  byId("test-tone").addEventListener("click", () => {
+    void playTestTone();
+  });
+  byId("save-import").addEventListener("click", () => {
+    void importSaveFile();
+  });
+  byId("save-export").addEventListener("click", () => {
+    const name = saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha);
+    if (name) exportSave(name);
+  });
+  byId("reset-settings").addEventListener("click", () => {
+    inputState.settings = normaliseSettings();
+    persistInputSettings();
+    renderSettings();
+  });
+
+  document.addEventListener("fullscreenchange", () => {
+    const active = document.fullscreenElement !== null;
+    document.body.classList.toggle("input-fullscreen", active);
+    inputState.settings.fullscreen = active;
+    persistInputSettings();
+    byId("fullscreen-button").textContent = active ? "Windowed" : "Fullscreen";
+    renderSettings();
+  });
+
+  const isFormControl = (target) =>
+    ["SELECT", "INPUT", "TEXTAREA", "BUTTON", "A"].includes(target?.tagName ?? "");
+
+  const formControlHasFocus = () => isFormControl(document.activeElement);
+
+  // Keep keyboard-only backend selection deterministic across browser
+  // platforms. Native select popups differ (some open on Alt+ArrowDown and
+  // leave the value unchanged in headless mode), so a focused select steps its
+  // own value on ArrowUp/ArrowDown and commits immediately. Enter is swallowed
+  // because the value is already committed; other native keys still work.
+  const backendSelect = byId("backend-select");
+  backendSelect.addEventListener("keydown", (event) => {
+    if (event.altKey) {
+      event.preventDefault();
+      return;
+    }
+    if (event.code === "ArrowDown" || event.code === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.code === "ArrowDown" ? 1 : -1;
+      const next = Math.min(
+        backendSelect.options.length - 1,
+        Math.max(0, backendSelect.selectedIndex + delta),
+      );
+      backendSelect.selectedIndex = next;
+      backendSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    if (event.code === "Enter") {
+      event.preventDefault();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (isFormControl(event.target) || formControlHasFocus()) return;
+    if (event.code === "F1") {
+      event.preventDefault();
+      showSettings(byId("settings-panel").hidden);
+      return;
+    }
+    if (event.code === "F11" || (event.code === "Enter" && event.altKey)) {
+      event.preventDefault();
+      void toggleFullscreen();
+      return;
+    }
+    if (event.code === "KeyM") {
+      event.preventDefault();
+      inputState.settings.muted = !inputState.settings.muted;
+      persistInputSettings();
+      renderSettings();
+      return;
+    }
+    if (event.code === "Minus" || event.code === "Equal") {
+      event.preventDefault();
+      const delta = event.code === "Minus" ? -10 : 10;
+      inputState.settings.masterVolume = Math.min(
+        100,
+        Math.max(0, inputState.settings.masterVolume + delta),
+      );
+      persistInputSettings();
+      renderSettings();
+      return;
+    }
+    const button = buttonForCode(event.code, inputState.settings.bindings);
+    if (button) {
+      event.preventDefault();
+      pressButton(button);
+    }
+  });
+  document.addEventListener("keyup", (event) => {
+    if (isFormControl(event.target) || formControlHasFocus()) return;
+    const button = buttonForCode(event.code, inputState.settings.bindings);
+    if (button) {
+      event.preventDefault();
+      releaseButton(button);
+    }
+  });
+  window.addEventListener("blur", releaseAllButtons);
+
+  for (const element of document.querySelectorAll("[data-gba-button]")) {
+    const button = element.dataset.gbaButton;
+    element.setAttribute("aria-pressed", "false");
+    element.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      element.setPointerCapture?.(event.pointerId);
+      pressButton(button);
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      element.addEventListener(name, (event) => {
+        event.preventDefault?.();
+        releaseButton(button);
+      });
+    }
+    element.addEventListener("pointerleave", () => releaseButton(button));
+    element.addEventListener("contextmenu", (event) => event.preventDefault());
+  }
+
+  window.__gbaNative.input = {
+    mask: inputMask,
+    pressed: () => [...inputState.pressed],
+    settings: () => JSON.parse(JSON.stringify(inputState.settings)),
+    press: pressButton,
+    release: releaseButton,
+    showSettings,
+    fullscreen: () => document.fullscreenElement !== null || document.body.classList.contains("input-fullscreen"),
+  };
+  window.__gbaNative.saves = {
+    digest: SYNTHETIC_SAVE_ROM.sha,
+    list: () => saveSlots().map((slot) => ({ name: slot.name, bytes: slot.bytes.length, default: slot.default })),
+    defaultSlot: () => saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha),
+    importBytes: (name, bytes) => importSaveBytes(name, Uint8Array.from(bytes)),
+    use: (name) => saveStore.setDefault(SYNTHETIC_SAVE_ROM.sha, name),
+    remove: (name) => saveStore.remove(SYNTHETIC_SAVE_ROM.sha, name),
+    exportDefault: () => exportSave(saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha)),
+  };
+  window.__gbaNative.audio = {
+    settings: () => ({
+      masterVolume: inputState.settings.masterVolume,
+      muted: inputState.settings.muted,
+      gain: audioGain(),
+    }),
+    playTestTone,
+    playPcm,
+    contextState: () => audioContext?.state ?? "closed",
+  };
+}
+
+setupInputUi();
 main();

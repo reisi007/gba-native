@@ -377,4 +377,8 @@ fn mov_mvn_and_test_ops_keep_their_encoding_restrictions() {
         decode_arm(0, dp(10, true, 2, 15, 3)).is_err(),
         "CMP P-variant"
     );
+    assert!(
+        decode_arm(0, dp(10, true, 15, 15, 0)).is_err(),
+        "CMP with PC in its reserved Rd field remains unsupported"
+    );
 }

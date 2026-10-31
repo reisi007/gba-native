@@ -34,3 +34,102 @@ jobs:
 
       - name: Full gate
         run: ./scripts/full.sh
+
+  # Synthetic input-tester ROM: build it for the Linux host through native AOT,
+  # run it with a committed input script and compare the actual frame with the
+  # committed expected frame. The visual step renders both frames in Chromium
+  # through the pinned Playwright tooling and compares every pixel. No retail
+  # ROM, BIOS image or save data is involved.
+  linux-input-tester:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Provision pinned Node, npm and Playwright Chromium
+        run: ./scripts/web-browsers-install.sh
+
+      - name: Native input-tester, Linux AOT and visual comparison
+        run: ./scripts/input-tester.sh --visual
+
+      - name: Native save-tester, AOT persistence and CLI slots
+        run: ./scripts/save-tester.sh
+
+      - name: Native playback through a fake player on PATH
+        run: ./scripts/play-tester.sh
+
+      - name: Upload input-tester evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-tester-linux
+          path: |
+            output/input-tester.*/
+            output/save-tester.*/
+            output/play-tester.*/
+          if-no-files-found: warn
+
+  # Windows host execution of the same audio-enabled synthetic AOT harness. The
+  # committed fixture is regenerated and run with --audio; no retail ROM, BIOS
+  # image or save data is read. Linux and macOS already execute this gate, so
+  # this closes the Windows execution gap without making a retail-game claim.
+  windows-input-tester:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Native input-tester and guest audio on Windows
+        shell: bash
+        run: ./scripts/input-tester.sh
+
+      - name: Native playback through a fake player on PATH
+        shell: bash
+        run: ./scripts/play-tester.sh
+
+      - name: Upload input-tester evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-tester-windows
+          path: |
+            output/input-tester.*/
+            output/play-tester.*/
+          if-no-files-found: warn
+
+  # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets
+  # below compile the generated harness for the *installed host* triple, so this
+  # job is only meaningful on an Apple-silicon runner. The host check makes an
+  # unexpected runner fail loudly instead of silently testing another triple.
+  # Both targets use synthetic fixtures only; no retail ROM or BIOS image is
+  # read, and this is not a cross-compilation or platform-support claim.
+  macos-arm-native-aot:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Require an aarch64-apple-darwin host
+        run: |
+          rustc -vV
+          cargo -vV
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          if [ "$host" != "aarch64-apple-darwin" ]; then
+            echo "::error::Expected host aarch64-apple-darwin but rustc reports '$host'. This job requires an arm64 macOS runner and would otherwise test a different triple."
+            exit 1
+          fi
+
+      - name: Target-profile synthetic native AOT build
+        run: cargo test --offline --locked -p gba-native-aot --test aot_target_build
+
+      - name: Synthetic CLI AOT build contract
+        run: cargo test --offline --locked -p gba-native --test cli_aot_build

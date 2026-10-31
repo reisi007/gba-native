@@ -1,0 +1,6 @@
+# Byte-pinned synthetic fixtures must survive a Windows checkout unchanged.
+# The PPM is compared byte for byte and the input script is hashed indirectly
+# through the expected frame pins in scripts/input-tester.sh.
+tests/roms/synthetic/*.ppm -text
+tests/roms/synthetic/*.input text eol=lf
+tests/roms/synthetic/*.gba binary

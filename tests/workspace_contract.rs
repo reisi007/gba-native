@@ -1,17 +1,11 @@
 //! Contracts for the three-package default workspace and isolated frontends.
-//! Uses fresh offline metadata/inventories and checks CLI behavior from an unrelated cwd.
-
+use gba_native::{aot, bios, bus, cart, cpu, decode, demo, display, error, interpret, ir, render};
+use gba_native::{memory, semantics, sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
-
-use gba_native::{aot, bios, bus, cart, cpu, decode, demo, display, error, interpret, ir, render};
-use gba_native::{memory, semantics, sha256};
-
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
 struct TempDir(PathBuf);
-
 impl TempDir {
     fn new(tag: &str) -> Self {
         let sequence = NEXT_TEMP.fetch_add(1, Ordering::SeqCst);
@@ -27,7 +21,6 @@ impl TempDir {
         &self.0
     }
 }
-
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -65,7 +58,6 @@ fn root_facade_preserves_legacy_paths_and_error_identity() {
     assert_eq!(image.sha256_hex(), demo::expected_demo_image().sha256_hex());
     let scaled = render::scale(&image, 480, 320, render::Backend::Nearest).expect("facade scale");
     assert!(!render::to_ppm(&scaled).is_empty());
-
     let raw = 0xE1A0_0000;
     assert_eq!(
         decode::decode_arm(demo::ENTRY, raw)
@@ -82,11 +74,9 @@ fn root_facade_preserves_legacy_paths_and_error_identity() {
     let _ = bios::SERVICE_DIV;
     let _: ir::Psr = ir::Psr::Cpsr;
 }
-
 fn op_of(raw: u32) -> ir::Op {
     decode::decode_arm(0x0800_0000, raw).expect("decode").op
 }
-
 #[test]
 fn offline_default_graph_inventory_and_bare_cli_contract() {
     let temp = TempDir::new("offline");
@@ -199,65 +189,86 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 337, "full workspace test inventory changed");
-
-    // Exact inventory retains prior families and includes the Mode 0 BG0 slice,
-    // WASM-module tests, synthetic CLI run-snapshot regressions, host-input,
-    // mirrored-RAM, ignored-I/O, host-triggered Sound FIFO DMA, VCOUNT
-    // byte-lane, latched pending-IRQ run-budget and synthetic BIOS data-policy
-    // regressions.
+    assert_eq!(total, 567, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
     let core_targets = [
         ("arm_alu", 6),
-        ("arm_control", 9),
+        ("arm_control", 10),
         ("arm_halfword", 5),
         ("arm_halfword_extended", 8),
+        ("arm_multiply_long", 6),
         ("arm_memory", 8),
         ("arm_shift", 4),
-        ("arm_block", 9),
+        ("arm_block", 10),
+        ("arm_swap", 5),
+        ("exception_return", 7),
         ("bios_arithmetic", 6),
+        ("bios_affine", 2),
+        ("bios_decompress", 2),
         ("bios_dispatch", 2),
         ("bios_memory_copy", 14),
         ("bios_reset", 7),
-        ("bus", 15),
+        ("bus", 18),
+        ("mask_rom_and_serial", 12),
         ("cartridge", 6),
-        ("cpu", 13),
+        ("cpu", 14),
         ("demo", 3),
         ("display", 5),
+        ("display_layers", 8),
         ("display_mode0", 8),
+        ("input_tester_fixture", 3),
         ("isa_golden", 4),
+        ("irq_dispatch", 6),
+        ("local_name_entry", 1),
         ("psr_banking", 6),
+        ("local_emerald_save", 1),
         ("psr_field_mask", 4),
         ("psr_transfer", 10),
+        ("save_tester_fixture", 2),
         ("sound_dma", 7),
         ("swi_decode", 3),
         ("swi_execution", 10),
         ("thumb_alu", 7),
-        ("thumb_block", 6),
+        ("timer_guest", 2),
+        ("timer_model", 16),
+        ("thumb_block", 8),
         ("thumb_control", 5),
         ("thumb_memory", 7),
     ];
     let aot_targets = [
-        ("aot_alu", 2),
-        ("aot_block", 3),
+        ("aot_alu", 3),
+        ("aot_block", 5),
+        ("aot_block_unaligned", 2),
+        ("aot_fallback", 2),
+        ("aot_irq", 1),
         ("aot_control", 4),
         ("aot_halfword", 1),
-        ("aot_memory", 2),
+        ("aot_memory", 3),
+        ("aot_multiply_long", 1),
         ("aot_native", 5),
+        ("aot_exception_return", 2),
         ("aot_psr", 3),
         ("aot_ram", 1),
         ("aot_swi", 2),
         ("aot_swi_errors", 5),
         ("aot_swi_services", 1),
-        ("aot_target_build", 4),
+        ("aot_swap", 2),
+        ("aot_target_build", 5),
         ("aot_thumb_alu", 1),
+        ("aot_timer", 2),
+        ("aot_video_memory", 1),
     ];
     let root_targets = [
         ("cli_aot_build", 2),
+        ("cli_audio", 3),
         ("cli_output", 5),
-        ("cli_run", 7),
+        ("cli_play", 3),
+        ("cli_run", 9),
+        ("cli_run_input", 4),
+        ("cli_run_options", 4),
+        ("cli_save", 2),
         ("frontend_gates", 4),
         ("quality_counter", 10),
         ("scripts", 5),
@@ -266,8 +277,8 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 42);
-    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 22);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 138);
+    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 31);
     baseline += assert_target_count(
         &root,
         &target,
@@ -275,12 +286,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         &root_manifest,
         "--bin",
         "gba-native",
-        5,
+        9,
     );
-    assert_eq!(baseline, 333, "selected package test inventory changed");
-
-    // Bare/default-run CLI from the repository root, then manifest invocations
-    // from an unrelated working directory that owns all generated output.
+    assert_eq!(baseline, 559, "selected package test inventory changed");
+    // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,
         &target,
@@ -451,7 +460,6 @@ fn assert_target_count(
     );
     count
 }
-
 #[test]
 fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     let root = repo_root();
@@ -474,7 +482,6 @@ fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     assert!(lock.contains("name = \"pixels\"\nversion = \"0.17.2\""));
     assert!(lock.contains("name = \"winit\"\nversion = \"0.30.13\""));
     assert!(lock.contains("name = \"wgpu\"\nversion = \"29.0.4\""));
-
     let web_manifest =
         std::fs::read_to_string(root.join("apps/web/Cargo.toml")).expect("browser manifest");
     assert!(web_manifest.contains("name = \"gba-native-web\""));
@@ -485,7 +492,6 @@ fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
     );
     assert!(!web_manifest.contains("gba-native-aot"));
     assert!(!web_manifest.contains("package = \"gba-native\""));
-
     let web_lock = std::fs::read_to_string(root.join("apps/web/Cargo.lock")).expect("browser lock");
     assert!(web_lock.contains("name = \"gba-native-core\""));
     assert!(web_lock.contains("name = \"gba-native-web\""));

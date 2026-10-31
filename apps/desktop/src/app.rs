@@ -4,19 +4,24 @@
 //! to RGBA and copied into the GPU texture. Redraws re-upload that static image;
 //! this is not a frame loop, emulator runtime or playable frontend.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use gba_native::input::{Button, Key, Settings};
 use pixels::wgpu::Color;
 use pixels::{Pixels, PixelsBuilder, ScalingMode, SurfaceTexture};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::keyboard::ModifiersState;
+use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::cli::Options;
 use crate::presentation::{RgbaImage, compute_viewport, synthetic_demo_image};
+use crate::{settings, ui};
+
+mod input;
 
 pub const TITLE: &str = "gba-native synthetic GPU presentation (not playable retail)";
 
@@ -28,11 +33,22 @@ const MAX_SURFACE_PIXELS: u64 = 16 * 1024 * 1024;
 
 pub fn run(options: Options) -> Result<(), String> {
     let image = synthetic_demo_image().map_err(|error| error.to_string())?;
+    let settings_path = settings::path(options.settings.as_deref());
+    let (mut settings, warning) = settings::load(&settings_path);
+    if options.fullscreen {
+        settings.fullscreen = true;
+    }
+    if let Some(warning) = warning {
+        eprintln!("frontend: {warning}");
+    }
+    if let Some(path) = &options.audio_out {
+        crate::audio_out::write_tone(path, &settings)?;
+    }
     let event_loop =
         EventLoop::new().map_err(|error| format!("cannot create window event loop: {error}"))?;
     event_loop.set_control_flow(ControlFlow::Wait);
 
-    let mut frontend = Frontend::new(options, image);
+    let mut frontend = Frontend::new(options, image, settings, settings_path);
     event_loop
         .run_app(&mut frontend)
         .map_err(|error| format!("window event loop failed: {error}"))?;
@@ -42,6 +58,14 @@ pub fn run(options: Options) -> Result<(), String> {
 struct Frontend {
     options: Options,
     image: RgbaImage,
+    settings: Settings,
+    settings_path: PathBuf,
+    show_settings: bool,
+    input_mask: u16,
+    pressed_keys: Vec<Key>,
+    pointer_button: Option<Button>,
+    pointer: (f32, f32),
+    modifiers: ModifiersState,
     window: Option<Arc<Window>>,
     pixels: Option<Pixels<'static>>,
     adapter: Option<String>,
@@ -54,10 +78,18 @@ struct Frontend {
 }
 
 impl Frontend {
-    fn new(options: Options, image: RgbaImage) -> Self {
+    fn new(options: Options, image: RgbaImage, settings: Settings, settings_path: PathBuf) -> Self {
         Self {
             options,
             image,
+            settings,
+            settings_path,
+            show_settings: false,
+            input_mask: 0,
+            pressed_keys: Vec::new(),
+            pointer_button: None,
+            pointer: (0.0, 0.0),
+            modifiers: ModifiersState::empty(),
             window: None,
             pixels: None,
             adapter: None,
@@ -70,11 +102,34 @@ impl Frontend {
         }
     }
 
+    fn compose(&self) -> RgbaImage {
+        if self.show_settings {
+            ui::settings_page(&self.settings)
+        } else if self.fullscreen() {
+            ui::fullscreen(&self.image)
+        } else {
+            ui::shell(&self.image, self.input_mask)
+        }
+    }
+
+    fn fullscreen(&self) -> bool {
+        self.window
+            .as_ref()
+            .is_some_and(|window| window.fullscreen().is_some())
+            || (self.window.is_none() && self.settings.fullscreen)
+    }
+
+    fn persist_settings(&self) {
+        if let Err(error) = settings::save(&self.settings_path, &self.settings) {
+            eprintln!(
+                "frontend: cannot save settings to {}: {error}",
+                self.settings_path.display()
+            );
+        }
+    }
+
     fn initial_size(&self) -> (u32, u32) {
-        self.options.initial_size.unwrap_or((
-            self.image.width().saturating_mul(3),
-            self.image.height().saturating_mul(3),
-        ))
+        self.options.initial_size.unwrap_or((ui::WIDTH, ui::HEIGHT))
     }
 
     fn request_redraw(&self) {
@@ -91,6 +146,7 @@ impl Frontend {
     }
 
     fn finish(mut self) -> Result<(), String> {
+        self.persist_settings();
         if let Some(message) = self.failure.take() {
             return Err(message);
         }
@@ -112,6 +168,9 @@ impl Frontend {
             .create_window(attributes)
             .map_err(|error| format!("cannot create native window: {error}"))?;
         let window = Arc::new(window);
+        if self.settings.fullscreen {
+            window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
         self.window = Some(Arc::clone(&window));
 
         let size = window.inner_size();
@@ -129,28 +188,28 @@ impl Frontend {
             ));
         }
 
+        let display = self.compose();
         let surface_texture = SurfaceTexture::new(size.width, size.height, window);
-        let mut pixels =
-            PixelsBuilder::new(self.image.width(), self.image.height(), surface_texture)
-                .enable_vsync(true)
-                .build()
-                .map_err(|error| {
-                    format!("GPU initialization failed (adapter, device or surface): {error}")
-                })?;
+        let mut pixels = PixelsBuilder::new(display.width(), display.height(), surface_texture)
+            .enable_vsync(true)
+            .build()
+            .map_err(|error| {
+                format!("GPU initialization failed (adapter, device or surface): {error}")
+            })?;
         pixels.set_scaling_mode(ScalingMode::PixelPerfect);
         pixels.clear_color(Color::BLACK);
 
         let frame = pixels.frame_mut();
-        if frame.len() != self.image.rgba().len() {
+        if frame.len() != display.rgba().len() {
             return Err(format!(
                 "GPU frame buffer is {} bytes, expected {} for {}x{} RGBA",
                 frame.len(),
-                self.image.rgba().len(),
-                self.image.width(),
-                self.image.height()
+                display.rgba().len(),
+                display.width(),
+                display.height()
             ));
         }
-        frame.copy_from_slice(self.image.rgba());
+        frame.copy_from_slice(display.rgba());
 
         self.surface = (size.width, size.height);
         self.adapter = Some(describe_adapter(&pixels));
@@ -164,12 +223,7 @@ impl Frontend {
         let Some(pixels) = &self.pixels else {
             return;
         };
-        let viewport = compute_viewport(
-            self.image.width(),
-            self.image.height(),
-            self.surface.0,
-            self.surface.1,
-        );
+        let viewport = compute_viewport(ui::WIDTH, ui::HEIGHT, self.surface.0, self.surface.1);
         println!("{TITLE}");
         println!(
             "source: synthetic demo {}x{} RGB888, sha256(rgb)={}, budget={} guest instructions \
@@ -178,6 +232,16 @@ impl Frontend {
             self.image.height(),
             self.image.rgb_sha256(),
             self.image.guest_budget()
+        );
+        println!(
+            "ui: windowed_gba_shell={} fullscreen={} settings={} touch_controls={} integer_scaling={} volume={} muted={}",
+            !self.fullscreen(),
+            self.fullscreen(),
+            self.settings_path.display(),
+            self.settings.touch_controls,
+            self.settings.integer_scaling,
+            self.settings.master_volume,
+            self.settings.muted
         );
         println!(
             "{}",
@@ -316,12 +380,6 @@ fn describe_adapter(pixels: &Pixels<'_>) -> String {
     )
 }
 
-fn is_escape(event: &KeyEvent) -> bool {
-    event.state == ElementState::Pressed
-        && !event.repeat
-        && matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape))
-}
-
 impl ApplicationHandler for Frontend {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -347,8 +405,19 @@ impl ApplicationHandler for Frontend {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. } if is_escape(&event) => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.persist_settings();
+                event_loop.exit();
+            }
+            WindowEvent::KeyboardInput { event, .. } => self.handle_key(event_loop, event),
+            WindowEvent::CursorMoved { position, .. } => self.on_cursor(position),
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => self.on_pointer(state),
+            WindowEvent::Touch(touch) => self.on_touch(touch.phase, touch.location),
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::Resized(size) => self.on_resized(event_loop, size),
             WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(window) = &self.window {

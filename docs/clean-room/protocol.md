@@ -108,9 +108,10 @@ retail cartridges**.
   interaction. The core accepts host-injected KEYINPUT state, but has no frame
   scheduler, sampling guarantee or timing claim.
 - No cycle/frame-accurate timing, DMA arbitration, automatic HBlank/VBlank or
-  timer-driven sound request, or DMA-driven IRQ. Immediate DMA and the bounded
-  host-triggered Sound FIFO subset are implemented; this does not establish
-  general DMA coverage. A bounded static Mode 0 BG0 text-background snapshot
+  timer-driven sound request, or DMA-driven IRQ. Timer counters advance only from
+  the nominal three-cycle instruction mapping; that is not hardware timing.
+  Immediate DMA and the bounded host-triggered Sound FIFO subset are implemented;
+  this does not establish general DMA coverage. A bounded static Mode 0 BG0 text-background snapshot
   subset exists alongside bitmap modes; it is not a scanline/frame renderer,
   and other BG layers and OBJ/sprite rendering remain unsupported.
 - No GPU vendor SDK, FSR, DLSS, ML model or custom upscaling shader/integration.

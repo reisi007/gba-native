@@ -62,7 +62,16 @@ tools under root `target/`; do not install global tools or run Cargo inside
 `apps/web/` without a root-level `CARGO_TARGET_DIR`. It is independent of
 `short.sh`/`full.sh` and the default three-package workspace.
 
-CI runs the same two scripts. The optional desktop and browser workflows run
+CI runs the same two scripts. A separate `macos-arm-native-aot` job on
+`macos-latest` asserts an `aarch64-apple-darwin` host and runs the synthetic
+`aot_target_build` and `cli_aot_build` integration targets for ROM-bound native
+AOT. That job builds for its ARM runner host; it is not the x86 cross-target
+test described by the optional local ROM procedure or a platform-support claim.
+CI uses repository-generated synthetic fixtures; the separately documented
+hardware-test ROMs under `tests/roms/gba-tests/` are local-only, read-only test
+inputs and must never be fetched or executed by CI, or included in CI jobs or
+artifacts. Their optional local manual use is documented with the ROMs.
+The optional desktop and browser workflows run
 `scripts/frontend.sh` and `scripts/web.sh --ci` separately. The underlying root
 gates remain:
 
@@ -138,8 +147,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 
 ## Hard boundaries
 
-- Never modify, copy, embed or commit the user-supplied `.gba` file, Nintendo
-  logo bytes, BIOS bytes or save data. The original ROM is read-only input.
+- Never modify, copy, embed or newly commit a user-supplied or vendored `.gba`
+  file, Nintendo logo bytes, BIOS bytes or save data. All such ROMs are
+  read-only inputs. Never copy ROM bytes into generated output or CI artifacts,
+  publish them, or include their binaries in a CI workflow; local manual
+  execution is optional and must follow `tests/roms/gba-tests/README.md`.
   Generated AOT source must not contain a ROM byte array or raw image copy; bind
   SHA-256+length and require a caller-supplied `--rom PATH`.
 - Do not use third-party emulator implementation sources, game decompilations or
@@ -152,7 +164,12 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   dependency on a JIT.
 - Do not silently turn unsupported instructions, I/O, PPU features or vendor
   backends into successful no-ops or nearest-neighbor fallbacks.
-- Guest SWI support is limited to the six documented HLE services. Preserve
+- Guest SWI support is limited to the six documented HLE services by default.
+  The documented LZ77/RL/diff decompression SWIs and
+  `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`) are explicit, host-selected
+  opt-ins (`DecompressionPolicy::DocumentedFormats`,
+  `AffinePolicy::Documented`); do not enable them by default or add further
+  services without a reviewed contract change. Preserve
   explicit errors for unsupported services and SVC-origin nested SWIs; do not
   fetch or synthesize BIOS instruction bytes. The current ascending SVC-frame
   slot order is a bounded design policy, not a Nintendo BIOS compatibility
@@ -161,63 +178,25 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   completed budget as a booted game or a rendered frame from hardware timing.
 - The default third-party dependency set stays empty: the workspace lockfile
   contains only the three internal path packages. Tests must not require network
-  access, commercial ROMs, BIOS files or external crates. The optional
-  `apps/desktop` and `apps/web` packages have their own locks and are excluded
-  from the default graph; browser registry dependencies and Node/npm tools stay
-  outside the root lock and root build.
-- AOT is restricted to immutable ROM bytes. RAM/self-modifying code must always
-  go through the reference interpreter with a fresh fetch/decode.
+  access, commercial ROMs, BIOS files or external crates. The MIT-licensed
+  hardware-test ROMs in `tests/roms/gba-tests/` are optional local black-box
+  tests, not part of `cargo test` or CI. A budget stop is not a ROM pass: only
+  the ROM's own visible PASS result counts. The optional `apps/desktop` and
+  `apps/web` packages have their own locks and are excluded from the default
+  graph; browser registry dependencies and Node/npm tools stay outside the root
+  lock and root build.
+- Static AOT discovery is restricted to immutable ROM bytes. The explicit
+  trace-seeded mode (`aot build --trace`) may emit sealed one-instruction
+  work-RAM blocks only when the generated dispatcher re-reads the live encoding
+  and executes the native block solely on an exact match; any mismatch must go
+  through the reference interpreter with a fresh fetch/decode and count as a
+  fallback. Sealed blocks are profile-guided translations of observed
+  instructions, not general RAM translation, a RAM snapshot, or a whole-ROM
+  coverage claim. Follow-on RAM code is never statically discovered.
 
 ## Source layout
 
-- `crates/core/src/cart.rs`, `bus.rs`, `cpu.rs`, `cpu/exception.rs`: header,
-  explicit memory map, state, documented stack initialization and framed SWI
-  exception entry/return.
-- `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
-  `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
-  memory/block submodules, tests), reference semantics and shared pure
-  address/width/sign-extension helpers.
-- `crates/core/src/display.rs`, `render.rs`: bitmap snapshot,
-  nearest/letterbox, PPM.
-- `crates/core/src/demo.rs`: entirely synthetic ROM fixtures.
-- `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
-  `arithmetic.rs`, `memory.rs`) plus typed guest SWI framing/dispatch (`swi.rs`).
-- `crates/aot/src/aot/`: bounded discovery (`discover.rs`), artifact binding
-  (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
-  `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),
-  target-profile build/metadata (`target_build.rs`), harness build/run
-  (`harness.rs`), the bounded wasm32 module build/metadata/pinned-CLI path
-  (`wasm_build.rs`, `wasm_meta.rs`, `wasm_tool.rs`) and tests.
-  This package depends on `gba-native-core` under the `gba_native` alias.
-- Root `src/lib.rs`: compatibility facade re-exporting the core modules and
-  `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands
-  (including the experimental `aot build` native and wasm32 branches) and safe
-  `output/` writes.
-- `apps/desktop/`: optional, separately excluded synthetic Winit/Pixels/WGPU
-  package with its own workspace/lockfile. It depends directly on
-  `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
-  crate or the root facade, and has no ROM surface.
-- `apps/web/`: optional, separately excluded synthetic WASM/WebGPU/WebGL2
-  package with its own Cargo/npm locks. It depends directly on `crates/core`,
-  not the AOT crate or root facade; it accepts no ROM, save, audio or game input.
-- `src/bin/quality-counter/`: the maintained-Rust population and 500-line
-  counter used by the hard gate and Ratchet.
-- `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
-  failure paths, optional frontend gate contracts, web-tool bootstrap regression
-  and workspace compatibility contracts.
-- `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
-  typed guest SWI decode/execution tests, independent ISA golden vectors and
-  ARM/Thumb single/block/stack memory vectors.
-- `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
-  fixtures, the native RAM self-modification regression, the target-profile
-  build regression and the native AOT proof.
-- `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
-  `scripts/native-consistency.sh` is the slow Ratchet counter.
-- `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
-  `scripts/bootstrap-web-tools.sh`: isolated browser build/E2E/review flow and
-  pinned repository-owned tooling.
-- `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality
-  rules and baseline.
+See [`docs/source-layout.md`](docs/source-layout.md) for the maintained module map.
 
 ## Licensing / publication
 

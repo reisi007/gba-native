@@ -2,7 +2,10 @@
 //! the runtime fallback for the native-AOT prototype.
 
 use crate::bus::Bus;
-use crate::cpu::{Cpu, adc_flags, add_flags, condition_holds, sbc_flags, sub_flags};
+use crate::cpu::{
+    Cpu, IRQ_DISPATCH_CONTINUATION, IRQ_FRAME_BYTES, IRQ_FRAME_WORDS, Mode, adc_flags, add_flags,
+    condition_holds, sbc_flags, sub_flags,
+};
 use crate::decode::{decode_arm, decode_thumb};
 use crate::error::Result;
 use crate::ir::{AluOpcode, IrInstr, Op, PsrSrc, Src};
@@ -18,12 +21,111 @@ pub fn decode_at(bus: &Bus, addr: u32, thumb: bool) -> Result<IrInstr> {
     }
 }
 
-/// Execute exactly one instruction (or one conditional no-op).
+/// Execute one guest instruction, conditional no-op or modeled IRQ return step.
 pub fn step(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
+    if irq_dispatch_continuation(cpu) {
+        return return_from_irq_dispatch(cpu, bus);
+    }
     let addr = cpu.pc();
     let thumb = cpu.thumb();
     let instr = decode_at(bus, addr, thumb)?;
     execute(cpu, bus, instr)
+}
+
+/// Whether the PC is the modelled BIOS IRQ dispatcher continuation rather
+/// than a guest instruction address. Generated native code uses this to keep
+/// the dispatcher return native instead of counting it as a fallback.
+pub fn irq_dispatch_continuation(cpu: &Cpu) -> bool {
+    cpu.mode() == Mode::Irq && !cpu.thumb() && cpu.pc() == IRQ_DISPATCH_CONTINUATION
+}
+
+/// Deliver a pending enabled IRQ before the next guest instruction when the
+/// handler and six-word IRQ frame are valid. This models the documented BIOS
+/// dispatcher behavior without fetching BIOS code. Entry consumes no guest
+/// instruction budget. Shared by the reference runner and generated AOT code.
+pub fn deliver_pending_irq(cpu: &mut Cpu, bus: &mut Bus) -> Result<bool> {
+    if cpu.irq_masked() || cpu.mode() == Mode::Irq || !bus.irq_pending() {
+        return Ok(false);
+    }
+    let Some(handler) = bus.irq_handler() else {
+        return Ok(false);
+    };
+    if handler & 3 != 0 {
+        return Err(crate::error::Error::IrqHandler {
+            addr: handler,
+            reason: "handler pointer is not word-aligned ARM code",
+        });
+    }
+    bus.fetch32(handler)
+        .map_err(|_| crate::error::Error::IrqHandler {
+            addr: handler,
+            reason: "handler pointer does not reference executable memory",
+        })?;
+
+    let sp = cpu.irq_stack_pointer();
+    if sp & 3 != 0 {
+        return Err(crate::error::Error::IrqStack {
+            sp,
+            reason: "stack pointer is not word-aligned",
+        });
+    }
+    let frame_sp = sp
+        .checked_sub(IRQ_FRAME_BYTES)
+        .ok_or(crate::error::Error::IrqStack {
+            sp,
+            reason: "six-word frame underflows the address space",
+        })?;
+    if !Bus::is_work_ram_range(frame_sp, IRQ_FRAME_BYTES as usize) {
+        return Err(crate::error::Error::IrqStack {
+            sp,
+            reason: "six-word frame must fit wholly in EWRAM or IWRAM",
+        });
+    }
+
+    let frame = cpu.irq_frame_values();
+    for (index, value) in frame.into_iter().enumerate() {
+        bus.write32(frame_sp + index as u32 * 4, value)?;
+    }
+    cpu.enter_irq(handler, frame_sp);
+    Ok(true)
+}
+
+pub fn return_from_irq_dispatch(cpu: &mut Cpu, bus: &mut Bus) -> Result<()> {
+    let frame_sp = cpu.reg(13);
+    if frame_sp & 3 != 0 {
+        return Err(crate::error::Error::IrqStack {
+            sp: frame_sp,
+            reason: "dispatcher frame pointer is not word-aligned",
+        });
+    }
+    if !Bus::is_work_ram_range(frame_sp, IRQ_FRAME_BYTES as usize) {
+        return Err(crate::error::Error::IrqStack {
+            sp: frame_sp,
+            reason: "dispatcher frame must fit wholly in EWRAM or IWRAM",
+        });
+    }
+    let restored_sp =
+        frame_sp
+            .checked_add(IRQ_FRAME_BYTES)
+            .ok_or(crate::error::Error::IrqStack {
+                sp: frame_sp,
+                reason: "restored stack pointer overflows the address space",
+            })?;
+    let mut frame = [0; IRQ_FRAME_WORDS];
+    for (index, value) in frame.iter_mut().enumerate() {
+        *value = bus.read32(frame_sp + index as u32 * 4)?;
+    }
+    cpu.validate_exception_return()?;
+
+    // The BIOS dispatcher restores the saved user registers and IRQ LR before
+    // applying SUBS-PC/LR/#4 semantics. No guest BIOS instruction is fetched.
+    for (index, value) in frame[..4].iter().copied().enumerate() {
+        cpu.set_reg(index as u8, value);
+    }
+    cpu.set_reg(12, frame[4]);
+    cpu.set_reg(14, frame[5]);
+    cpu.set_reg(13, restored_sp);
+    cpu.return_from_exception(frame[5].wrapping_sub(4))
 }
 
 fn read_rn(cpu: &Cpu, instr: IrInstr, rn: u8, rhs: Src) -> u32 {
@@ -34,15 +136,26 @@ fn eval_rhs(cpu: &Cpu, instr: IrInstr, rhs: Src) -> (u32, Option<bool>) {
     semantics::operand(cpu, instr.addr, instr.thumb, rhs, rhs.uses_register_shift())
 }
 
-/// Write `Rd` and either fall through or redirect the PC. PC writes through
-/// MOV/ALU are force-aligned and do not change ARM/Thumb state.
-fn write_rd(cpu: &mut Cpu, instr: IrInstr, rd: u8, value: u32) {
-    if rd == 15 {
-        cpu.set_pc(semantics::aligned_pc(value, instr.thumb));
-    } else {
+/// Write `Rd` and report whether the ordinary `S=1` flag update still applies.
+///
+/// A non-PC `Rd` writes the register and falls through. `S=0` PC writes are
+/// force-aligned and keep the ARM/Thumb state. `S=1` with `Rd=R15` is the
+/// documented exception return: the computed value becomes the PC in the state
+/// restored from the current mode's SPSR, so the arithmetic N/Z/C/V result must
+/// not be applied afterwards. The restore is validated before any mutation, so
+/// a missing or invalid SPSR leaves the CPU untouched.
+fn write_rd(cpu: &mut Cpu, instr: IrInstr, rd: u8, set_flags: bool, value: u32) -> Result<bool> {
+    if rd != 15 {
         cpu.set_reg(rd, value);
         cpu.set_pc(instr.next_addr());
+        return Ok(true);
     }
+    if set_flags {
+        cpu.return_from_exception(value)?;
+        return Ok(false);
+    }
+    cpu.set_pc(semantics::aligned_pc(value, instr.thumb));
+    Ok(true)
 }
 
 pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
@@ -54,8 +167,7 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
     match instr.op {
         Op::Mov { rd, src, set_flags } => {
             let (value, shifter_carry) = eval_rhs(cpu, instr, src);
-            write_rd(cpu, instr, rd, value);
-            if set_flags {
+            if write_rd(cpu, instr, rd, set_flags, value)? && set_flags {
                 cpu.set_logic_flags(value, shifter_carry);
             }
         }
@@ -67,8 +179,7 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
         } => {
             let (rhs_value, _) = eval_rhs(cpu, instr, rhs);
             let (result, carry, overflow) = add_flags(read_rn(cpu, instr, rn, rhs), rhs_value);
-            write_rd(cpu, instr, rd, result);
-            if set_flags {
+            if write_rd(cpu, instr, rd, set_flags, result)? && set_flags {
                 cpu.set_arith_flags(result, carry, overflow);
             }
         }
@@ -80,8 +191,7 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
         } => {
             let (rhs_value, _) = eval_rhs(cpu, instr, rhs);
             let (result, carry, overflow) = sub_flags(read_rn(cpu, instr, rn, rhs), rhs_value);
-            write_rd(cpu, instr, rd, result);
-            if set_flags {
+            if write_rd(cpu, instr, rd, set_flags, result)? && set_flags {
                 cpu.set_arith_flags(result, carry, overflow);
             }
         }
@@ -109,24 +219,28 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
                 | AluOpcode::Tst
                 | AluOpcode::Teq => {
                     let result = logical_result(opcode, rn_value, rhs_value);
-                    if let Some(rd) = rd {
-                        write_rd(cpu, instr, rd, result);
-                    } else {
-                        cpu.set_pc(instr.next_addr());
-                    }
-                    if set_flags {
+                    let ordinary = match rd {
+                        Some(rd) => write_rd(cpu, instr, rd, set_flags, result)?,
+                        None => {
+                            cpu.set_pc(instr.next_addr());
+                            true
+                        }
+                    };
+                    if set_flags && ordinary {
                         cpu.set_logic_flags(result, shifter_carry);
                     }
                 }
                 _ => {
                     let (result, carry, overflow) =
                         arithmetic_result(cpu, opcode, rn_value, rhs_value);
-                    if let Some(rd) = rd {
-                        write_rd(cpu, instr, rd, result);
-                    } else {
-                        cpu.set_pc(instr.next_addr());
-                    }
-                    if set_flags {
+                    let ordinary = match rd {
+                        Some(rd) => write_rd(cpu, instr, rd, set_flags, result)?,
+                        None => {
+                            cpu.set_pc(instr.next_addr());
+                            true
+                        }
+                    };
+                    if set_flags && ordinary {
                         cpu.set_arith_flags(result, carry, overflow);
                     }
                 }
@@ -143,12 +257,47 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
             if let Some(rn) = accumulate {
                 value = value.wrapping_add(cpu.reg(rn));
             }
-            write_rd(cpu, instr, rd, value);
+            // MUL with Rd=R15 is not a valid encoding, so this can never be the
+            // `S=1` exception-return form.
+            write_rd(cpu, instr, rd, false, value)?;
             if set_flags {
                 // N/Z only: C is "destroyed" on ARMv4 (preserved here as a
                 // documented Design choice) and V is unaffected.
                 cpu.set_logic_flags(value, None);
             }
+        }
+        Op::MultiplyLong {
+            signed,
+            accumulate,
+            set_flags,
+            rd_hi,
+            rd_lo,
+            rs,
+            rm,
+        } => {
+            let mut value = if signed {
+                let rhs = i64::from(cpu.reg(rm) as i32);
+                let lhs = i64::from(cpu.reg(rs) as i32);
+                rhs.wrapping_mul(lhs) as u64
+            } else {
+                u64::from(cpu.reg(rm)).wrapping_mul(u64::from(cpu.reg(rs)))
+            };
+            if accumulate {
+                let accumulator = (u64::from(cpu.reg(rd_hi)) << 32) | u64::from(cpu.reg(rd_lo));
+                value = value.wrapping_add(accumulator);
+            }
+            let low = value as u32;
+            let high = (value >> 32) as u32;
+            cpu.set_reg(rd_lo, low);
+            cpu.set_reg(rd_hi, high);
+            if set_flags {
+                let (_, _, carry, overflow) = cpu.flags();
+                cpu.set_nzcv(high & 0x8000_0000 != 0, value == 0, carry, overflow);
+            }
+            cpu.set_pc(instr.next_addr());
+        }
+        Op::Swap { rd, rm, rn, byte } => {
+            memory::execute_swap(cpu, bus, instr, rd, rm, rn, byte)?;
         }
         Op::B { target } => cpu.set_pc(target),
         Op::Bl { target } => {
@@ -275,14 +424,13 @@ fn psr_source_value(cpu: &Cpu, src: PsrSrc) -> u32 {
 
 /// Execute at most `budget` instructions. Exhausting the budget is not evidence
 /// that a game booted or produced a frame.
-///
-/// IRQ delivery is unsupported. A pending enabled request observed by the
-/// controller stays latched and remains readable through the I/O registers; it
-/// never redirects execution, even when the guest published a handler pointer
-/// at `0x03007FFC` and the CPSR I bit is clear.
 pub fn run_budget(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<u64> {
     let mut used = 0;
     while used < budget {
+        // Deliver a pending interrupt between instructions. Without a handler
+        // pointer at 0x03007FFC there is nowhere to dispatch, so the request
+        // stays latched instead of being dropped.
+        deliver_pending_irq(cpu, bus)?;
         step(cpu, bus)?;
         bus.tick_frame();
         used += 1;

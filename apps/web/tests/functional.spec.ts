@@ -14,7 +14,7 @@
 
 import { expect, test as base } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const SOURCE_SHA256 = 'b02968d620ee66d7175c29bbde12bc9ff075290f3e8086b26e9d4829b9ccb154';
 const GUEST_BUDGET = 230_411;
@@ -39,7 +39,8 @@ const SCREENSHOT_TIMEOUT_MS = 5_000;
 const WEBGPU_CONFIRMATION_TIMEOUT_MS = 1_000;
 const WEBGPU_STABILITY_STEP_TIMEOUT_MS = 3_000;
 const WEBGPU_STABILITY_FRAMES = 8;
-const DISCLAIMER = 'Experimental synthetic GPU demo; no playable ROM, saves or game input yet.';
+const DISCLAIMER =
+  'Experimental synthetic GPU demo; no playable ROM or cartridge input; synthetic save management only.';
 
 type Fixtures = { failureDiagnostics: void; requests: string[] };
 
@@ -1423,4 +1424,122 @@ test('restart budget stops an unbounded reload storm', async ({ page }) => {
   await page.getByRole('button', { name: 'Restart with selected backend' }).click();
   await expect(page.locator('#status-message')).toContainText('Restart budget reached');
   expect(page.url()).toBe(settledUrl);
+});
+
+test('save library imports, selects a default, exports and persists', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.locator('#save-status')).toContainText('No save slots yet.');
+
+  const image = (counter: number) => {
+    const bytes = new Uint8Array(32 * 1024).fill(0xff);
+    bytes.set([0x47, 0x53, 0x41, 0x56, counter], 0);
+    return Buffer.from(bytes);
+  };
+
+  await page.locator('#save-name').fill('alpha');
+  await page.locator('#save-file').setInputFiles({
+    name: 'alpha.sav',
+    mimeType: 'application/octet-stream',
+    buffer: image(1),
+  });
+  await page.getByRole('button', { name: 'Import' }).click();
+  await expect(page.locator('#save-status')).toContainText('imported=alpha');
+  await expect(page.locator('#save-list li[data-slot="alpha"]')).toContainText('default');
+
+  await page.locator('#save-name').fill('beta');
+  await page.locator('#save-file').setInputFiles({
+    name: 'beta.sav',
+    mimeType: 'application/octet-stream',
+    buffer: image(2),
+  });
+  await page.getByRole('button', { name: 'Import' }).click();
+  await expect(page.locator('#save-list li')).toHaveCount(2);
+  await expect(page.locator('#save-status')).toContainText('imported=beta');
+
+  await page.locator('#save-list li[data-slot="beta"]').getByRole('button', { name: 'Use' }).click();
+  await expect(page.locator('#save-status')).toContainText('default=beta');
+  await expect(page.locator('#save-list li[data-slot="beta"]')).toContainText('default');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Export default' }).click(),
+  ]);
+  const exported = await readFile((await download.path())!);
+  expect(Array.from(exported.subarray(0, 5))).toEqual([0x47, 0x53, 0x41, 0x56, 2]);
+  expect(exported.length).toBe(32 * 1024);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.locator('#save-list li')).toHaveCount(2);
+  await expect(page.locator('#save-list li[data-slot="beta"]')).toContainText('default');
+  const stored = await page.evaluate(() => window.__gbaNative.saves.list());
+  expect(stored).toEqual([
+    { name: 'alpha', bytes: 32768, default: false },
+    { name: 'beta', bytes: 32768, default: true },
+  ]);
+});
+
+test('audio settings and the WebAudio test tone are wired', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  type AudioDiagnostics = {
+    settings: () => { masterVolume: number; muted: boolean; gain: number };
+    playTestTone: () => boolean;
+    contextState: () => string;
+  };
+  const settings = () =>
+    page.evaluate(() =>
+      (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.settings(),
+    );
+
+  const initial = await settings();
+  expect(initial.masterVolume).toBe(80);
+  expect(initial.muted).toBe(false);
+  expect(initial.gain).toBeCloseTo(0.8, 5);
+
+  const played = await page.evaluate(() =>
+    (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.playTestTone(),
+  );
+  expect(played).toBe(true);
+  const state = await page.evaluate(() =>
+    (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.contextState(),
+  );
+  expect(['running', 'suspended']).toContain(state);
+
+  await page.locator('#mute-toggle').check();
+  expect((await settings()).gain).toBe(0);
+  await page.locator('#mute-toggle').uncheck();
+  await page.evaluate(() => {
+    const range = document.querySelector('#volume-range') as HTMLInputElement;
+    range.value = '40';
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const quieter = await settings();
+  expect(quieter.masterVolume).toBe(40);
+  expect(quieter.gain).toBeCloseTo(0.4, 5);
+});
+
+test('PCM buffers shaped like the wasm module output play through WebAudio', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  type AudioDiagnostics = {
+    playPcm: (samples: Int16Array, sampleRate?: number) => boolean;
+    contextState: () => string;
+  };
+  const result = await page.evaluate(() => {
+    const audio = (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio;
+    const samples = new Int16Array(3277);
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = Math.round(Math.sin((2 * Math.PI * 440 * index) / 32768) * 8000);
+    }
+    return {
+      played: audio.playPcm(samples, 32768),
+      empty: audio.playPcm(new Int16Array(0), 32768),
+      state: audio.contextState(),
+    };
+  });
+  expect(result.played).toBe(true);
+  expect(result.empty).toBe(false);
+  expect(['running', 'suspended']).toContain(result.state);
 });

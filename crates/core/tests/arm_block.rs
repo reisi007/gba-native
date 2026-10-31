@@ -2,7 +2,7 @@
 //! ARMv4 base-in-list specials, PC entries, condition-false behavior and the
 //! documented non-atomic partial-failure policy.
 
-use gba_native_core::bus::{Bus, EWRAM_BASE, PALETTE_BASE, PALETTE_LEN};
+use gba_native_core::bus::{Bus, EWRAM_BASE, OAM_BASE, OAM_LEN};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
 use gba_native_core::decode::decode_arm;
@@ -178,28 +178,69 @@ fn s_user_bank_empty_and_pc_base_encodings_are_rejected() {
 }
 
 #[test]
-fn unaligned_base_is_rejected_before_any_access_or_writeback() {
-    for load in [false, true] {
-        let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, load as u32, 0, 0b0011));
-        cpu.set_reg(0, EWRAM_BASE + 0x102);
-        cpu.set_reg(1, 0x1111);
-        let digest = bus.state_digest();
-        let error = interpret::step(&mut cpu, &mut bus).expect_err("unaligned base");
-        assert!(matches!(
-            error,
-            Error::UnalignedBlockBase { thumb: false, .. }
-        ));
-        assert_eq!(cpu.reg(0), EWRAM_BASE + 0x102);
-        assert_eq!(cpu.reg(1), 0x1111);
-        assert_eq!(bus.state_digest(), digest);
-    }
+fn unaligned_base_aligns_only_the_transfer_address() {
+    let base = EWRAM_BASE + 0x102;
+
+    // STMIA: words go to base&!3 and base&!3+4; writeback uses original+8.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 0, 0, 0b0110));
+    cpu.set_reg(0, base);
+    cpu.set_reg(1, 0x1111);
+    cpu.set_reg(2, 0x2222);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned STMIA");
+    assert_eq!(bus.read32(EWRAM_BASE + 0x100), Ok(0x1111));
+    assert_eq!(bus.read32(EWRAM_BASE + 0x104), Ok(0x2222));
+    assert_eq!(cpu.reg(0), base + 8);
+
+    // LDMIA: reads the same aligned words; writeback uses original+8.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 1, 0, 0b0110));
+    bus.write32(EWRAM_BASE + 0x100, 0xAAAA).expect("first");
+    bus.write32(EWRAM_BASE + 0x104, 0xBBBB).expect("second");
+    cpu.set_reg(0, base);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned LDMIA");
+    assert_eq!(cpu.reg(1), 0xAAAA);
+    assert_eq!(cpu.reg(2), 0xBBBB);
+    assert_eq!(cpu.reg(0), base + 8);
+
+    // LDMDA: the aligned base is the mode reference; writeback is original-8.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 0, 0, 1, 1, 0, 0b0110));
+    bus.write32(EWRAM_BASE + 0xFC, 0xCCCC).expect("da first");
+    bus.write32(EWRAM_BASE + 0x100, 0xDDDD).expect("da second");
+    cpu.set_reg(0, base);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned LDMDA");
+    assert_eq!(cpu.reg(1), 0xCCCC);
+    assert_eq!(cpu.reg(2), 0xDDDD);
+    assert_eq!(cpu.reg(0), base - 8);
+}
+
+#[test]
+fn unaligned_base_in_list_specials_keep_the_original_base() {
+    let base = EWRAM_BASE + 0x102;
+
+    // STMIA with the base first stores the old (still unaligned) base.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 0, 0, 0b0011));
+    cpu.set_reg(0, base);
+    cpu.set_reg(1, 0x11);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned STMIA base first");
+    assert_eq!(bus.read32(EWRAM_BASE + 0x100), Ok(base));
+    assert_eq!(bus.read32(EWRAM_BASE + 0x104), Ok(0x11));
+    assert_eq!(cpu.reg(0), base + 8);
+
+    // LDMIA with the base in the list: the loaded value wins.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 1, 0, 0b0011));
+    bus.write32(EWRAM_BASE + 0x100, 0xAAAA)
+        .expect("loaded base");
+    bus.write32(EWRAM_BASE + 0x104, 0xBBBB).expect("second");
+    cpu.set_reg(0, base);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned LDMIA base loaded");
+    assert_eq!(cpu.reg(0), 0xAAAA);
+    assert_eq!(cpu.reg(1), 0xBBBB);
 }
 
 #[test]
 fn partial_multiaccess_failure_is_observable_and_never_promises_atomicity() {
-    // The work-RAM windows mirror, so the palette boundary is the shortest
-    // region whose next word is genuinely unmapped.
-    let last_word = PALETTE_BASE + PALETTE_LEN as u32 - 4;
+    // Palette/VRAM/OAM have explicit prototype aliases; the first unmapped word
+    // immediately after the narrow OAM alias window is a stable failure edge.
+    let last_word = OAM_BASE + (OAM_LEN * 2) as u32 - 4;
 
     // LDM: the first register is written, the second access fails, no WB.
     let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 1, 3, 0b0110));

@@ -23,6 +23,9 @@ pub enum Error {
     UnsupportedSave {
         addr: u32,
     },
+    SaveImage {
+        len: usize,
+    },
     Unmapped {
         addr: u32,
     },
@@ -56,13 +59,6 @@ pub enum Error {
         needed: usize,
         available: usize,
     },
-    /// Bounded policy for block/stack transfers: the low bits of the base would
-    /// be ignored by hardware, but the documented writeback source is not
-    /// established, so no access or writeback is performed.
-    UnalignedBlockBase {
-        addr: u32,
-        thumb: bool,
-    },
     UnsupportedInstruction {
         addr: u32,
         thumb: bool,
@@ -76,6 +72,14 @@ pub enum Error {
     /// the request itself is unsupported or its SVC stack cannot hold a frame.
     SwiNesting,
     SwiStack {
+        sp: u32,
+        reason: &'static str,
+    },
+    IrqHandler {
+        addr: u32,
+        reason: &'static str,
+    },
+    IrqStack {
         sp: u32,
         reason: &'static str,
     },
@@ -135,6 +139,9 @@ impl fmt::Display for Error {
             Error::UnsupportedSave { addr } => {
                 write!(f, "save hardware at 0x{addr:08X} is not implemented")
             }
+            Error::SaveImage { len } => {
+                write!(f, "save image length {len} is not 1..=131072 bytes")
+            }
             Error::Unmapped { addr } => write!(f, "unmapped address 0x{addr:08X}"),
             Error::UnalignedHalfword { addr } => {
                 write!(f, "unaligned halfword bus access at 0x{addr:08X}")
@@ -170,11 +177,6 @@ impl fmt::Display for Error {
                 f,
                 "sound FIFO at 0x{addr:08X} needs {needed} bytes but has {available} available"
             ),
-            Error::UnalignedBlockBase { addr, thumb } => write!(
-                f,
-                "unaligned {} block-transfer base 0x{addr:08X}; this prototype rejects it before any access",
-                if *thumb { "Thumb" } else { "ARM" }
-            ),
             Error::UnsupportedInstruction {
                 addr,
                 thumb,
@@ -195,6 +197,18 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     "SWI exception: invalid SVC stack pointer 0x{sp:08X}: {reason}"
+                )
+            }
+            Error::IrqHandler { addr, reason } => {
+                write!(
+                    f,
+                    "IRQ exception: invalid handler address 0x{addr:08X}: {reason}"
+                )
+            }
+            Error::IrqStack { sp, reason } => {
+                write!(
+                    f,
+                    "IRQ exception: invalid IRQ stack pointer 0x{sp:08X}: {reason}"
                 )
             }
             Error::Bios(source) => write!(f, "BIOS HLE: {source}"),

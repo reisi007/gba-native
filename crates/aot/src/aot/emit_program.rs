@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::artifact::AotArtifact;
@@ -61,19 +62,20 @@ pub fn emit_program_module(cart: &Cartridge, artifact: &AotArtifact) -> Result<S
     writeln!(out, "pub struct ProgramReport {{").unwrap();
     writeln!(out, "    pub budget_remaining: u64,").unwrap();
     writeln!(out, "    pub fallbacks: u64,").unwrap();
+    writeln!(out, "    pub irq_returns: u64,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     for block in &artifact.blocks {
         emit_block(&mut out, block)?;
     }
-    emit_program_runner(&mut out, artifact);
+    emit_program_runner(&mut out, artifact)?;
     Ok(out)
 }
 
 /// Emit `run_program`, the target-neutral dispatch loop. It returns the
 /// remaining budget and fallback count instead of printing or exiting.
-fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
+fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(
         out,
         "/// Execute the program against an initialized CPU/bus until the budget is"
@@ -87,37 +89,128 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) {
     writeln!(out, "/// reference interpreter with a fresh fetch/decode.").unwrap();
     writeln!(
         out,
-        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64) -> Result<ProgramReport> {{"
+        "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<ProgramReport> {{"
     )
     .unwrap();
     writeln!(out, "    let mut remaining = budget;").unwrap();
     writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
+    writeln!(out, "    let mut irq_returns = 0u64;").unwrap();
     writeln!(out, "    while remaining > 0 {{").unwrap();
+    writeln!(out, "        let executed = budget - remaining;").unwrap();
+    writeln!(
+        out,
+        "        if !input.is_empty() {{ bus.set_pressed_keys(input.mask_at(executed)); }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if gba_native::interpret::irq_dispatch_continuation(cpu) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            gba_native::interpret::return_from_irq_dispatch(cpu, bus)?;"
+    )
+    .unwrap();
+    writeln!(out, "            bus.tick_frame();").unwrap();
+    writeln!(out, "            remaining -= 1;").unwrap();
+    writeln!(out, "            irq_returns += 1;").unwrap();
+    writeln!(
+        out,
+        "            if let Some(engine) = audio.as_mut() {{ engine.advance_instruction_bus(bus)?; }}"
+    )
+    .unwrap();
+    writeln!(out, "            continue;").unwrap();
+    writeln!(out, "        }}").unwrap();
     writeln!(out, "        let next = match (cpu.pc(), cpu.thumb()) {{").unwrap();
+    let mut groups: BTreeMap<(u32, bool), Vec<&super::artifact::AotBlock>> = BTreeMap::new();
     for block in &artifact.blocks {
+        groups
+            .entry((block.addr, block.thumb))
+            .or_default()
+            .push(block);
+    }
+    for ((addr, thumb), variants) in groups {
+        if variants.len() == 1 && !variants[0].sealed {
+            writeln!(
+                out,
+                "            (0x{addr:08X}, {thumb}) => {}(cpu, bus, &mut remaining, audio)?,",
+                block_name(variants[0])
+            )
+            .unwrap();
+            continue;
+        }
+        if variants.iter().any(|block| !block.sealed) {
+            return Err(Error::Aot(format!(
+                "block at 0x{addr:08X} mixes sealed and ROM variants"
+            )));
+        }
+        let fetch = if thumb { "fetch16" } else { "fetch32" };
+        writeln!(out, "            (0x{addr:08X}, {thumb}) => {{").unwrap();
+        writeln!(out, "                let raw = bus.{fetch}(0x{addr:08X})?;").unwrap();
+        writeln!(out, "                match raw {{").unwrap();
+        for block in variants {
+            let raw = block.instructions[0].raw;
+            let literal = if thumb {
+                format!("0x{raw:04X}u16")
+            } else {
+                format!("0x{raw:08X}u32")
+            };
+            writeln!(
+                out,
+                "                    {literal} => {}(cpu, bus, &mut remaining, audio)?,",
+                block_name(block)
+            )
+            .unwrap();
+        }
         writeln!(
             out,
-            "            (0x{:08X}, {}) => {}(cpu, bus, &mut remaining)?,",
-            block.addr,
-            block.thumb,
-            block_name(block.addr, block.thumb)
+            "                    _ => fallback_step(cpu, bus, &mut remaining, &mut fallbacks, audio)?,"
         )
         .unwrap();
+        writeln!(out, "                }}").unwrap();
+        writeln!(out, "            }}").unwrap();
     }
     writeln!(out, "            _ => {{").unwrap();
-    writeln!(out, "                interpret::step(cpu, bus)?;").unwrap();
-    writeln!(out, "                remaining -= 1;").unwrap();
-    writeln!(out, "                fallbacks += 1;").unwrap();
-    writeln!(out, "                Next::Continue").unwrap();
+    writeln!(
+        out,
+        "                fallback_step(cpu, bus, &mut remaining, &mut fallbacks, audio)?"
+    )
+    .unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }};").unwrap();
     writeln!(out, "        if next == Next::Halt {{").unwrap();
     writeln!(out, "            break;").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "    bus.set_pressed_keys(0);").unwrap();
     writeln!(out, "    Ok(ProgramReport {{").unwrap();
     writeln!(out, "        budget_remaining: remaining,").unwrap();
     writeln!(out, "        fallbacks,").unwrap();
+    writeln!(out, "        irq_returns,").unwrap();
     writeln!(out, "    }})").unwrap();
     writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "fn fallback_step(cpu: &mut Cpu, bus: &mut Bus, remaining: &mut u64, fallbacks: &mut u64, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<Next> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    gba_native::interpret::deliver_pending_irq(cpu, bus)?;"
+    )
+    .unwrap();
+    writeln!(out, "    gba_native::interpret::step(cpu, bus)?;").unwrap();
+    writeln!(out, "    bus.tick_frame();").unwrap();
+    writeln!(
+        out,
+        "    if let Some(engine) = audio.as_mut() {{ engine.advance_instruction_bus(bus)?; }}"
+    )
+    .unwrap();
+    writeln!(out, "    *remaining -= 1;").unwrap();
+    writeln!(out, "    *fallbacks += 1;").unwrap();
+    writeln!(out, "    Ok(Next::Continue)").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
 }

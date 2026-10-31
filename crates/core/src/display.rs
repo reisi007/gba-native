@@ -1,13 +1,21 @@
-//! Snapshot renderer for the implemented Mode 0 BG0 and bitmap display subsets.
+//! Snapshot renderer for the implemented Mode 0 BG0-BG3/OBJ and bitmap subsets.
 //!
 //! This is not a scanline PPU: it reads the current DISPCNT/VRAM/palette state
-//! once. Only Mode 0 BG0 text tiles and bitmap modes 3-5 are rendered; other
-//! layers, sprites, windows, blending, mosaic and affine transforms are rejected
-//! or absent, never silently approximated.
+//! once. Mode 0 BG0-BG3 text + OBJ and Mode 1 BG0/BG1 text + BG2 affine + OBJ
+//! are composed with window 0, the OBJ window and BLDCNT alpha/brightness
+//! blending. 2D OBJ mapping, semi-transparent OBJ mode, double-size affine OBJ,
+//! mosaic, window 1 and Mode 2 are explicit errors, never silent approximations.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};
 use crate::sha256;
+
+mod affine;
+mod blend;
+mod layer;
+mod obj;
+mod text;
+mod window;
 
 pub const WIDTH: u32 = 240;
 pub const HEIGHT: u32 = 160;
@@ -15,9 +23,12 @@ pub const HEIGHT: u32 = 160;
 /// Unsupported layers/features in bitmap modes. Bits 5 and 6 do not affect this subset.
 const BITMAP_UNSUPPORTED_DISPCNT_MASK: u16 =
     0x0008 | 0x0100 | 0x0200 | 0x0800 | 0x1000 | 0x2000 | 0x4000 | 0x8000;
-/// Mode 0 uses BG0, but not the other BGs, OBJ, windows or CGB mode.
-const MODE0_UNSUPPORTED_DISPCNT_MASK: u16 =
-    0x0008 | 0x0200 | 0x0400 | 0x0800 | 0x1000 | 0x2000 | 0x4000 | 0x8000;
+/// Mode 0 rejects the reserved bit and the window-1 enable. Window 0 and the
+/// OBJ window are implemented.
+const MODE0_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x4000;
+/// Mode 1 uses BG0/BG1 text, BG2 affine and OBJ; BG3 and the two later windows
+/// are rejected explicitly.
+const MODE1_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x0800 | 0x4000;
 const BG_VRAM_LEN: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,16 +73,21 @@ pub fn snapshot(bus: &Bus) -> Result<Image> {
 
 pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
     let mode = dispcnt & 0x7;
-    let unsupported_mask = if mode == 0 {
-        MODE0_UNSUPPORTED_DISPCNT_MASK
-    } else {
-        BITMAP_UNSUPPORTED_DISPCNT_MASK
+    let unsupported_mask = match mode {
+        0 => MODE0_UNSUPPORTED_DISPCNT_MASK,
+        1 => MODE1_UNSUPPORTED_DISPCNT_MASK,
+        _ => BITMAP_UNSUPPORTED_DISPCNT_MASK,
     };
     if dispcnt & unsupported_mask != 0 {
         return Err(Error::UnsupportedPpuFeature { dispcnt });
     }
-    if mode == 0 && dispcnt & 0x0100 != 0 {
-        validate_mode0_bg0_control(bus.bg0cnt())?;
+    if mode == 0 {
+        // Validate enabled text backgrounds before forced blank can hide them.
+        for index in 0..4u8 {
+            if dispcnt & (0x0100 << index) != 0 {
+                text::validate_control(bus.bgcnt(index))?;
+            }
+        }
     }
     if dispcnt & 0x0080 != 0 {
         return Ok(Image {
@@ -81,14 +97,23 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
         });
     }
 
+    let blend = blend::Blend::new(bus)?;
+    let window = window::Window::new(bus, dispcnt)?;
     let backdrop = palette_color(bus, 0)?;
 
     match mode {
         0 => {
-            if dispcnt & 0x0100 == 0 {
+            if dispcnt & 0x1F00 == 0 {
                 Ok(solid(backdrop))
             } else {
-                render_mode0_bg0(bus, backdrop)
+                render_mode0(bus, dispcnt, backdrop, &window, &blend)
+            }
+        }
+        1 => {
+            if dispcnt & 0x1700 == 0 {
+                Ok(solid(backdrop))
+            } else {
+                render_mode1(bus, dispcnt, backdrop, &window, &blend)
             }
         }
         3 => {
@@ -116,59 +141,44 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
     }
 }
 
-fn render_mode0_bg0(bus: &Bus, backdrop: u32) -> Result<Image> {
-    let bgcnt = bus.bg0cnt();
-    let size = ((bgcnt >> 14) & 0x3) as usize;
-    let bg_width = if size & 1 == 0 { 256 } else { 512 };
-    let bg_height = if size & 2 == 0 { 256 } else { 512 };
-    let char_base = (((bgcnt >> 2) & 0x3) as usize) * 0x4000;
-    let screen_base = (((bgcnt >> 8) & 0x1F) as usize) * 0x800;
-    let color_8bpp = bgcnt & 0x0080 != 0;
-    let (scroll_x, scroll_y) = bus.bg0_scroll();
-
+fn render_mode0(
+    bus: &Bus,
+    dispcnt: u16,
+    backdrop: u32,
+    window: &window::Window,
+    blend: &blend::Blend,
+) -> Result<Image> {
+    let mut backgrounds: [Option<text::TextBg>; 4] = [None, None, None, None];
+    for index in 0..4u8 {
+        if dispcnt & (0x0100 << index) != 0 {
+            backgrounds[index as usize] = Some(text::TextBg::new(bus, index)?);
+        }
+    }
+    let objects = if dispcnt & 0x1000 != 0 {
+        Some(obj::render(bus, dispcnt)?)
+    } else {
+        None
+    };
     let mut pixels = Vec::with_capacity((WIDTH * HEIGHT) as usize);
     for y in 0..HEIGHT as usize {
         for x in 0..WIDTH as usize {
-            let source_x = (x + scroll_x as usize) % bg_width;
-            let source_y = (y + scroll_y as usize) % bg_height;
-            let tile_x = source_x / 8;
-            let tile_y = source_y / 8;
-            let screen_quadrants_wide = bg_width / 256;
-            let quadrant = (tile_y / 32) * screen_quadrants_wide + tile_x / 32;
-            let entry_offset =
-                screen_base + quadrant * 0x800 + ((tile_y % 32) * 32 + tile_x % 32) * 2;
-            let entry = read_bg16(bus, entry_offset)?;
-            let mut pixel_x = source_x % 8;
-            let mut pixel_y = source_y % 8;
-            if entry & 0x0400 != 0 {
-                pixel_x = 7 - pixel_x;
-            }
-            if entry & 0x0800 != 0 {
-                pixel_y = 7 - pixel_y;
-            }
-            let tile_number = (entry & 0x03FF) as usize;
-            let color_index = if color_8bpp {
-                let tile_offset = char_base + tile_number * 64;
-                read_bg8(bus, tile_offset + pixel_y * 8 + pixel_x)? as usize
-            } else {
-                let tile_offset = char_base + tile_number * 32;
-                let packed = read_bg8(bus, tile_offset + pixel_y * 4 + pixel_x / 2)?;
-                let index = (if pixel_x & 1 == 0 {
-                    packed & 0x0F
-                } else {
-                    packed >> 4
-                }) as usize;
-                if index == 0 {
-                    pixels.push(backdrop);
-                    continue;
+            let obj_pixel = objects
+                .as_ref()
+                .is_some_and(|objects| objects.window[y * WIDTH as usize + x]);
+            let mut candidates: [Option<layer::LayerPixel>; 5] = [None; 5];
+            for (index, background) in backgrounds.iter().enumerate() {
+                if let Some(background) = background
+                    && window.allows(x as u32, y as u32, index as u8, obj_pixel)
+                {
+                    candidates[index] = background.pixel(x, y)?;
                 }
-                (((entry >> 12) & 0xF) as usize) * 16 + index
-            };
-            if color_index == 0 {
-                pixels.push(backdrop);
-            } else {
-                pixels.push(palette_color(bus, color_index)?);
             }
+            if let Some(objects) = &objects
+                && window.allows(x as u32, y as u32, 4, obj_pixel)
+            {
+                candidates[4] = objects.pixels[y * WIDTH as usize + x];
+            }
+            pixels.push(composite(&candidates, backdrop, blend));
         }
     }
     Ok(Image {
@@ -178,28 +188,69 @@ fn render_mode0_bg0(bus: &Bus, backdrop: u32) -> Result<Image> {
     })
 }
 
-fn validate_mode0_bg0_control(bgcnt: u16) -> Result<()> {
-    if bgcnt & 0x0040 != 0 {
-        return Err(Error::UnsupportedBgControl {
-            bgcnt,
-            reason: "mosaic is not implemented",
-        });
+fn render_mode1(
+    bus: &Bus,
+    dispcnt: u16,
+    backdrop: u32,
+    window: &window::Window,
+    blend: &blend::Blend,
+) -> Result<Image> {
+    let mut backgrounds: [Option<text::TextBg>; 2] = [None, None];
+    for index in 0..2u8 {
+        if dispcnt & (0x0100 << index) != 0 {
+            backgrounds[index as usize] = Some(text::TextBg::new(bus, index)?);
+        }
     }
-    if bgcnt & 0x2030 != 0 {
-        return Err(Error::UnsupportedBgControl {
-            bgcnt,
-            reason: "reserved BG0CNT bits must be zero in GBA mode",
-        });
+    let affine = if dispcnt & 0x0400 != 0 {
+        Some(affine::AffineBg::new(bus, 2)?)
+    } else {
+        None
+    };
+    let objects = if dispcnt & 0x1000 != 0 {
+        Some(obj::render(bus, dispcnt)?)
+    } else {
+        None
+    };
+    let mut pixels = Vec::with_capacity((WIDTH * HEIGHT) as usize);
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            let obj_pixel = objects
+                .as_ref()
+                .is_some_and(|objects| objects.window[y * WIDTH as usize + x]);
+            let mut candidates: [Option<layer::LayerPixel>; 5] = [None; 5];
+            for (index, background) in backgrounds.iter().enumerate() {
+                if let Some(background) = background
+                    && window.allows(x as u32, y as u32, index as u8, obj_pixel)
+                {
+                    candidates[index] = background.pixel(x, y)?;
+                }
+            }
+            if let Some(affine) = &affine
+                && window.allows(x as u32, y as u32, 2, obj_pixel)
+            {
+                candidates[2] = affine.pixel(x, y)?;
+            }
+            if let Some(objects) = &objects
+                && window.allows(x as u32, y as u32, 4, obj_pixel)
+            {
+                candidates[4] = objects.pixels[y * WIDTH as usize + x];
+            }
+            pixels.push(composite(&candidates, backdrop, blend));
+        }
     }
-    Ok(())
+    Ok(Image {
+        width: WIDTH,
+        height: HEIGHT,
+        pixels,
+    })
 }
 
-fn read_bg16(bus: &Bus, offset: usize) -> Result<u16> {
+pub(super) fn read_bg16(bus: &Bus, offset: usize) -> Result<u16> {
     check_bg_vram(offset, 2)?;
     bus.read16(VRAM_BASE + offset as u32)
 }
 
-fn read_bg8(bus: &Bus, offset: usize) -> Result<u8> {
+pub(super) fn read_bg8(bus: &Bus, offset: usize) -> Result<u8> {
     check_bg_vram(offset, 1)?;
     bus.read8(VRAM_BASE + offset as u32)
 }
@@ -267,6 +318,33 @@ fn render_mode5(bus: &Bus, page: u32, backdrop: u32) -> Result<Image> {
     })
 }
 
+fn composite(
+    candidates: &[Option<layer::LayerPixel>; 5],
+    backdrop: u32,
+    blend: &blend::Blend,
+) -> u32 {
+    let Some(top) = layer::best(candidates) else {
+        return blend.brightness(5, backdrop);
+    };
+    if blend.mode() == 1 && blend.is_first(top.layer) {
+        if let Some(next) = layer::next(candidates, top) {
+            // GBATEK: blend only when the immediately next lower
+            // non-transparent layer is a second target.
+            return if blend.is_second(next.layer) {
+                blend.alpha(top.color, next.color)
+            } else {
+                top.color
+            };
+        }
+        return if blend.is_second(5) {
+            blend.alpha(top.color, backdrop)
+        } else {
+            top.color
+        };
+    }
+    blend.brightness(top.layer, top.color)
+}
+
 fn solid(color: u32) -> Image {
     Image {
         width: WIDTH,
@@ -275,7 +353,7 @@ fn solid(color: u32) -> Image {
     }
 }
 
-fn palette_color(bus: &Bus, index: usize) -> Result<u32> {
+pub(super) fn palette_color(bus: &Bus, index: usize) -> Result<u32> {
     let value = bus.read16(PALETTE_BASE + 2 * index as u32)?;
     Ok(rgb555_to_rgb888(value))
 }

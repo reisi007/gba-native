@@ -2,7 +2,7 @@
 //! full-descending SP, LDMIA/STMIA writeback and base-in-list specials,
 //! unaligned-base policy and non-atomic partial failure.
 
-use gba_native_core::bus::{Bus, EWRAM_BASE, PALETTE_BASE, PALETTE_LEN};
+use gba_native_core::bus::{Bus, EWRAM_BASE, OAM_BASE, OAM_LEN};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
 use gba_native_core::decode::decode_thumb;
@@ -77,8 +77,8 @@ fn push_pop_use_full_descending_increasing_memory_order_and_sp_restores() {
 }
 
 #[test]
-fn empty_push_pop_and_ldm_stm_lists_are_explicit_errors() {
-    for raw in [push(0, false), pop(0, false), ldm(0, 0), stm(0, 0)] {
+fn empty_push_pop_lists_remain_explicit_errors() {
+    for raw in [push(0, false), pop(0, false)] {
         let (mut cpu, mut bus) = thumb(raw);
         let before = cpu.clone();
         let digest = bus.state_digest();
@@ -91,6 +91,46 @@ fn empty_push_pop_and_ldm_stm_lists_are_explicit_errors() {
         assert_eq!(cpu.reg(13), before.reg(13));
         assert_eq!(bus.state_digest(), digest);
     }
+}
+
+#[test]
+fn empty_ldm_stm_lists_use_the_documented_armv4_pc_quirk() {
+    let base = EWRAM_BASE + 0x102;
+
+    // LDMIA empty list loads R15 from the aligned base and increments Rb by
+    // 0x40. The loaded address is even-aligned and the CPU remains in Thumb.
+    let (mut cpu, mut bus) = thumb(ldm(2, 0));
+    cpu.set_reg(2, base);
+    bus.write32(EWRAM_BASE + 0x100, 0x0800_1235)
+        .expect("PC transfer word");
+    interpret::step(&mut cpu, &mut bus).expect("empty LDMIA");
+    assert_eq!(cpu.pc(), 0x0800_1234);
+    assert!(cpu.thumb());
+    assert_eq!(cpu.reg(2), base + 0x40);
+
+    // STMIA empty list stores the next Thumb instruction's visible PC
+    // (instruction address+6) and uses the same 0x40 writeback quirk.
+    let (mut cpu, mut bus) = thumb(stm(3, 0));
+    cpu.set_reg(3, EWRAM_BASE + 0x200);
+    interpret::step(&mut cpu, &mut bus).expect("empty STMIA");
+    assert_eq!(bus.read32(EWRAM_BASE + 0x200), Ok(EWRAM_BASE + 6));
+    assert_eq!(cpu.reg(3), EWRAM_BASE + 0x240);
+    assert_eq!(cpu.pc(), EWRAM_BASE + 2);
+}
+
+#[test]
+fn empty_stmia_pc_matches_the_following_thumb_mov_pc_observation() {
+    let (mut cpu, mut bus) = thumb(stm(0, 0));
+    cpu.set_reg(0, EWRAM_BASE + 0x100);
+    interpret::step(&mut cpu, &mut bus).expect("empty STMIA");
+    assert_eq!(bus.read32(EWRAM_BASE + 0x100), Ok(EWRAM_BASE + 6));
+
+    // A Thumb MOV Rd,PC at address +2 reads that instruction's address +4.
+    // This pins the exact value against which local ROM test 229 compares.
+    cpu.set_pc(EWRAM_BASE + 2);
+    bus.write16(EWRAM_BASE + 2, 0x4679).expect("MOV r1,PC");
+    interpret::step(&mut cpu, &mut bus).expect("following MOV r1,PC");
+    assert_eq!(cpu.reg(1), EWRAM_BASE + 6);
 }
 
 #[test]
@@ -136,37 +176,64 @@ fn ldm_stm_writeback_and_thumb_base_in_list_specials() {
 }
 
 #[test]
-fn unaligned_sp_or_block_base_is_rejected_before_any_access() {
+fn unaligned_sp_or_block_base_aligns_only_the_transfer_address() {
+    // PUSH uses (SP & !3) - 8 for the words; SP becomes original SP - 8.
     let (mut cpu, mut bus) = thumb(push(0b0011, false));
     cpu.set_reg(13, EWRAM_BASE + 0x102);
-    cpu.set_reg(0, 0x11);
-    cpu.set_reg(1, 0x22);
-    let digest = bus.state_digest();
-    let error = interpret::step(&mut cpu, &mut bus).expect_err("unaligned SP");
-    assert!(matches!(
-        error,
-        Error::UnalignedBlockBase { thumb: true, .. }
-    ));
-    assert_eq!(cpu.reg(13), EWRAM_BASE + 0x102);
-    assert_eq!(bus.state_digest(), digest);
+    cpu.set_reg(0, 0x1111);
+    cpu.set_reg(1, 0x2222);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned PUSH");
+    assert_eq!(bus.read32(EWRAM_BASE + 0xF8), Ok(0x1111));
+    assert_eq!(bus.read32(EWRAM_BASE + 0xFC), Ok(0x2222));
+    assert_eq!(cpu.reg(13), EWRAM_BASE + 0xFA);
 
-    let (mut cpu, mut bus) = thumb(ldm(0, 0b0011));
+    // POP reads from SP & !3; SP becomes original SP + 8.
+    let (mut cpu, mut bus) = thumb(pop(0b0011, false));
+    cpu.set_reg(13, EWRAM_BASE + 0x102);
+    bus.write32(EWRAM_BASE + 0x100, 0xAAAA).expect("first");
+    bus.write32(EWRAM_BASE + 0x104, 0xBBBB).expect("second");
+    interpret::step(&mut cpu, &mut bus).expect("unaligned POP");
+    assert_eq!(cpu.reg(0), 0xAAAA);
+    assert_eq!(cpu.reg(1), 0xBBBB);
+    assert_eq!(cpu.reg(13), EWRAM_BASE + 0x10A);
+
+    // STMIA: aligned transfer addresses, writeback original + 8.
+    let (mut cpu, mut bus) = thumb(stm(0, 0b0110));
     cpu.set_reg(0, EWRAM_BASE + 0x102);
-    let error = interpret::step(&mut cpu, &mut bus).expect_err("unaligned LDM base");
-    assert!(matches!(
-        error,
-        Error::UnalignedBlockBase { thumb: true, .. }
-    ));
-    assert_eq!(cpu.reg(0), EWRAM_BASE + 0x102);
+    cpu.set_reg(1, 0x1111);
+    cpu.set_reg(2, 0x2222);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned STMIA");
+    assert_eq!(bus.read32(EWRAM_BASE + 0x100), Ok(0x1111));
+    assert_eq!(bus.read32(EWRAM_BASE + 0x104), Ok(0x2222));
+    assert_eq!(cpu.reg(0), EWRAM_BASE + 0x10A);
+
+    // LDMIA with the base in the list keeps the loaded value.
+    let (mut cpu, mut bus) = thumb(ldm(0, 0b0011));
+    bus.write32(EWRAM_BASE + 0x100, 0xAAAA).expect("first");
+    bus.write32(EWRAM_BASE + 0x104, 0xBBBB).expect("second");
+    cpu.set_reg(0, EWRAM_BASE + 0x102);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned LDMIA base loaded");
+    assert_eq!(cpu.reg(0), 0xAAAA);
+    assert_eq!(cpu.reg(1), 0xBBBB);
+
+    // LDMIA without the base in the list commits original + 8.
+    let (mut cpu, mut bus) = thumb(ldm(0, 0b0110));
+    bus.write32(EWRAM_BASE + 0x100, 0x1111).expect("first");
+    bus.write32(EWRAM_BASE + 0x104, 0x2222).expect("second");
+    cpu.set_reg(0, EWRAM_BASE + 0x102);
+    interpret::step(&mut cpu, &mut bus).expect("unaligned LDMIA");
+    assert_eq!(cpu.reg(1), 0x1111);
+    assert_eq!(cpu.reg(2), 0x2222);
+    assert_eq!(cpu.reg(0), EWRAM_BASE + 0x10A);
 }
 
 #[test]
 fn partial_stack_and_block_failure_is_not_atomic() {
-    // Work RAM mirrors, so the palette boundary is the shortest region whose
-    // next word is genuinely unmapped.
-    let last_word = PALETTE_BASE + PALETTE_LEN as u32 - 4;
+    // Palette/VRAM/OAM have explicit prototype aliases; the first unmapped word
+    // after the narrow OAM alias window is a stable failure edge.
+    let last_word = OAM_BASE + (OAM_LEN * 2) as u32 - 4;
 
-    // PUSH: SP + 4 makes the first of two words land in the last palette word
+    // PUSH: SP + 4 makes the first of two words land in the last OAM alias word
     // and the second one past the end.
     let (mut cpu, mut bus) = thumb(push(0b0011, false));
     cpu.set_reg(13, last_word + 8);
@@ -234,6 +301,10 @@ fn typed_ir_marks_control_flow_and_never_changes_flags() {
         }
     );
     assert!(!ldm_ir.is_control_flow());
+
+    let empty_ldm = decode_thumb(0, u32::from(ldm(3, 0))).expect("empty LDMIA");
+    assert!(empty_ldm.is_control_flow());
+    assert!(empty_ldm.writes_register(15));
 
     let (mut cpu, mut bus) = thumb(stm(0, 0b0011));
     cpu.set_reg(0, EWRAM_BASE + 0x100);

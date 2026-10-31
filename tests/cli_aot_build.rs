@@ -213,6 +213,8 @@ fn aot_build_writes_owned_artifact_and_deterministic_metadata() {
         "dynamic_bl",
         "pc_writes",
         "swis",
+        "sealed_blocks",
+        "rejected_seeds",
         "decode_stops",
         "external_targets",
         "block_limit_splits",
@@ -233,6 +235,8 @@ fn aot_build_writes_owned_artifact_and_deterministic_metadata() {
     assert_eq!(fields["budget"], "1000000");
     assert_eq!(fields["blocks"], "4");
     assert_eq!(fields["translated_instructions"], "17");
+    assert_eq!(fields["sealed_blocks"], "0");
+    assert_eq!(fields["rejected_seeds"], "0");
     assert_eq!(fields["embedded_rom_bytes"], "0");
     assert_eq!(fields["requires_external_rom"], "true");
     assert_eq!(

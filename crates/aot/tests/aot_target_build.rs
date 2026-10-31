@@ -110,6 +110,60 @@ fn target_profile_build_runs_synthetic_rom_and_preserves_digest_binding() {
 }
 
 #[test]
+fn build_honors_inherited_cargo_build_target_and_runs_its_executable() {
+    // The environment is read, never mutated: the same test asserts the layout
+    // it was started in. With `CARGO_BUILD_TARGET` set it must resolve and run
+    // the target-specific executable; otherwise it stays in the host layout.
+    let declared = std::env::var("CARGO_BUILD_TARGET")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let cart = demo::demo_cartridge();
+    let artifact =
+        aot::discover(&cart, demo::ENTRY, false, aot::Limits::default()).expect("discover demo");
+    let source =
+        aot::emit_native_module(&cart, &artifact, demo::DEMO_BUDGET).expect("emit native source");
+
+    let temp = TempDir::new("inherited-target");
+    let harness =
+        NativeHarness::build(&source, &temp.path().join("harness")).expect("build harness");
+    let executable = harness.executable().to_string_lossy().replace('\\', "/");
+    assert!(
+        harness.executable().is_file(),
+        "harness executable is missing: {}",
+        harness.executable().display()
+    );
+    match &declared {
+        Some(target) => assert!(
+            executable.contains(&format!("/{target}/debug/")),
+            "inherited CARGO_BUILD_TARGET={target} is not reflected in {executable}"
+        ),
+        None => {
+            let host = aot::host_target_triple().expect("installed rustc host triple");
+            assert!(
+                !executable.contains(&format!("/{host}/")),
+                "host build must not use a target-specific directory: {executable}"
+            );
+            assert!(
+                executable.contains("/debug/gba-native-aot-harness"),
+                "host build is not in the host debug directory: {executable}"
+            );
+        }
+    }
+
+    let bound_rom = temp.path().join("bound.gba");
+    std::fs::write(&bound_rom, cart.bytes()).expect("write bound ROM");
+    let (cpu, bus, used) = reference(&cart, demo::DEMO_BUDGET);
+    let report = harness
+        .run(&bound_rom)
+        .expect("run inherited-target harness");
+    assert_eq!(report.budget_used, demo::DEMO_BUDGET);
+    assert_eq!(report.fallbacks, 0);
+    assert!(report.matches_reference(&cpu, &bus, used).expect("compare"));
+}
+
+#[test]
 fn target_validation_keeps_valid_short_triples() {
     for target in ["wasm32-wasip1", "aarch64-apple-darwin"] {
         assert!(

@@ -193,16 +193,8 @@ fn mode0_rejects_mosaic_reserved_bgcnt_and_unimplemented_layers() {
             Err(Error::UnsupportedBgControl { reason: actual, .. }) if actual.contains(reason)
         ));
     }
-    for dispcnt in [
-        BG0_ON | 0x0008,
-        BG0_ON | 0x0200,
-        BG0_ON | 0x0400,
-        BG0_ON | 0x0800,
-        BG0_ON | 0x1000,
-        BG0_ON | 0x2000,
-        BG0_ON | 0x4000,
-        BG0_ON | 0x8000,
-    ] {
+    set_mode0(&mut bus, 0);
+    for dispcnt in [BG0_ON | 0x0008, BG0_ON | 0x4000] {
         bus.write16(DISPCNT_ADDR, dispcnt)
             .expect("unsupported layer");
         assert!(matches!(
@@ -210,13 +202,18 @@ fn mode0_rejects_mosaic_reserved_bgcnt_and_unimplemented_layers() {
             Err(Error::UnsupportedPpuFeature { .. })
         ));
     }
-    for mode in [1, 2] {
-        bus.write16(DISPCNT_ADDR, mode).expect("unsupported mode");
-        assert!(matches!(
-            display::snapshot(&bus),
-            Err(Error::UnsupportedDisplayMode { mode: actual }) if actual == mode
-        ));
+    // BG1-BG3 and OBJ are now implemented; with no data they fall through to
+    // the backdrop instead of being rejected as unknown layers.
+    for layer in [0x0200, 0x0400, 0x0800, 0x1040] {
+        bus.write16(DISPCNT_ADDR, BG0_ON | layer)
+            .expect("implemented layer");
+        display::snapshot(&bus).expect("implemented layer snapshot");
     }
+    bus.write16(DISPCNT_ADDR, 2).expect("unsupported mode");
+    assert!(matches!(
+        display::snapshot(&bus),
+        Err(Error::UnsupportedDisplayMode { mode: 2 })
+    ));
 }
 
 #[test]

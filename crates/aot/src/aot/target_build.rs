@@ -169,6 +169,8 @@ pub fn artifact_metadata(
     writeln!(out, "dynamic_bl={}", stats.dynamic_bl).unwrap();
     writeln!(out, "pc_writes={}", stats.pc_writes).unwrap();
     writeln!(out, "swis={}", stats.swis).unwrap();
+    writeln!(out, "sealed_blocks={}", stats.sealed_blocks).unwrap();
+    writeln!(out, "rejected_seeds={}", stats.rejected_seeds).unwrap();
     writeln!(out, "decode_stops={}", stats.decode_stops).unwrap();
     writeln!(out, "external_targets={}", stats.external_targets).unwrap();
     writeln!(out, "block_limit_splits={}", stats.block_limit_splits).unwrap();

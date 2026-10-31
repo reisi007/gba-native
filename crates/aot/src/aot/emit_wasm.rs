@@ -8,6 +8,7 @@
 
 use super::artifact::AotArtifact;
 use super::emit_program::emit_program_module;
+use super::policy::{HarnessPolicy, bus_setup_source};
 use gba_native::cart::Cartridge;
 use gba_native::error::Result;
 
@@ -16,8 +17,21 @@ use gba_native::error::Result;
 /// The budget is fixed at build time and travels inside the module; the caller
 /// supplies only the external ROM bytes at call time.
 pub fn emit_wasm_module(cart: &Cartridge, artifact: &AotArtifact, budget: u64) -> Result<String> {
+    emit_wasm_module_with_policy(cart, artifact, budget, HarnessPolicy::default())
+}
+
+/// Compose the WASM driver with explicit synthetic device policies.
+///
+/// The policy statements are baked into the generated module exactly like the
+/// native harness; the default remains the fail-closed strict policy.
+pub fn emit_wasm_module_with_policy(
+    cart: &Cartridge,
+    artifact: &AotArtifact,
+    budget: u64,
+    policy: HarnessPolicy,
+) -> Result<String> {
     let mut out = emit_program_module(cart, artifact)?;
-    out.push_str(&driver_source(artifact, budget));
+    out.push_str(&driver_source(artifact, budget, policy));
     Ok(out)
 }
 
@@ -25,11 +39,12 @@ pub fn emit_wasm_module(cart: &Cartridge, artifact: &AotArtifact, budget: u64) -
 ///
 /// The template carries no ROM data; only the expected digest, the bounded
 /// length and the build-time budget are rendered into it.
-pub(super) fn driver_source(artifact: &AotArtifact, budget: u64) -> String {
+pub(super) fn driver_source(artifact: &AotArtifact, budget: u64, policy: HarnessPolicy) -> String {
     DRIVER_TEMPLATE
         .replace("@ROM_SHA256@", &artifact.rom_sha256_hex())
         .replace("@ROM_LEN@", &artifact.rom_len.to_string())
         .replace("@BUDGET@", &budget.to_string())
+        .replace("@BUS_SETUP@", &bus_setup_source(policy))
 }
 
 /// Driver template. `run_rom` checks length and SHA-256 before constructing a
@@ -66,15 +81,24 @@ fn verify_binding(bytes: &[u8]) -> gba_native::error::Result<()> {
     Ok(())
 }
 
-fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
+fn execute(
+    bytes: Vec<u8>,
+    audio: &mut Option<gba_native::audio::AudioEngine>,
+) -> gba_native::error::Result<String> {
     verify_binding(&bytes)?;
     let cart = Cartridge::from_bytes(bytes)?;
-    let mut bus = Bus::new(cart);
+@BUS_SETUP@
     let mut cpu = Cpu::direct_entry();
     cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(ENTRY_THUMB);
-    let program = run_program(&mut cpu, &mut bus, BUDGET)?;
+    let program = run_program(
+        &mut cpu,
+        &mut bus,
+        BUDGET,
+        &gba_native::input::InputScript::default(),
+        audio,
+    )?;
     let mut report = String::new();
     report.push_str("status=ok\n");
     report.push_str(&format!("pc=0x{:08X}\n", cpu.pc()));
@@ -112,6 +136,30 @@ fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
 /// bytes; this module never contains, fetches or writes them.
 #[wasm_bindgen]
 pub fn run_rom(bytes: Vec<u8>) -> std::result::Result<String, JsValue> {
-    execute(bytes).map_err(|error| JsValue::from_str(&format!("{error}")))
+    let mut audio = None;
+    execute(bytes, &mut audio).map_err(|error| JsValue::from_str(&format!("{error}")))
+}
+
+/// Execute the same bounded program and return guest-state PCM.
+///
+/// The samples are mono signed 16-bit PSG plus Direct Sound at
+/// `audio_sample_rate()`; the caller schedules playback. No unbounded run,
+/// filesystem access, speaker access or UI exists here. The ROM binding checks
+/// are identical to `run_rom`, so a wrong image throws before any guest state
+/// is constructed.
+#[wasm_bindgen]
+pub fn run_rom_audio(bytes: Vec<u8>) -> std::result::Result<Vec<i16>, JsValue> {
+    let mut audio = Some(gba_native::audio::AudioEngine::new(
+        gba_native::audio::AudioSettings::default(),
+    ));
+    execute(bytes, &mut audio).map_err(|error| JsValue::from_str(&format!("{error}")))?;
+    let mut engine = audio.expect("the audio engine stays present for this call");
+    Ok(engine.take_samples())
+}
+
+/// Host render rate of the PCM returned by `run_rom_audio`.
+#[wasm_bindgen]
+pub fn audio_sample_rate() -> u32 {
+    gba_native::audio::SAMPLE_RATE
 }
 "#;

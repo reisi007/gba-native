@@ -255,8 +255,8 @@ fn cpu_set_rejects_alignment_reserved_bios_and_ranges_before_mutation() {
         Err(Error::Bios(BiosError::RangeOverflow { .. }))
     ));
 
-    // ROM, I/O and unmapped destinations are rejected whole.
-    for bad_destination in [ROM_BASE, 0x0400_0000, 0x0480_0000] {
+    // BIOS, ROM, I/O and unmapped destinations are rejected whole.
+    for bad_destination in [0, ROM_BASE, 0x0400_0000, 0x0480_0000] {
         set_args(&mut cpu, EWRAM_BASE, bad_destination, 1);
         let error = bios::call(bios::SERVICE_CPU_SET, &mut cpu, &mut bus);
         assert!(

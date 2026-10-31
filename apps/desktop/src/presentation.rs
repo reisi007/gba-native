@@ -60,6 +60,54 @@ pub struct RgbaImage {
 }
 
 impl RgbaImage {
+    /// Build a validated RGBA image from already-expanded channels.
+    ///
+    /// Used by the windowed shell/settings compositor. The RGB digest is
+    /// recomputed from the buffer, never caller-supplied.
+    pub(crate) fn from_rgba(
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        guest_budget: u64,
+    ) -> Result<Self, ImageError> {
+        if width == 0 || height == 0 {
+            return Err(ImageError::ZeroDimension { width, height });
+        }
+        let pixels = u64::from(width) * u64::from(height);
+        if pixels > MAX_IMAGE_PIXELS {
+            return Err(ImageError::TooLarge { width, height });
+        }
+        if rgba.len() != pixels as usize * 4 {
+            return Err(ImageError::PixelCount {
+                width,
+                height,
+                len: rgba.len(),
+            });
+        }
+        let mut rgb = Vec::with_capacity(pixels as usize);
+        for (index, pixel) in rgba.chunks(4).enumerate() {
+            if pixel[3] != 0xFF {
+                return Err(ImageError::NonOpaquePixel {
+                    index,
+                    value: u32::from_be_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]),
+                });
+            }
+            rgb.push(u32::from(pixel[0]) << 16 | u32::from(pixel[1]) << 8 | u32::from(pixel[2]));
+        }
+        let digest = gba_native::sha256::hex(&gba_native::sha256::digest(
+            &rgb.iter()
+                .flat_map(|pixel| [(pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8])
+                .collect::<Vec<u8>>(),
+        ));
+        Ok(Self {
+            width,
+            height,
+            rgba,
+            rgb_sha256: digest,
+            guest_budget,
+        })
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

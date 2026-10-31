@@ -6,8 +6,8 @@
 use gba_native_core::bios;
 use gba_native_core::bus::{
     BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, EWRAM_BASE, EWRAM_LEN, FIFO_A_ADDR,
-    FIFO_B_ADDR, IWRAM_BASE, IWRAM_LEN, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, SoundFifo,
-    VRAM_BASE, VRAM_LEN,
+    FIFO_B_ADDR, IWRAM_BASE, IWRAM_LEN, OAM_BASE, OAM_LEN, PALETTE_BASE, PALETTE_LEN, RCNT_ADDR,
+    SoundFifo, VRAM_BASE, VRAM_LEN,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::cpu::Cpu;
@@ -165,7 +165,7 @@ fn register_ram_reset_all_memory_flags_preserves_iwram_tail() {
 }
 
 #[test]
-fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
+fn register_ram_reset_group_five_clears_serial_and_group_seven_resets_other_io() {
     let (mut cpu, mut bus) = fresh();
     bus.write16(DISPCNT_ADDR, 0x0010).expect("dispcnt");
     bus.write16(BG0CNT_ADDR, 0x1234).expect("bg0cnt");
@@ -177,9 +177,10 @@ fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
 
     bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset 5 and 7");
 
-    // Group 7 resets the modelled "other I/O" set, group 5 has no SIO state,
-    // and the unselected group 6 leaves sound storage untouched. Scroll
-    // registers are write-only, so compare the full bus digest.
+    // Group 7 resets the modelled "other I/O" set, group 5 clears the serial
+    // registers and selects the documented general-purpose mode, and the
+    // unselected group 6 leaves sound storage untouched. Scroll registers are
+    // write-only, so compare the full bus digest.
     let (_, mut expected) = fresh();
     expected
         .write16(0x0400_0084, 0x1234)
@@ -190,6 +191,9 @@ fn register_ram_reset_group_five_is_empty_and_group_seven_resets_other_io() {
     expected
         .write16(DISPCNT_ADDR, 0x0080)
         .expect("expected dispcnt");
+    // Group 5 switches the serial port to general-purpose mode.
+    expected.write16(RCNT_ADDR, 0x8000).expect("expected rcnt");
+    assert_eq!(bus.read16(RCNT_ADDR).expect("rcnt"), 0x8000);
     assert_eq!(bus.state_digest(), expected.state_digest());
     // DISPCNT is not part of group 7; only the unconditional forced blank shows.
     assert_eq!(bus.read16(DISPCNT_ADDR).expect("dispcnt"), 0x0080);

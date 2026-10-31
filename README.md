@@ -1,7 +1,9 @@
 # gba-native
 
 **Experimental, documentation-driven hybrid GBA-to-native prototype.** This is
-not a playable emulator. It does not boot a BIOS or retail cartridges and has no
+not a playable emulator. It does not boot a BIOS; with the explicit synthetic
+device/HLE opt-ins it can reach an observed retail title screen, but it makes no
+general retail-game or gameplay compatibility claim and has no
 vendor upscaling integration. Optional, separate desktop and browser packages
 present the static synthetic bitmap through Pixels/WGPU and WASM/WebGPU/WebGL2;
 neither is a playable or per-ROM frontend. There is no successful REA
@@ -37,21 +39,32 @@ the root workspace lockfile contains only these three internal path packages.
 | Area | State |
 | --- | --- |
 | Cartridge header (`192 B..32 MiB`, checksum/fixed byte) | Implemented, logo never validated or embedded |
-| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA and Thumb MUL |
-| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches and the bounded framed SWI entry/return path |
+| ARM/Thumb ALU, shifts, PC operands, B/BL/BX | Implemented for the documented ARMv4T subset, including ARM MUL/MLA, UMULL/UMLAL/SMULL/SMLAL, Thumb MUL and the `S=1, Rd=PC` SPSR exception return |
+| ARM7TDMI MRS/MSR + banked r8-r14/SPSR state | Implemented for MSR-driven mode switches, the framed SWI path and documented ALU exception return |
 | Bus (RAM, VRAM, palette, OAM, ROM windows, I/O) | Small explicit subset; unmodelled reads error, unused I/O writes are ignored and recorded |
-| ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases reject explicitly |
-| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot, other exceptions or timing |
+| ARM/Thumb memory transfers | Word/byte/half/signed single transfers, ARM LDM/STM, Thumb PUSH/POP/LDM/STM for the documented policy; unaligned block bases align only the transfer address down while writeback uses the original base (Design) |
+| ARM `SWP`/`SWPB` | Implemented for documented ARMv4T forms; `Rd=Rm` is valid and unpredictable aliases are rejected; independent interpreter/AOT vectors |
+| BIOS HLE | Six documented services callable directly or from typed ARM/Thumb SWI; no BIOS boot or cycle timing. Explicit experimental `--synthetic-bios-decompress` adds documented LZ77/RL/diff SWIs (not BitUnPack or Huffman); `--synthetic-bios-affine` adds documented `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`). The default stays fail-closed |
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
-| Bitmap display modes 3/4/5 | Snapshot only; no timing/tiles/sprites/windows |
+| BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
+| Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No save type or persistence is modelled by this store policy; the backup window is governed by its own device policy below |
+| Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model volatile 32/64 KiB SRAM, and `--synthetic-backup-flash128k` models a volatile 128 KiB flash with the documented autoselect/bank/program/erase subset. No persistence; wider accesses stay explicit errors |
+| Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
+| Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT alpha/brightness; bitmap modes 3/4/5. No scanline timing, Mode 2, 2D OBJ mapping, double-size affine OBJ, OBJ/BG mosaic or window 1 |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
-| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI or save claim |
-| ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
-| Runtime fallback | Reference interpreter; RAM code is never AOT |
+| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--audio WAV` plus fail-closed `--play`, `--save` persists an explicit raw backup image; no playability or GUI claim |
+| ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` report and `run_rom_audio` mono PCM module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
+| Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
-| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; static synthetic bitmap only, no ROM/input/audio/save; one macOS Metal smoke run (render acknowledgements, not a visible-frame count) |
-| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2, static synthetic demo only; no ROM/AOT/input/audio/save; browser functional E2E locally observed, visual review pending |
+| Input model | `core::input`: ten button bits, default/editable key bindings, 800x600 landscape + portrait touch layout, persisted settings document, instruction-indexed scripts |
+| Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
+| Audio | Dependency-free PSG mixer plus timer-clocked Direct Sound FIFO A/B; stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out [--play]` (installed system player, fail-closed) and AOT harness `--audio`; wasm `run_rom_audio` PCM; browser WebAudio test tone and PCM playback helper; full PSG sweep/envelope timing tracked in #29 |
+| Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
+| Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
+| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
+| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
+| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings, a synthetic save-image library (import/export/use/default) and a `playPcm` WebAudio helper for the AOT module's PCM; static synthetic demo only; no ROM/AOT/guest-ROM execution |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
@@ -62,13 +75,43 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--synthetic-bios-zero-fill]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
+cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
+cargo run -- save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
+cargo run -- audio --out output/<new-directory>/tone.wav [--frequency 440] [--seconds 2] [--volume 80] [--mute]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
 
+`./scripts/save-tester.sh` is also part of the Linux CI job; the browser save
+panel is covered by `apps/web/tests/js/saves.test.mjs` and the Playwright E2E
+suite.
+
+- `run --input FILE` replays `at:KEYS:hold` instruction-indexed input events
+  (for example `0:A+B+Start:20000000`). The `run` report always includes
+  `perf_*` wall-time, guest-instructions/second and real-time-factor lines with
+  the explicit non-cycle caveat. `run --audio-out FILE [--volume 0..100]
+  [--mute]` renders the guest sound-register timeline to a WAV through the
+  dependency-free PSG + Direct Sound `AudioEngine`. `--play` additionally runs an
+  installed platform player (`afplay`, `paplay`/`aplay`, PowerShell
+  `SoundPlayer`). No player is downloaded or guessed: a missing or failing
+  player is an explicit error, and `GBA_NATIVE_AUDIO_PLAYER` can name one.
+  This is post-run playback of the WAV, not a streaming sink.
+- The generated AOT harness accepts the same `--play` contract as `run`:
+  `--audio FILE --play` writes the guest WAV and hands it to an installed
+  platform player; a missing player is an explicit harness error.
+- `run --save-dir DIR [--save-slot NAME]` loads and stores the selected raw
+  backup image through the host save library; without a slot it uses the stored
+  default, creating `default` on the first save. `save list/import/export/use/
+  default/delete` manages multiple slots per ROM SHA-256. Device writes still
+  require one explicit `--synthetic-backup-*` opt-in.
+- `fixture input-tester` writes our own 4 KiB synthetic ROM. The committed
+  fixture, input script and expected frame live under `tests/roms/synthetic/`;
+  `scripts/input-tester.sh --visual` builds the native AOT artifact and compares
+  the frame with Playwright.
 - `info` parses the documented 192-byte header and prints diagnostics. It does
   not validate the Nintendo logo.
 - `demo` builds the synthetic direct-entry fixture, executes 230,411 guest
@@ -76,14 +119,31 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   writes a PPM. The guest itself draws the image via ARM setup, a BX to Thumb,
   a Thumb pixel loop and a Thumb BX back.
 - `run` initializes the documented guest BIOS stacks and executes a bounded
-  number of instructions, including typed SWIs to the six HLE services. Other
-  services return explicit errors. Reaching the budget is not a boot or frame
-  claim. BIOS data reads fail closed by default. `--synthetic-bios-zero-fill`
+  number of instructions, including typed SWIs to the six default HLE services.
+  Other services return explicit errors unless an opt-in below enables them.
+  Reaching the budget is not a boot or frame claim. BIOS data reads fail closed
+  by default. `--synthetic-bios-zero-fill`
   is an explicit experimental opt-in that returns zero for every BIOS data read
   width (`0x00000000..=0x00003FFF`); it is reported as
   `bios_data_policy=synthetic-zero-fill` and is neither authentic BIOS data or
   opcodes nor hardware behavior. BIOS fetches and writes stay rejected under
-  both policies. Without `--out`, it creates no files. With `--out`, after both
+  both policies. `--synthetic-bios-decompress` is an explicit experimental
+  opt-in for the documented LZ77 (`11h`/`12h`), run-length (`14h`/`15h`) and
+  diff-filter (`16h`/`17h`/`18h`) SWIs; it is reported as
+  `decompression_policy=documented-formats`. The default is `strict`, which
+  keeps the whole decompression family explicit unsupported-service errors.
+  BitUnPack (`10h`) and Huffman (`13h`) remain unsupported under either policy.
+  `--synthetic-bios-affine` is an explicit experimental opt-in for the
+  documented `BgAffineSet`/`ObjAffineSet` (`0Eh`/`0Fh`); it is reported as
+  `affine_policy=documented`. The default is `strict`, which keeps both SWIs
+  explicit unsupported-service errors.
+  `--synthetic-backup-sram64k` selects the documented 64 KiB SRAM window
+  maximum; the 32 KiB flag and the default remain unchanged.
+  `--synthetic-backup-flash128k` selects the volatile two-bank 128 KiB flash
+  model with the documented autoselect/bank/program/erase subset. It is the
+  model that lets the unmodified Emerald probe set the boot flag and reach the
+  title sequence. None of the backup models persists data.
+  Without `--out`, it creates no files. With `--out`, after both
   execution and the static bitmap snapshot succeed, it creates a fresh directory
   containing `screen.ppm` and `report.txt`. The report records the ROM and image
   hashes, requested/used instruction budget, selected BIOS data policy, final
@@ -138,8 +198,12 @@ cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<
   Neither branch is a playable standalone game, GUI frontend, save-aware app,
   final application or complete browser app: the WASM artifact is a
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or
-  persistence. Automated tests use synthetic fixtures; local supplied-ROM
-  attempts and their outcomes are recorded in the verification log. The latest
+  persistence. Automated `cargo test` and CI use synthetic fixtures. Optional
+  local hardware-test ROM instructions are in
+  `tests/roms/gba-tests/README.md`; their binaries remain read-only and outside
+  CI. A budget stop is not a pass: the ROM's own visible PASS result is required.
+  Local target/run attempts and their outcomes are recorded in the verification
+  log. The latest
   bounded native run stops at an unsupported BIOS-region access at
   `0x0000000A` (`direct-entry mode has no BIOS`); the strict default is
   unchanged and BIOS instruction fetch remains outside the implemented subset.
@@ -195,6 +259,8 @@ wasm-bindgen CLI from `./scripts/bootstrap-web-tools.sh` and the installed
 ./scripts/full.sh      # short + debug/release tests, demo, native proof, Ratchet slow
 ./scripts/frontend.sh  # optional desktop package: no Ratchet, no live GPU window
 ./scripts/web.sh --ci  # optional browser package and fail-closed Chromium E2E
+./scripts/save-tester.sh  # native save persistence (fresh/loaded, CLI slots)
+./scripts/play-tester.sh  # native playback through a fake player on PATH
 ```
 
 Per-package commands are available when a smaller loop is useful:
@@ -205,6 +271,21 @@ cargo test -p gba-native-aot
 cargo test -p gba-native
 cargo run --bin quality-counter -- oversized --root . --max 500 --hard
 ```
+
+The local-only name-entry regression is ignored by default and never runs in
+CI. It needs a user-supplied, read-only retail ROM and writes evidence only
+under `output/`:
+
+```text
+GBA_NATIVE_LOCAL_ROM=/path/to/read-only.gba \
+  cargo test -p gba-native-core --release --test local_name_entry -- --ignored --nocapture
+GBA_NATIVE_LOCAL_ROM=/path/to/read-only.gba \
+  cargo test -p gba-native-core --release --test local_emerald_save -- --ignored --nocapture
+```
+
+The save test drives the observed intro/name/menu flow to an in-game save,
+persists the 128 KiB flash image through the save library and reloads it. It
+writes evidence only under `output/local-emerald-save-*`.
 
 The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and
@@ -306,8 +387,12 @@ open pending independent verification and CI; local tests alone do not close it.
   immediate or by the low eight bits of a register; `B`, `BL` and `BX`.
   Documented PC reads (`+8`, or `+12` for register-specified shifts), ALU PC
   writes with `S=0`, and PC wrapping are implemented. `S=1` with `Rd=PC`
-  requires an SPSR restore and stays an explicit error; ARMv5/newer exchange
-  encodings are rejected. `MRS`/`MSR` remain as before. Single word/byte
+  restores CPSR from the current mode's valid SPSR and uses the computed result
+  as the state-aligned PC; USER/SYSTEM and invalid saved modes fail explicitly.
+  ARMv5/newer exchange encodings are rejected. `MUL`/`MLA` use the register
+  form; the architecturally unpredictable `MUL`/`MLA Rd=Rm` aliases follow the
+  explicit prototype design policy in D21.
+  `MRS`/`MSR` remain as before. Single word/byte
   `LDR`/`STR` support immediate-12 or shifted-register offsets, pre/post
   indexing, writeback and the documented PC base/source rules; `LDRH`/`STRH`/
   `LDRSB`/`LDRSH` add pre/post immediate or unshifted register offsets; ARM
@@ -320,9 +405,11 @@ open pending independent verification and CI; local tests alone do not close it.
   FIQ/IRQ/SVC/ABT/UND SPSRs. MSR mode writes switch banks; USER control writes
   are ignored as documented; invalid modes and T-bit changes error before
   mutation; USER/SYSTEM SPSR access errors. Typed ARM/Thumb SWI has a bounded
-  SVC frame, six-service HLE dispatch and full CPSR return. IRQ delivery uses
-  the host-driven frame model and the documented IWRAM handler pointer; BIOS
-  boot is not implemented.
+  SVC frame, six default-service HLE dispatch (with opt-in decompression and
+  BgAffineSet/ObjAffineSet) and full CPSR return. VBlank and
+  timer-overflow IRQ dispatch uses the documented six-word IRQ frame, ARM
+  handler pointer and bounded exception return without fetching BIOS code; BIOS
+  boot and timing are not implemented.
 - Thumb: register ALU operations including `MUL`, shift by
   immediate and by register, `ADC`/`SBC`/`NEG`/`TST`/`CMN`, `MOV`/`ADD`/`SUB`
   register and immediate forms, high-register `ADD`/`CMP`/`MOV` (low/low
@@ -331,15 +418,26 @@ open pending independent verification and CI; local tests alone do not close it.
   halves of `BL`, `BX`, literal `LDR`, word/byte register and immediate
   transfers, SP-relative word transfers, immediate/register `LDRH`/`STRH`,
   register `LDSB`/`LDSH`, `PUSH`/`POP`, `LDMIA`/`STMIA`, and conditional or
-  unconditional `B`, and typed SWI to the six documented HLE services. The
-  ARMv5 `BLX` second half and register form are rejected;
-  empty stack/block lists and unaligned SP/base are explicit errors.
-- Memory/I/O: EWRAM and IWRAM mirrors, exact palette/VRAM/OAM regions, three ROM
-  windows, selected display/input/WAITCNT/DMA/IRQ/sound/timer registers. Unused
-  I/O writes are ignored and recorded; unmodelled reads remain errors. There is
-  no open bus, save support, cycle timing, audio generation or ticking timer.
-- Display: 240x160 mode-3 RGB555 snapshot; modes 4 and 5 with page selection.
-  Tiles, sprites, windows, blending and affine transforms are unsupported.
+  unconditional `B`, and typed SWI to the six default documented HLE services
+  (with the explicit decompression and BgAffineSet/ObjAffineSet opt-ins). The
+  ARMv5 `BLX` second half and register form are rejected; the ARMv4 empty-list
+  `LDMIA`/`STMIA` R15/`+0x40` quirk is implemented while empty stack lists remain
+  explicit errors. An unaligned SP/base aligns
+  only the transferred addresses while writeback uses the original base
+  (Design policy).
+- Memory/I/O: EWRAM and IWRAM mirrors, documented palette/VRAM/OAM regions plus
+  explicit prototype palette/VRAM/OAM alias policies, three ROM windows, selected
+  display/input/WAITCNT/DMA/IRQ/sound/timer registers. Timers advance from the
+  same nominal three-cycle-per-instruction mapping as `VCOUNT`, including
+  prescaler, cascade, reload and overflow-IRQ support; this is not cycle-accurate
+  timing. Unused I/O writes are ignored and recorded; unmodelled reads remain
+  errors. There is no open bus, save support, cycle timing, audio generation or
+  timer-driven sound/DMA request.
+- Display: 240x160 static snapshot. Mode 0 BG0-BG3 text + OBJ, Mode 1
+  BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT
+  alpha/brightness blending; modes 3-5 retain the bitmap paths. 2D OBJ tile
+  mapping, semi-transparent OBJ mode, double-size affine OBJ, OBJ/BG mosaic,
+  window 1, Mode 2 and scanline effects are unsupported.
 - AOT: only immutable ROM blocks; unknown targets use the reference interpreter;
   RAM is always interpreted freshly.
 

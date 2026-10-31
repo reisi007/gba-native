@@ -7,14 +7,19 @@ use gba_native::bus::Bus;
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::demo;
-use gba_native::display;
 use gba_native::error::{Error, Result};
 use gba_native::interpret;
-use gba_native::render::{self, Backend};
 
 mod aot_build;
+mod audio_cmd;
+mod demo_cmd;
+mod fixture_cmd;
+mod info_cmd;
 mod output;
+mod play;
+mod run_cmd;
 mod run_output;
+mod save_cmd;
 
 use output::{create_fresh_directory, create_unique_workspace, write_safely};
 
@@ -22,10 +27,13 @@ const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
   gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--synthetic-bios-zero-fill]
+  gba-native fixture input-tester --out output/<input-tester.gba>
+  gba-native save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
+  gba-native audio --out output/<tone.wav> [--frequency 440] [--seconds 2] [--volume 80] [--mute]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--volume 0..100] [--mute] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
-  gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
+  gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.
@@ -44,10 +52,13 @@ pub fn run() -> Result<()> {
             let path = args
                 .next()
                 .ok_or_else(|| Error::Args("info needs a ROM path".to_string()))?;
-            cmd_info(Path::new(&path))
+            info_cmd::run(Path::new(&path))
         }
-        "demo" => cmd_demo(args),
-        "run" => cmd_run(args),
+        "audio" => audio_cmd::run(args),
+        "demo" => demo_cmd::run(args),
+        "fixture" => fixture_cmd::run(args),
+        "save" => save_cmd::run(args),
+        "run" => run_cmd::run(args),
         "aot" => {
             let subcommand = args
                 .next()
@@ -65,146 +76,6 @@ pub fn run() -> Result<()> {
         }
         _ => Err(Error::Args(USAGE.to_string())),
     }
-}
-
-fn cmd_info(path: &Path) -> Result<()> {
-    let cart = Cartridge::from_path(path)?;
-    let header = cart.header();
-    println!("file={}", path.display());
-    println!("size={}", cart.len());
-    println!("sha256={}", cart.sha256_hex());
-    println!("title={:?}", header.title);
-    println!("game_code={}", String::from_utf8_lossy(&header.game_code));
-    println!("maker_code={}", String::from_utf8_lossy(&header.maker_code));
-    println!("fixed_byte=0x{:02X}", header.fixed_byte);
-    println!("fixed_ok={}", header.fixed_ok);
-    println!("main_unit_code=0x{:02X}", header.main_unit_code);
-    println!("device_type=0x{:02X}", header.device_type);
-    println!("version=0x{:02X}", header.version);
-    println!("complement=0x{:02X}", header.complement);
-    println!("computed_complement=0x{:02X}", header.computed_complement);
-    println!("complement_ok={}", header.complement_ok);
-    println!("logo=not-validated (no Nintendo logo bytes embedded)");
-    Ok(())
-}
-
-fn cmd_demo(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
-    let mut output = PathBuf::from("output/demo.ppm");
-    let mut size = (display::WIDTH, display::HEIGHT);
-    let mut backend = Backend::Nearest;
-    while let Some(argument) = args.next() {
-        match argument.as_str() {
-            "--out" => {
-                output = PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| Error::Args("--out needs a path".to_string()))?,
-                );
-            }
-            "--size" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| Error::Args("--size needs WxH".to_string()))?;
-                size = parse_size(&value)?;
-            }
-            "--backend" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| Error::Args("--backend needs a name".to_string()))?;
-                backend = Backend::parse(&value)?;
-            }
-            _ => return Err(Error::Args(format!("unknown demo option {argument}"))),
-        }
-    }
-
-    let cart = demo::demo_cartridge();
-    let mut cpu = Cpu::direct_entry();
-    cpu.set_pc(demo::ENTRY);
-    cpu.set_thumb(false);
-    let mut bus = Bus::new(cart);
-    let used = interpret::run_budget(&mut cpu, &mut bus, demo::DEMO_BUDGET)?;
-    let image = display::snapshot(&bus)?;
-    let scaled = render::scale(&image, size.0, size.1, backend)?;
-    write_safely(&output, &render::to_ppm(&scaled))?;
-
-    println!("fixture=synthetic-direct-entry");
-    println!("instructions={used}");
-    println!("pc=0x{:08X}", cpu.pc());
-    println!("cpsr=0x{:08X}", cpu.cpsr());
-    println!("image={}x{}", image.width, image.height);
-    println!("image_sha256={}", image.sha256_hex());
-    println!("output={}", output.display());
-    println!("output_size={}x{}", scaled.width, scaled.height);
-    println!("backend={}", backend.name());
-    println!("note=experimental synthetic fixture; not a retail-game compatibility result");
-    Ok(())
-}
-
-fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
-    let path = args
-        .next()
-        .ok_or_else(|| Error::Args("run needs a ROM path".to_string()))?;
-    let mut budget = 1_000_000u64;
-    let mut snapshot_output = None;
-    let mut synthetic_bios_zero_fill = false;
-    while let Some(argument) = args.next() {
-        match argument.as_str() {
-            "--synthetic-bios-zero-fill" => synthetic_bios_zero_fill = true,
-            "--budget" => {
-                let value = args
-                    .next()
-                    .ok_or_else(|| Error::Args("--budget needs a count".to_string()))?;
-                budget = value
-                    .parse()
-                    .map_err(|_| Error::Args(format!("invalid budget {value}")))?;
-            }
-            "--out" => {
-                snapshot_output =
-                    Some(PathBuf::from(args.next().ok_or_else(|| {
-                        Error::Args("--out needs a directory".to_string())
-                    })?));
-            }
-            _ => return Err(Error::Args(format!("unknown run option {argument}"))),
-        }
-    }
-    let cart = Cartridge::from_path(Path::new(&path))?;
-    let mut cpu = Cpu::direct_entry();
-    cpu.initialize_bios_stacks();
-    let mut bus = if synthetic_bios_zero_fill {
-        Bus::with_synthetic_bios_zero_fill(cart)
-    } else {
-        Bus::new(cart)
-    };
-    let used = interpret::run_budget(&mut cpu, &mut bus, budget)?;
-    let output = if let Some(path) = snapshot_output {
-        let image = display::snapshot(&bus)?;
-        Some(run_output::write_snapshot(
-            &path,
-            bus.cart(),
-            &cpu,
-            &bus,
-            budget,
-            used,
-            &image,
-        )?)
-    } else {
-        None
-    };
-    println!("status=bounded");
-    println!("instructions={used}");
-    println!("pc=0x{:08X}", cpu.pc());
-    println!("cpsr=0x{:08X}", cpu.cpsr());
-    println!("thumb={}", if cpu.thumb() { 1 } else { 0 });
-    println!("bios_data_policy={}", bus.bios_data_policy().name());
-    if synthetic_bios_zero_fill {
-        println!(
-            "bios_assumption=experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"
-        );
-    }
-    println!("note=stopped only by the instruction budget; no boot or compatibility claim");
-    if let Some(output) = output {
-        println!("snapshot_dir={}", output.display());
-    }
-    Ok(())
 }
 
 fn cmd_aot_proof(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {

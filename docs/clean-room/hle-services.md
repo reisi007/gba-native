@@ -1,9 +1,12 @@
 # Independently implemented BIOS HLE services and guest SWI path
 
 Status: six documented Rust HLE primitives are callable directly and from typed
-ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. No BIOS is
-fetched or booted; the implementation is not a general exception subsystem and
-does not establish playability. `README.md` and `gba-contract.md` state the same
+ARM/Thumb guest SWIs through a bounded SVC entry/frame/return path. Two
+independent host-selected opt-ins add the documented LZ77, run-length and
+diff-filter decompression SWIs and the `BgAffineSet`/`ObjAffineSet` services;
+without the relevant opt-in they stay unsupported. No BIOS is fetched or
+booted; the implementation is not a general exception subsystem and does not
+establish playability. `README.md` and `gba-contract.md` state the same
 boundary.
 
 Decision background: **D8** in `docs/decisions.md` chooses documented BIOS HLE
@@ -28,6 +31,12 @@ interface reference, not an emulator implementation source.
   - `#bios-memory-copy`
   - `#swi-0bh-gbands7nds9dsi7dsi9---cpuset`
   - `#swi-0ch-gbands7nds9dsi7dsi9---cpufastset`
+  - `#bios-decompression-functions` and the `LZ77UnCompReadNormalWrite8bit/16bit`
+    (`11h`/`12h`), `RLUnCompReadNormalWrite8bit/16bit` (`14h`/`15h`) and
+    `Diff8bitUnFilterWrite8bit/16bit` / `Diff16bitUnFilter` (`16h`..`18h`)
+    entries
+  - `#bios-rotationscaling-functions` and `#swi-0fh-gba---objaffineset`
+    (source/destination fields, angle range and `offset=2`/`offset=8` layout)
   - `#bios-reset-functions`
   - `#swi-01h-gba---registerramreset`
   - `#bios-halt-functions` (explicitly not implemented here)
@@ -176,8 +185,9 @@ Only r0 changes.
 - IWRAM `03007E00h..03007FFFh` is preserved.
 - GBATEK documents bit 5 as resetting SIO registers and switching to general-
   purpose mode, bit 6 as resetting sound registers, and bit 7 as resetting all
-  other registers except SIO and sound. All three are accepted. Group 5 has no
-  modeled serial state. Group 6 applies only the sufficiently specified sound
+  other registers except SIO and sound. All three are accepted. Group 5 clears
+  the modeled `SIOCNT`/`RCNT`/`SIODATA*` storage and sets `RCNT` bit 15 for the
+  documented general-purpose mode. Group 6 applies only the sufficiently specified sound
   effects: `SOUNDCNT_L := 0`, `SOUNDCNT_H := 0x880E`, `SOUNDCNT_X := 0`, clears
   the upper SOUNDBIAS bits while preserving the low 10, clears wave RAM, and
   empties both modeled Sound FIFOs.
@@ -192,16 +202,127 @@ Only r0 changes.
 - Bits 8..31 carry no documented meaning and are ignored, matching the
   documented service rather than rejecting the call.
 - GBATEK also notes that the SIO `SIODATA32` least-significant bits are destroyed
-  even when bit 5 is clear. The current bus has no `SIODATA32` state, so this
-  side effect is not fabricated.
+  even when bit 5 is clear. The bus now stores `SIODATA32_L/H`, but that
+  undocumented-elsewhere side effect is still not fabricated, so a guest must
+  not rely on it.
 - Every request writes `DISPCNT=0080h`, including flags zero, so a display
   snapshot becomes forced-blank white.
 - Clears use 16-bit or 32-bit bus writes, not byte writes. OAM zeroing is not a
   claim that objects are disabled; DISPCNT bit 6 and OAM attribute state are
   separate.
 - Sound register storage remains non-audio state; no audio is generated. Serial
-  state and the documented unconditional `SIODATA32` side effect remain
-  unmodeled; no save/persistence behavior is claimed.
+  registers are documented storage only: there is no shift engine, no link
+  partner, no serial IRQ delivery and no unconditional `SIODATA32` side effect,
+  and a start request outside normal mode with the internal clock is an explicit
+  error. No save/persistence behavior is claimed.
+
+## Opt-in decompression services
+
+The default `DecompressionPolicy::Strict` keeps SWI `11h/12h/14h/15h/16h/17h/
+18h` explicit `BiosError::UnsupportedService` values. The explicit
+`DecompressionPolicy::DocumentedFormats` opt-in
+(`run --synthetic-bios-decompress`) enables only these documented formats:
+
+| SWI | Format | Destination stores |
+| --- | --- | --- |
+| `11h` | LZ77, "Wram" variant | 8-bit units |
+| `12h` | LZ77, "Vram" variant | 16-bit units |
+| `14h` | run-length, "Wram" variant | 8-bit units |
+| `15h` | run-length, "Vram" variant | 16-bit units |
+| `16h` | 8-bit diff filter, "Wram" variant | 8-bit units |
+| `17h` | 8-bit diff filter, "Vram" variant | 16-bit units |
+| `18h` | 16-bit diff filter | 16-bit units |
+
+The implementation is derived from the public GBATEK format descriptions, not
+from BIOS bytes or code. Its boundaries are deliberately strict:
+
+- The source address must be 4-byte aligned. The 32-bit header must have the
+  documented compressed type (`1` LZ77, `3` run-length, `8` diff filter) and a
+  reserved/data-size nibble matching the selected service; otherwise
+  `DecompressHeader` is returned before the destination is touched.
+- Byte variants accept destinations wholly inside byte-writable EWRAM or
+  IWRAM. Halfword variants accept EWRAM/IWRAM/palette/VRAM/OAM, require a
+  halfword-aligned destination and an even decompressed size, and otherwise
+  return `Misaligned`, `DecompressUnitSize` or `UnsupportedDestination`.
+  ROM, BIOS, save, I/O and unmapped destinations are not supported.
+- LZ77 `disp=000h` is rejected for `12h`: GBATEK states the Vram function works
+  only with `disp=001h..FFFh`. A back-reference before the output start is
+  `DecompressBackReference` for either LZ77 variant.
+- The service reconstructs the complete documented output byte sequence in a
+  host buffer first. A decode failure (invalid header/back-reference or an
+  exhausted readable source) therefore leaves the destination untouched; a
+  structurally valid stream that simply carries different bytes cannot be
+  detected without a checksum. The final store is not transactional; a bus
+  error part-way through it leaves the bytes already written.
+- Service preconditions (policy, header, destination range) are rejected before
+  the SVC frame. A decode failure occurs after the architectural SWI frame has
+  been entered, but before any destination store, and propagates as an explicit
+  error; the frame is not rolled back, matching the bounded non-transactional
+  error policy of the memory-copy services.
+- The decompressed size is the header's 24-bit field. No compressed-stream
+  length is inferred from the following bytes; the decoder stops exactly at the
+  declared output size.
+- `10h` BitUnPack and `13h` Huffman are not implemented. They remain explicit
+  unsupported services under both policies.
+
+Ranges are validated and the output is rebuilt before the first store, but this
+is a bounded behavior model: it does not claim BIOS cycle timing, compressed
+data produced by a particular retail BIOS, or support for every possible
+compressed stream.
+
+## Opt-in affine services
+
+`AffinePolicy::Strict` keeps SWI `0Eh` and `0Fh` explicit
+`BiosError::UnsupportedService` values. `AffinePolicy::Documented`
+(`run --synthetic-bios-affine`) enables the two documented calculations.
+
+### ObjAffineSet (`0Fh`)
+
+| Input | Meaning |
+| --- | --- |
+| r0 | source pointer, six bytes per calculation |
+| r1 | destination pointer |
+| r2 | number of calculations |
+| r3 | destination stride in bytes between the four parameters |
+
+Source entry: `s16` scale X (8.8), `s16` scale Y (8.8), `u16` angle (only the
+upper eight bits are used). Destination: `PA`, `PB`, `PC`, `PD` at `dest + 0`,
+`dest + offset`, `dest + 2*offset`, `dest + 3*offset`; the next calculation
+starts `4*offset` bytes later. `offset=2` therefore stores the four parameters
+contiguously, while `offset=8` addresses one parameter per 8-byte OAM slot,
+matching the documented OAM structure.
+
+- The implementation is derived from the public interface and the standard
+  affine matrix. The 256-entry Q12 sine table is generated from the
+  mathematical sine at the documented 8-bit angle resolution; it is **not**
+  copied from a BIOS image. The HLE does not claim bit-identical results to a
+  particular BIOS sine table or rounding.
+- Products fit in `i32`; the final 16-bit store keeps the low halfword. An
+  extreme or negative scale therefore follows the same low-halfword store rule
+  as hardware. Each signed product uses an arithmetic right shift; this is a
+  stated rounding choice, not a BIOS-identity claim.
+- Source and destination must be 2-byte aligned. The source entries must lie
+  wholly in one readable region; the complete destination span must lie wholly
+  in one writable EWRAM/IWRAM/palette/VRAM/OAM region. ROM, BIOS, save, I/O and
+  unmapped destinations are explicit errors.
+- `offset` must be even and at least 2. Preconditions (policy, alignment,
+  offset and ranges) are rejected before the SVC frame. The calculation and
+  stores happen after frame entry; a bus failure during the stores is not
+  rolled back.
+### BgAffineSet (`0Eh`)
+
+The source is a 20-byte entry: `s32` original centre X, `s32` original centre Y
+(both 8.8), `s16` display centre X, `s16` display centre Y, `s16` scale X,
+`s16` scale Y and `u16` angle (upper eight bits used). The destination is a
+16-byte entry: `s16 PA`, `PB`, `PC`, `PD`, `s32` start X and `s32` start Y. The
+HLE computes the same Q12 matrix as `ObjAffineSet` and derives
+`start_x = origin_x - (display_x*PA + display_y*PB)` and
+`start_y = origin_y - (display_x*PC + display_y*PD)` with wrapping 32-bit
+arithmetic, matching the documented field layout. The destination must be
+4-byte aligned and wholly inside one writable EWRAM/IWRAM/palette/VRAM/OAM
+region; the direct BG2PA I/O destination is not modelled because the I/O block
+has its own register path. Both services share the generated sine table and the
+same non-identity disclaimer.
 
 ## Deliberately unimplemented
 
@@ -212,13 +333,18 @@ or silent successes:
 - `02h` Halt, `04h` IntrWait and `05h` VBlankIntrWait: IRQ/frame state is
   modelled, but these wait-service semantics are not implemented.
 - `03h` Stop/Sleep and `27h` CustomHalt.
-- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum, affine setup and every
-  other service not listed above.
-- The decompression family (`10h`..`18h`) is future work; no fake handlers are
-  installed.
-- BIOS bytes and BIOS boot remain absent. Exceptions other than the bounded SWI
-  path, IRQ delivery, unsupported SWI services and all timing-dependent services
-  remain explicit errors or unsupported behavior.
+- `09h`/`0Ah` ArcTan/ArcTan2, `0Dh` GetBiosChecksum and every other service not
+  listed above.
+- `10h` BitUnPack and `13h` Huffman remain future work; no fake handlers are
+  installed. The LZ77/RL/diff services are implemented only under
+  `DecompressionPolicy::DocumentedFormats` and `BgAffineSet`/`ObjAffineSet`
+  only under `AffinePolicy::Documented`; the default policy keeps each
+  unsupported.
+- BIOS bytes and BIOS boot remain absent. The runtime has a bounded,
+  behavior-only VBlank IRQ dispatcher frame and handler return; it never fetches
+  or reconstructs BIOS instructions. Other exception paths, IRQ nesting, FIQ,
+  unsupported SWI services and all timing-dependent services remain explicit
+  errors or unsupported behavior.
 
 ## Tests and evidence boundary
 
@@ -243,6 +369,32 @@ implementation:
   checked as a pre-effect error. Reserved bits take classification precedence
   when combined with flags 5..7.
 - Dispatch: explicit `UnsupportedService` results that mutate nothing.
+
+`crates/core/src/bios/decompress/tests.rs` uses synthetic LZ77, run-length and
+diff vectors written independently of the decoder: literal/back-reference
+expansion including an overlapping back-reference, header type and reserved
+nibble failures, byte-variant rejection of VRAM, halfword alignment/even-size
+failures, `disp=0` rejection for `12h`, a back-reference before the output
+start, routed run-length/diff vectors with independent cumulative expectations,
+a zero-size no-op, destination preservation after a truncated stream, and the
+strict-policy `UnsupportedService` boundary. `crates/core/tests/bios_decompress.rs`
+runs a Thumb SWI `11h` through the real SVC frame into EWRAM (the frame itself
+uses IWRAM) and checks the
+resume address, CPSR restoration, register preservation and output bytes, plus
+the strict default's no-write failure.
+
+`crates/core/src/bios/affine/tests.rs` uses synthetic six- and twenty-byte
+source entries and independently stated expectations: identity, quarter-turn
+and half-turn matrices, the upper-angle-byte rule, a negative scale, `offset=2`
+contiguous parameters, `offset=8` OAM-slot layout, zero count, odd offset and
+misaligned addresses, ROM destination and source overrun, a destination-region
+crossing, the strict-policy no-mutation boundary, policy-independent
+`state_digest`, BgAffineSet zero-scale/identity/quarter-turn/multi-entry
+vectors, and the generated sine table's cardinal values and quarter-wave
+symmetry.
+`crates/core/tests/bios_affine.rs` runs a Thumb SWI `0Fh` through the real SVC
+frame and checks the resumed PC, CPSR, register preservation and parameter
+bytes, plus the strict default's no-write failure.
 
 `crates/core/tests/swi_decode.rs` checks typed ARM/Thumb comments.
 `crates/core/tests/swi_execution.rs` checks full SVC entry/return, ARM and Thumb

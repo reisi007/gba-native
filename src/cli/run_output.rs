@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use gba_native::bus::{BiosDataPolicy, Bus, PALETTE_BASE};
+use gba_native::bios::{AffinePolicy, DecompressionPolicy};
+use gba_native::bus::{BiosDataPolicy, BiosWritePolicy, Bus, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::display::Image;
@@ -38,12 +39,42 @@ pub(super) fn write_snapshot(
             "experimental synthetic zero fill; not authentic BIOS data, opcodes or hardware behavior"
         }
     };
+    let bios_write_note = match bus.bios_write_policy() {
+        BiosWritePolicy::Strict => "fail-closed; BIOS stores are explicit errors",
+        BiosWritePolicy::RomWritesDropped => {
+            "experimental documented mask-ROM no-effect writes; no BIOS byte is stored, read or executed"
+        }
+    };
+    let decompression_note = match bus.decompression_policy() {
+        DecompressionPolicy::Strict => {
+            "fail-closed; decompression SWIs are explicit unsupported-service errors"
+        }
+        DecompressionPolicy::DocumentedFormats => {
+            "experimental documented LZ77/RL/diff HLE from public format descriptions; no BIOS bytes or code"
+        }
+    };
+    let affine_note = match bus.affine_policy() {
+        AffinePolicy::Strict => {
+            "fail-closed; SWI 0Eh/0Fh affine services are explicit unsupported-service errors"
+        }
+        AffinePolicy::Documented => {
+            "experimental documented BgAffineSet/ObjAffineSet from the public interface and mathematical affine formulas; no BIOS bytes or code"
+        }
+    };
     let report = format!(
         "capture_kind=post_budget_bitmap_snapshot\n\
          rom_bytes={}\n\
          rom_sha256={}\n\
          bios_data_policy={}\n\
          bios_data_note={}\n\
+         bios_write_policy={}\n\
+         bios_write_note={}\n\
+         rom_write_policy={}\n\
+         backup_policy={}\n\
+         decompression_policy={}\n\
+         decompression_note={}\n\
+         affine_policy={}\n\
+         affine_note={}\n\
          requested_instruction_budget={}\n\
          used_instruction_budget={}\n\
          stop_reason={}\n\
@@ -54,7 +85,10 @@ pub(super) fn write_snapshot(
          display_mode={}\n\
          display_forced_blank={}\n\
          display_bg0_enabled={}\n\
+         display_bg1_enabled={}\n\
          display_bg2_enabled={}\n\
+         display_bg3_enabled={}\n\
+         display_obj_enabled={}\n\
          display_backdrop_rgb555=0x{:04X}\n\
          image_file={}\n\
          image_width={}\n\
@@ -66,6 +100,14 @@ pub(super) fn write_snapshot(
         cart.sha256_hex(),
         bus.bios_data_policy().name(),
         bios_data_note,
+        bus.bios_write_policy().name(),
+        bios_write_note,
+        bus.rom_write_policy().name(),
+        bus.backup_policy().name(),
+        bus.decompression_policy().name(),
+        decompression_note,
+        bus.affine_policy().name(),
+        affine_note,
         requested_budget,
         used_budget,
         stop_reason,
@@ -76,7 +118,10 @@ pub(super) fn write_snapshot(
         mode,
         u8::from(dispcnt & 0x0080 != 0),
         u8::from(dispcnt & 0x0100 != 0),
+        u8::from(dispcnt & 0x0200 != 0),
         u8::from(dispcnt & 0x0400 != 0),
+        u8::from(dispcnt & 0x0800 != 0),
+        u8::from(dispcnt & 0x1000 != 0),
         backdrop,
         IMAGE_FILE,
         image.width,
