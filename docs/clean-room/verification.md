@@ -1836,7 +1836,7 @@ including `audio settings and the WebAudio test tone are wired`,
 `the Save tone WAV button downloads the shared audio artifact`.
 
 CI confirms the same hashed bundle on Linux/SwiftShader (Web foundation run
-`41222635161` for `61c24ee`, conclusion `success`):
+`41223516459` for `4d8d09e`, conclusion `success`, i.e. the current `main`):
 
 ```text
 ==> served ES-module bundle (import-graph closure, content-hashed)
@@ -1845,8 +1845,8 @@ bundle modules=6 assets=1 entry=app.e8f044f49ce6.js
 ℹ tests 28
 ℹ pass 28
 ℹ fail 0
-  ✓ the bundle hashes every module and rewrites its import specifiers
-23 passed (24.1s)
+23 passed (32.1s)
+21 passed (26.2s)
 ==> browser gate passed (build, host tests, WASM bundle, functional E2E)
 ```
 
@@ -1854,3 +1854,47 @@ The 28 Node tests are the lifecycle, input, saves, audio, features and bundle
 suites, so the browser feature-contract and tone-WAV checks run in CI, not only
 locally. The functional run is the full suite against the hashed names, and the
 second (variant B) launch passes `21` of the same specs.
+
+### CI parity matrix
+
+CI run `41223516435` (`CI`, `4d8d09e`) concludes `success` with every job green,
+including the Android target:
+
+```text
+android-app: success            android-native: success
+gates: success                  linux-input-tester: success
+windows-input-tester: success   macos-arm-native-aot: success
+```
+
+The `android-app` job is the in-CI unit-test and packaging gate:
+
+```text
+Android app unit tests
+  running 11 tests
+  test result: ok. 11 passed; 0 failed; 0 ignored
+Android APK build and verification
+  ==> building arm64-v8a (aarch64-linux-android)
+  ==> building armeabi-v7a (armv7-linux-androideabi)
+  ==> building x86_64 (x86_64-linux-android)
+  ==> verifying the APK
+  package=dev.gbanative.synthetic
+  activity=android.app.NativeActivity
+  profile=release
+  native-code=arm64-v8a armeabi-v7a x86_64
+  signature=verified
+  android app build ok
+```
+
+Together with `Frontend` `41223516572` and `Agent gates` `41223516437` on the
+same commit, the four CI workflows are green on `4d8d09e`:
+
+| workflow | conclusion | what it proves |
+| --- | --- | --- |
+| `CI` | success | gates, both input testers, macOS AOT, Android native and Android app |
+| `Web foundation` | success | 28 Node tests and 23 functional specs on the hashed bundle |
+| `Frontend` | success | desktop GPU frontend package |
+| `Agent gates` | success | architecture rule checks |
+
+The Android parity claim is therefore CI-verified for compilation, host unit
+tests (including `features_are_the_shared_contract`) and signed packaging; only
+on-device MediaPlayer playback remains outside CI.
