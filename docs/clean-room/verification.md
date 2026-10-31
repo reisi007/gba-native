@@ -1585,3 +1585,10 @@ and the `audio_audible=true`/volume/mute lines, and asserts the PSG-only fixture
 consumes no Direct Sound samples. This is Windows host execution of the same
 requested audio path, not a retail-ROM or compatibility claim; the synthetic
 fixture is committed, so no retail ROM, BIOS or save data enters CI.
+
+The first Windows run passed on `windows-latest` with target
+`x86_64-pc-windows-msvc`, a byte-identical expected frame, and
+`audio_wav_sha256=20f67766404d55d2e35eb7cd3ab8b0b77cc1bbf8cbbd7e50f14a86577a3a1448`
+— the same PCM digest as Linux. `.gitattributes` pins the expected PPM as
+non-text, the input script to LF and the synthetic ROM as binary so Windows
+`autocrlf` cannot disturb the byte-pinned fixtures.
