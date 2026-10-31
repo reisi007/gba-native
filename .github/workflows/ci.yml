@@ -58,6 +58,9 @@ jobs:
       - name: Native save-tester, AOT persistence and CLI slots
         run: ./scripts/save-tester.sh
 
+      - name: Native playback through a fake player on PATH
+        run: ./scripts/play-tester.sh
+
       - name: Upload input-tester evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,6 +69,7 @@ jobs:
           path: |
             output/input-tester.*/
             output/save-tester.*/
+            output/play-tester.*/
           if-no-files-found: warn
 
   # Windows host execution of the same audio-enabled synthetic AOT harness. The
@@ -85,12 +89,18 @@ jobs:
         shell: bash
         run: ./scripts/input-tester.sh
 
+      - name: Native playback through a fake player on PATH
+        shell: bash
+        run: ./scripts/play-tester.sh
+
       - name: Upload input-tester evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: input-tester-windows
-          path: output/input-tester.*/
+          path: |
+            output/input-tester.*/
+            output/play-tester.*/
           if-no-files-found: warn
 
   # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets

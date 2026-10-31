@@ -1592,17 +1592,29 @@ Playback evidence:
   no-player diagnostic. Linux/Windows use `paplay`/`aplay` and PowerShell
   `SoundPlayer`; these are detected, not guessed, and are not installed by the
   emulator.
+- `scripts/play-tester.sh` compiles a fake platform player, puts it first on
+  `PATH`, and requires both the CLI and the generated AOT harness to report
+  `audio_played=true`, name the fake player and hand it the generated WAV. A
+  nonzero player exit must fail with `failed with`. Linux and Windows CI run
+  this gate, so platform player detection/arguments are executed, not only
+  source-checked.
 - The browser E2E suite (22 Playwright tests) exercises
   `__gbaNative.audio.playPcm(Int16Array, 32768)`, which schedules mono signed
   16-bit PCM of the same shape returned by the wasm `run_rom_audio` export.
+  Browser *guest* playback is explicitly out of scope for the app: `apps/web`
+  does not load the AOT module or execute ROMs. The module returns PCM and
+  `playPcm` accepts it; wiring a module instance and its pacing into a page is
+  a caller integration, documented rather than claimed.
 
 Limits: this is synthetic/retail-ROM audio generation evidence, not a hardware
 audio-conformance claim. `--play` is post-run playback of a generated WAV, not a
-streaming speaker sink, and it depends on an installed platform player. The
-browser application does not execute guest ROMs; only the separately built wasm
-execution module returns guest PCM, and the caller owns the WebAudio scheduling.
-Direct Sound timing derives from the instruction-budget timer model, so it is an
-approximation, not cycle timing.
+streaming speaker sink, and it depends on an installed platform player. CI
+proves invocation/failure semantics with a fake player; it does not prove
+physical sound output on a runner without an audio device. The browser
+application does not execute guest ROMs and guest playback there is out of
+scope; only the separately built wasm execution module returns guest PCM, and
+the caller owns WebAudio scheduling. Direct Sound timing derives from the
+instruction-budget timer model, so it is an approximation, not cycle timing.
 
 ### Windows host execution
 

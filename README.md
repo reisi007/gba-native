@@ -64,7 +64,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
 | Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
-| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings and a synthetic save-image library (import/export/use/default); static synthetic demo only; no ROM/AOT/guest-audio execution |
+| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings, a synthetic save-image library (import/export/use/default) and a `playPcm` WebAudio helper for the AOT module's PCM; static synthetic demo only; no ROM/AOT/guest-ROM execution |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
