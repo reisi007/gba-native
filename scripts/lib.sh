@@ -67,8 +67,19 @@ run_ratchet() {
 # turn that into a gate-specific diagnostic.
 android_sdk_root() {
   local sdk
-  for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" \
-    "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" /usr/local/lib/android/sdk; do
+  # An explicit environment wins outright so a gate can be pointed at one SDK
+  # (and a test can prove the missing-SDK path on a machine that has one).
+  if [ -n "${ANDROID_HOME:-}" ]; then
+    [ -d "$ANDROID_HOME" ] || return 1
+    printf '%s\n' "$ANDROID_HOME"
+    return 0
+  fi
+  if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+    [ -d "$ANDROID_SDK_ROOT" ] || return 1
+    printf '%s\n' "$ANDROID_SDK_ROOT"
+    return 0
+  fi
+  for sdk in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" /usr/local/lib/android/sdk; do
     [ -n "$sdk" ] && [ -d "$sdk" ] && {
       printf '%s\n' "$sdk"
       return 0

@@ -435,9 +435,9 @@ fn android_gate_fails_closed_without_an_ndk() {
         .current_dir(repo_root())
         .env("PATH", path_with_cargo(temp.path()))
         .env("HOME", &home)
+        .env("ANDROID_HOME", &home)
         .env_remove("ANDROID_NDK_HOME")
         .env_remove("ANDROID_NDK_ROOT")
-        .env_remove("ANDROID_HOME")
         .env_remove("ANDROID_SDK_ROOT")
         .output()
         .expect("run android gate");

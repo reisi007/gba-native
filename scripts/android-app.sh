@@ -111,7 +111,7 @@ for abi in "${ABIS[@]}"; do
   [ -x "$linker" ] || fail "the NDK has no clang wrapper: $linker"
   info "building $abi ($target)"
   env "CARGO_TARGET_$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')_LINKER=$linker" \
-    cargo build --offline --locked --quiet --manifest-path apps/android/Cargo.toml \
+    cargo build --locked --quiet --manifest-path apps/android/Cargo.toml \
     --target "$target" "${BUILD_ARGS[@]}"
   library="target/android/$target/$PROFILE/libgba_native_android.so"
   [ -f "$library" ] || fail "expected Android library was not produced: $library"
