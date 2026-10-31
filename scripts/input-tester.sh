@@ -106,6 +106,8 @@ grep -qx "audio_master_volume=80" "$WORK/audio-report.txt" ||
   fail "native audio volume was not applied"
 grep -qx "audio_muted=false" "$WORK/audio-report.txt" ||
   fail "native audio mute state changed unexpectedly"
+grep -qx "audio_direct_sound_samples=0" "$WORK/audio-report.txt" ||
+  fail "the PSG-only fixture consumed Direct Sound FIFO samples"
 [ -s "$WORK/actual.wav" ] || fail "native audio WAV is missing"
 info "native guest audio matched: $(grep '^audio_wav_sha256=' "$WORK/audio-report.txt")"
 

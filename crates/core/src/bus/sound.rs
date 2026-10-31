@@ -1,7 +1,9 @@
-//! Sound registers plus bounded Sound A/B FIFOs. No audio is generated.
+//! Sound registers plus bounded Sound A/B FIFOs.
 //!
-//! FIFO sample consumption and FIFO-DMA requests are explicit host events. No
-//! timer, frame or sample clock is synthesized by this storage model.
+//! This is storage and register semantics only. FIFO sample consumption and
+//! FIFO-DMA requests are explicit host events; the host audio engine drives
+//! them from the timer overflow rate. No timer, frame or sample clock is
+//! synthesized inside this storage model.
 
 use super::Bus;
 use crate::error::{Error, Result};

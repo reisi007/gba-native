@@ -440,9 +440,12 @@ still drives a cascade, but raises no request.
 
 **Design approximation, not a timing claim:** instruction lengths, waitstates,
 bus arbitration and mid-instruction reads are absent. A poll observes only
-completed instruction ticks. Timers do not consume Sound FIFO samples, select or
-start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video capture or
-any other peripheral. `SOUNDCNT_H` timer-select bits remain storage-only, and the
+completed instruction ticks. The timer model itself does not consume Sound FIFO
+samples, start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video
+capture or any other peripheral. The host audio engine reads only timer 0/1's
+nominal overflow rate as the Direct Sound sample clock and then consumes FIFO
+bytes and requests sound-timed DMA refills through the explicit bus APIs.
+`SOUNDCNT_H` timer-select bits choose timer 0 or 1 for that host audio clock; the
 documented `VCOUNT`-related timing sections are not used to derive prescaler
 phase. RegisterRamReset group 7 returns all four timers to their stopped, zeroed
 default state. Timer access stays halfword-oriented: an 8-bit timer read remains

@@ -217,6 +217,7 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             engine.samples().len(),
             gba_native::sha256::hex(&gba_native::sha256::digest(&wav)),
             engine.samples().iter().any(|sample| *sample != 0),
+            engine.audio_stats(),
         ))
     } else {
         None
@@ -233,13 +234,25 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
         println!("save_sha256={digest}");
         println!("save_default={default}");
     }
-    if let Some((path, samples, digest, audible)) = audio_written {
+    if let Some((path, samples, digest, audible, audio_stats)) = audio_written {
         println!("audio_out={}", path.display());
         println!("audio_sample_rate={}", gba_native::audio::SAMPLE_RATE);
         println!("audio_samples={samples}");
         println!("audio_master_volume={audio_volume}");
         println!("audio_muted={audio_muted}");
         println!("audio_audible={audible}");
+        println!(
+            "audio_direct_sound_samples={}",
+            audio_stats.direct_sound_samples
+        );
+        println!(
+            "audio_direct_sound_underruns={}",
+            audio_stats.direct_sound_underruns
+        );
+        println!(
+            "audio_direct_sound_dma_refills={}",
+            audio_stats.direct_sound_dma_refills
+        );
         println!("audio_wav_sha256={digest}");
     }
     println!("pc=0x{:08X}", cpu.pc());

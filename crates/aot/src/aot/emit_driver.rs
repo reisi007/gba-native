@@ -279,6 +279,14 @@ pub(super) fn emit_driver(
     writeln!(out, "        println!(\"audio_master_volume={{volume}}\");").unwrap();
     writeln!(out, "        println!(\"audio_muted={{muted}}\");").unwrap();
     writeln!(out, "        println!(\"audio_audible={{}}\", !muted && engine.samples().iter().any(|sample| *sample != 0));").unwrap();
+    writeln!(out, "        let audio_stats = engine.audio_stats();").unwrap();
+    writeln!(
+        out,
+        "        println!(\"audio_direct_sound_samples={{}}\", audio_stats.direct_sound_samples);"
+    )
+    .unwrap();
+    writeln!(out, "        println!(\"audio_direct_sound_underruns={{}}\", audio_stats.direct_sound_underruns);").unwrap();
+    writeln!(out, "        println!(\"audio_direct_sound_dma_refills={{}}\", audio_stats.direct_sound_dma_refills);").unwrap();
     writeln!(out, "        println!(\"audio_wav_sha256={{}}\", gba_native::sha256::hex(&gba_native::sha256::digest(&wav)));").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    if let Some(path) = save_path {{").unwrap();

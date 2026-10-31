@@ -21,8 +21,11 @@
 //! one guest instruction is not three hardware cycles, instruction lengths,
 //! waitstates and bus arbitration are absent, and a counter read observes only
 //! completed instruction ticks. Timer overflow can latch the matching `IF` bit
-//! (bits 3..6) for the existing IME/IE dispatcher, but timers never drive Sound
-//! FIFO sample consumption, Sound DMA, VCOUNT, HBlank or any other peripheral.
+//! (bits 3..6) for the existing IME/IE dispatcher. The timer model does not
+//! consume Sound FIFO samples or start Sound DMA itself; the host audio engine
+//! reads [`TimerState::sound_rate`] to clock Direct Sound FIFO consumption and
+//! sound-timed DMA refills. VCOUNT, HBlank and other peripherals stay undriven
+//! by timers.
 //! Timer 0's documented `Not used` count-up bit is accepted and ignored, then
 //! reads back as zero; Timer 1..3 use it for count-up. Reserved control bits are
 //! stored as zero. Reset through RegisterRamReset group 7 returns all four
@@ -83,6 +86,22 @@ impl TimerState {
             offset / TIMER_STRIDE as usize,
             offset % TIMER_STRIDE as usize,
         )
+    }
+
+    /// Nominal Direct Sound sample rate for timer 0 or 1, if running normally.
+    ///
+    /// This is the documented overflow rate `16.777216 MHz / (prescaler *
+    /// (65536 - reload))`. It is a host audio clock, not a cycle-timing claim.
+    pub(super) fn sound_rate(&self, index: usize) -> Option<f32> {
+        let timer = *self.timers.get(index)?;
+        if !timer.running() || timer.count_up() {
+            return None;
+        }
+        let ticks = 65536u32 - u32::from(timer.reload);
+        if ticks == 0 {
+            return None;
+        }
+        Some(16_777_216.0 / (timer.prescaler() as f32 * ticks as f32))
     }
 
     pub(super) fn read16(&self, addr: u32) -> Option<u16> {

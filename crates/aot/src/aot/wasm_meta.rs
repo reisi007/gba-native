@@ -105,13 +105,15 @@ pub fn wasm_readme(artifact: &AotArtifact, budget: u64) -> String {
          cartridge, CPU or bus is constructed.\n\n\
          ## JavaScript API\n\n\
          ```js\n\
-         import init, { run_rom } from \"./pkg/gba_native_wasm_module.js\";\n\n\
+         import init, { run_rom, run_rom_audio, audio_sample_rate }\n\
+           from \"./pkg/gba_native_wasm_module.js\";\n\n\
          await init();\n\
          // `input` is a caller-provided <input type=\"file\"> element; this module\n\
          // generates no page UI and the selected file stays local to the browser.\n\
          const bytes = new Uint8Array(await input.files[0].arrayBuffer());\n\
          const report = run_rom(bytes); // Uint8Array -> compact key=value report\n\
-         console.log(report);\n\
+         const pcm = run_rom_audio(bytes); // Int16Array of mono guest PCM\n\
+         console.log(report, pcm.length, audio_sample_rate());\n\
          ```\n\n\
          The bytes come from a browser-local `File` selected by the user. Nothing is\n\
          fetched from a URL, uploaded to a server or written to disk: the ROM never\n\
@@ -122,6 +124,12 @@ pub fn wasm_readme(artifact: &AotArtifact, budget: u64) -> String {
          `pc`, `cpsr`, `thumb`, `budget`, `budget_remaining`, `budget_used`,\n\
          `fallbacks` and CPU/bus/ROM digests. Core failures are thrown as JS errors;\n\
          unsupported instructions or I/O are never silently ignored.\n\n\
+         `run_rom_audio` runs the same bounded program with the stateful mixer and\n\
+         returns mono signed 16-bit PCM at `audio_sample_rate()` (32768 Hz), mixing\n\
+         PSG and Direct Sound FIFO playback from guest state. It performs no\n\
+         playback, buffering or scheduling itself: the caller owns the WebAudio\n\
+         sink. A run produces exactly the samples due inside its instruction budget;\n\
+         that is not a track length or real-time guarantee.\n\n\
          ## Explicit non-claims\n\n\
          An exhausted instruction budget is not a frame, boot or playability claim.\n\
          This module has no browser UI, no GPU presentation, no game input, no saves\n\

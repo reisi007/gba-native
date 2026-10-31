@@ -117,7 +117,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "            irq_returns += 1;").unwrap();
     writeln!(
         out,
-        "            if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+        "            if let Some(engine) = audio.as_mut() {{ engine.advance_instruction_bus(bus)?; }}"
     )
     .unwrap();
     writeln!(out, "            continue;").unwrap();
@@ -205,7 +205,7 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
     writeln!(out, "    bus.tick_frame();").unwrap();
     writeln!(
         out,
-        "    if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+        "    if let Some(engine) = audio.as_mut() {{ engine.advance_instruction_bus(bus)?; }}"
     )
     .unwrap();
     writeln!(out, "    *remaining -= 1;").unwrap();

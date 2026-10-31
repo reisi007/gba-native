@@ -56,8 +56,11 @@ Relevant anchors actually consulted for this milestone:
   (not used for Timer 0), overflow IRQ enable, start/stop, the reload/current
   counter distinction, reload on overflow and on the `0 -> 1` start edge, and
   the 32-bit reload-plus-start note. The implementation advances these counters
-  only from the nominal three-cycle instruction mapping; no hardware cycle,
-  prescaler phase or sound/DMA synchronization is inferred from the reference.
+  only from the nominal three-cycle instruction mapping; no hardware cycle or
+  prescaler phase is inferred from the reference. The host audio engine later
+  uses the documented overflow-rate formula as the Direct Sound sample clock and
+  issues explicit FIFO/DMA calls (see the Direct Sound round in
+  `verification.md`); that is an audio approximation, not hardware timing.
   These anchors were consulted on 2026-10-29 in the same upstream GBATEK text at
   <https://problemkaputt.de/gbatek.htm>; that retrieval was not separately
   retained or hashed.

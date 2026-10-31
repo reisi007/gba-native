@@ -239,9 +239,14 @@ impl Bus {
                 detail: "sound FIFO DMA requires an incrementing source",
             });
         }
-        if state.control & DEST_CONTROL != 2 << 5 {
+        // In sound special timing the transfer always targets the FIFO
+        // register, so the destination address is not advanced. The control
+        // field is written as either increment (0) or fixed (2) in practice;
+        // decrement/reload are not sound modes and stay explicit errors.
+        let destination_control = state.control & DEST_CONTROL;
+        if destination_control != 0 && destination_control != 2 << 5 {
             return Err(Error::UnsupportedDma {
-                detail: "sound FIFO DMA requires a fixed destination",
+                detail: "sound FIFO DMA requires a fixed or increment destination field",
             });
         }
         let available = self.sound_fifo_available(fifo);

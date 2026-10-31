@@ -1,17 +1,32 @@
 //! Dependency-free GBA audio synthesis and WAV output.
 //!
-//! This is a bounded PSG mixer: two square channels, the wave channel and the
-//! noise channel, driven by the write-only sound register file. It has no
-//! platform audio dependency, no unsafe code and no sample-clock claim beyond
-//! the fixed host sample rate. Direct Sound FIFO playback is not mixed here;
-//! the FIFO device model remains the explicit host-event queue in `bus::sound`.
+//! A bounded PSG mixer (two square channels, the wave channel and the noise
+//! channel) plus Direct Sound FIFO A/B playback, both driven by the write-only
+//! GBA sound register file. There is no platform audio dependency and no unsafe
+//! code. The output is deterministic PCM, so every supported target (including
+//! wasm32) compiles the same renderer. Native callers can write a WAV file; a
+//! browser frontend can feed the same samples to WebAudio.
 //!
-//! The output is deterministic PCM, so every supported target (including
-//! wasm32) can compile the same renderer. Native callers can write a WAV file;
-//! the browser frontend can feed the same samples to WebAudio.
+//! **Explicit limits.** [`SAMPLE_RATE`] is a fixed host render rate, not a GBA
+//! sample-clock claim. Direct Sound consumes one signed 8-bit FIFO byte per
+//! timer-0/1 overflow using the documented
+//! `16.777216 MHz / (prescaler * (65536 - reload))` rate, but the timer model
+//! itself advances on an instruction budget, not hardware cycles. A FIFO
+//! underrun holds the last sample instead of inventing silence.
+
+mod direct_sound;
+
+#[cfg(test)]
+mod tests;
+
+use crate::bus::{Bus, INSTRUCTION_CYCLES};
+use crate::error::Result;
+use direct_sound::DirectSound;
 
 /// Fixed host render rate. This is not a claim about the GBA sample clock.
 pub const SAMPLE_RATE: u32 = 32_768;
+
+const CYCLES_PER_SAMPLE: u32 = 16_777_216 / SAMPLE_RATE;
 
 /// Host-side volume and mute state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,94 +144,125 @@ fn noise_sample(regs: &[u8], phase: f32, lfsr: &mut u16) -> f32 {
     if *lfsr & 1 == 0 { volume } else { -volume }
 }
 
-/// Render `frames` mono samples from one sound-register snapshot.
-///
-/// The register file is the same 0x48-byte image the bus exposes at
-/// `0x04000060`; offsets are relative to that base. All channels are mixed and
-/// scaled by the host volume/mute setting, then clamped to `i16`.
-#[must_use]
-pub fn render_psg(regs: &[u8], frames: usize, settings: AudioSettings) -> Vec<i16> {
-    let mut phases = [0.0f32; 4];
-    let mut lfsr = 0x7FFFu16;
-    let mut samples = Vec::with_capacity(frames);
-    render_into(regs, frames, settings, &mut phases, &mut lfsr, &mut samples);
-    samples
+/// Phase and noise state of the four PSG channels.
+#[derive(Clone, Debug)]
+struct PsgMixer {
+    phases: [f32; 4],
+    lfsr: u16,
 }
 
-fn render_into(
-    regs: &[u8],
-    frames: usize,
-    settings: AudioSettings,
-    phases: &mut [f32; 4],
-    lfsr: &mut u16,
-    samples: &mut Vec<i16>,
-) {
-    if regs.len() < 0x40 {
-        samples.extend(std::iter::repeat_n(0, frames));
-        return;
+impl PsgMixer {
+    fn new() -> Self {
+        Self {
+            phases: [0.0; 4],
+            lfsr: 0x7FFF,
+        }
     }
-    let master = regs[0x24] & 0x80 != 0;
-    let psg_volume = f32::from(regs[0x20] & 0x07) / 7.0;
-    let gain = settings.gain() * psg_volume * 0.30;
-    let mut phase1 = phases[0];
-    let mut phase2 = phases[1];
-    let mut phase3 = phases[2];
-    let mut phase4 = phases[3];
-    for _ in 0..frames {
+
+    /// One host sample of the normalized PSG mix plus the active-channel count.
+    fn frame(&mut self, regs: &[u8]) -> (f32, u16) {
+        if regs.len() < 0x40 || regs[0x24] & 0x80 == 0 {
+            return (0.0, 0);
+        }
         let mut mixed = 0.0f32;
         let mut active = 0u16;
-        if master
-            && channel_enabled(regs, 0)
+        if channel_enabled(regs, 0)
             && let Some(frequency) = square_frequency(regs, 0x04)
         {
-            mixed += square_sample(regs, 0x02, 0x04, phase1);
-            phase1 = (phase1 + frequency / SAMPLE_RATE as f32).fract();
+            mixed += square_sample(regs, 0x02, 0x04, self.phases[0]);
+            self.phases[0] = (self.phases[0] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
-        if master
-            && channel_enabled(regs, 1)
+        if channel_enabled(regs, 1)
             && let Some(frequency) = square_frequency(regs, 0x0C)
         {
-            mixed += square_sample(regs, 0x08, 0x0C, phase2);
-            phase2 = (phase2 + frequency / SAMPLE_RATE as f32).fract();
+            mixed += square_sample(regs, 0x08, 0x0C, self.phases[1]);
+            self.phases[1] = (self.phases[1] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
-        if master && channel_enabled(regs, 2) {
-            mixed += wave_sample(regs, phase3);
+        if channel_enabled(regs, 2) {
+            mixed += wave_sample(regs, self.phases[2]);
             if let Some(frequency) = square_frequency(regs, 0x14) {
-                phase3 = (phase3 + frequency / SAMPLE_RATE as f32).fract();
+                self.phases[2] = (self.phases[2] + frequency / SAMPLE_RATE as f32).fract();
             }
             active += 1;
         }
-        if master && channel_enabled(regs, 3) {
-            mixed += noise_sample(regs, phase4, lfsr);
-            phase4 = (phase4 + 1.0 / SAMPLE_RATE as f32).fract();
+        if channel_enabled(regs, 3) {
+            mixed += noise_sample(regs, self.phases[3], &mut self.lfsr);
+            self.phases[3] = (self.phases[3] + 1.0 / SAMPLE_RATE as f32).fract();
             active += 1;
         }
-        let value = if active == 0 {
-            0.0
-        } else {
-            mixed / f32::from(active)
-        };
-        samples.push((value * gain * f32::from(i16::MAX)).clamp(-32768.0, 32767.0) as i16);
+        (mixed, active)
     }
-    phases.copy_from_slice(&[phase1, phase2, phase3, phase4]);
+
+    fn render_into(
+        &mut self,
+        regs: &[u8],
+        frames: usize,
+        settings: AudioSettings,
+        samples: &mut Vec<i16>,
+    ) {
+        if regs.len() < 0x40 {
+            samples.extend(std::iter::repeat_n(0, frames));
+            return;
+        }
+        let psg_volume = f32::from(regs[0x20] & 0x07) / 7.0;
+        let gain = settings.gain() * psg_volume * 0.30;
+        for _ in 0..frames {
+            let (mixed, active) = self.frame(regs);
+            let value = if active == 0 {
+                0.0
+            } else {
+                mixed / f32::from(active)
+            };
+            samples.push((value * gain * f32::from(i16::MAX)).clamp(-32768.0, 32767.0) as i16);
+        }
+    }
+}
+
+/// Host-side counters for the Direct Sound path.
+///
+/// These are diagnostics, not hardware timing: `direct_sound_samples` counts
+/// FIFO bytes consumed, `direct_sound_underruns` counts sample slots where the
+/// FIFO was empty, and `direct_sound_dma_refills` counts observed burst refills.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AudioStats {
+    pub direct_sound_samples: u64,
+    pub direct_sound_underruns: u64,
+    pub direct_sound_dma_refills: u64,
+}
+
+/// Render `frames` mono samples from one sound-register snapshot.
+///
+/// The register file is the same 0x48-byte image the bus exposes at
+/// `0x04000060`; offsets are relative to that base. All PSG channels are mixed
+/// and scaled by the host volume/mute setting, then clamped to `i16`. Direct
+/// Sound needs a live bus and is mixed by [`AudioEngine::advance_instruction_bus`].
+#[must_use]
+pub fn render_psg(regs: &[u8], frames: usize, settings: AudioSettings) -> Vec<i16> {
+    let mut mixer = PsgMixer::new();
+    let mut samples = Vec::with_capacity(frames);
+    mixer.render_into(regs, frames, settings, &mut samples);
+    samples
 }
 
 /// Stateful mixer that advances with the guest instruction timeline.
 ///
-/// Call [`AudioEngine::advance_instruction`] after every guest instruction with
-/// the current sound-register snapshot. Phase and noise state persist across
-/// calls, so a guest pitch/volume change is heard at the next generated sample,
-/// not after a fixed snapshot interval. The nominal clock is the documented
-/// 16.777216 MHz CPU clock divided by [`SAMPLE_RATE`]; this is an approximation,
-/// not cycle timing. One instruction is attributed three cycles, matching the
-/// bus's documented frame/timer mapping.
+/// Call [`AudioEngine::advance_instruction_bus`] after every guest instruction
+/// when the live bus is available: it renders PSG and Direct Sound from current
+/// guest state, consumes FIFO A/B bytes at the timer-selected rate and requests
+/// the half-empty sound DMA refill. [`AudioEngine::advance_instruction`] remains
+/// the register-only PSG path for tests that have no bus.
+///
+/// Phase, LFSR, FIFO position and resampling accumulators persist across calls,
+/// so a guest pitch, volume, timer or FIFO change is heard at the next generated
+/// sample, not after a fixed snapshot interval. One instruction is attributed
+/// three nominal cycles, matching the bus's documented frame/timer mapping.
 #[derive(Clone, Debug)]
 pub struct AudioEngine {
     settings: AudioSettings,
-    phases: [f32; 4],
-    lfsr: u16,
+    psg: PsgMixer,
+    direct_sound: DirectSound,
     cycle_accumulator: u64,
     samples: Vec<i16>,
 }
@@ -226,8 +272,8 @@ impl AudioEngine {
     pub fn new(settings: AudioSettings) -> Self {
         Self {
             settings,
-            phases: [0.0; 4],
-            lfsr: 0x7FFF,
+            psg: PsgMixer::new(),
+            direct_sound: DirectSound::new(),
             cycle_accumulator: 0,
             samples: Vec::new(),
         }
@@ -242,48 +288,92 @@ impl AudioEngine {
         self.settings
     }
 
-    /// Advance the mixer by one guest instruction.
+    /// Advance the register-only PSG mixer by one guest instruction.
     ///
     /// Two consecutive calls represent a register write boundary: the next
     /// sample rendered after the write uses the new register values. There is
-    /// no fixed 1024-instruction snapshot interval.
+    /// no fixed 1024-instruction snapshot interval. Direct Sound is not mixed
+    /// here because it needs the bus FIFOs; use
+    /// [`AudioEngine::advance_instruction_bus`] for guest audio capture.
     #[inline]
     pub fn advance_instruction(&mut self, regs: &[u8]) {
-        let cycles_per_sample = 16_777_216 / SAMPLE_RATE;
-        self.cycle_accumulator += u64::from(crate::bus::INSTRUCTION_CYCLES);
-        if self.cycle_accumulator < u64::from(cycles_per_sample) {
-            return;
+        let frames = self.due_frames(1);
+        if frames > 0 {
+            self.psg
+                .render_into(regs, frames, self.settings, &mut self.samples);
         }
-        let frames = (self.cycle_accumulator / u64::from(cycles_per_sample)) as usize;
-        self.cycle_accumulator %= u64::from(cycles_per_sample);
-        render_into(
-            regs,
-            frames,
-            self.settings,
-            &mut self.phases,
-            &mut self.lfsr,
-            &mut self.samples,
-        );
     }
 
-    /// Advance by a number of instructions in one step.
+    /// Advance the register-only PSG mixer by many instructions in one step.
     ///
-    /// This is used by generated dispatchers after a translated block. It uses
-    /// the register snapshot of the block end and renders all samples due in
-    /// one call; it never quantizes to a fixed instruction chunk.
+    /// Direct Sound is not mixed here; see
+    /// [`AudioEngine::advance_instruction_bus`].
     pub fn advance(&mut self, regs: &[u8], instructions: u64) {
-        let cycles_per_sample = 16_777_216 / SAMPLE_RATE;
-        self.cycle_accumulator += instructions * u64::from(crate::bus::INSTRUCTION_CYCLES);
-        let frames = (self.cycle_accumulator / u64::from(cycles_per_sample)) as usize;
-        self.cycle_accumulator %= u64::from(cycles_per_sample);
-        render_into(
-            regs,
-            frames,
-            self.settings,
-            &mut self.phases,
-            &mut self.lfsr,
-            &mut self.samples,
-        );
+        let frames = self.due_frames(instructions);
+        if frames > 0 {
+            self.psg
+                .render_into(regs, frames, self.settings, &mut self.samples);
+        }
+    }
+
+    /// Advance PSG and Direct Sound by one guest instruction.
+    ///
+    /// The live bus provides the sound register file, the timer overflow rates
+    /// and the Sound A/B FIFOs. FIFO samples are consumed at the timer rate and
+    /// a sound-timed DMA burst is requested once a FIFO is at most half full.
+    pub fn advance_instruction_bus(&mut self, bus: &mut Bus) -> Result<()> {
+        let frames = self.due_frames(1);
+        self.render_bus(bus, frames)
+    }
+
+    /// Advance PSG and Direct Sound by many instructions in one step.
+    ///
+    /// Batch variant for callers that already hold a bus and want one register
+    /// snapshot for several instructions; generated dispatchers call
+    /// [`AudioEngine::advance_instruction_bus`] at every instruction boundary.
+    pub fn advance_bus(&mut self, bus: &mut Bus, instructions: u64) -> Result<()> {
+        let frames = self.due_frames(instructions);
+        self.render_bus(bus, frames)
+    }
+
+    fn due_frames(&mut self, instructions: u64) -> usize {
+        self.cycle_accumulator += instructions.saturating_mul(u64::from(INSTRUCTION_CYCLES));
+        let frames = (self.cycle_accumulator / u64::from(CYCLES_PER_SAMPLE)) as usize;
+        self.cycle_accumulator %= u64::from(CYCLES_PER_SAMPLE);
+        frames
+    }
+
+    fn render_bus(&mut self, bus: &mut Bus, frames: usize) -> Result<()> {
+        if frames == 0 {
+            return Ok(());
+        }
+        let regs = bus.sound_registers();
+        let gain = self.settings.gain();
+        let psg_volume = if regs.len() >= 0x21 {
+            f32::from(regs[0x20] & 0x07) / 7.0
+        } else {
+            0.0
+        };
+        let psg_gain = gain * psg_volume * 0.30;
+        for _ in 0..frames {
+            let (mixed, active) = self.psg.frame(&regs);
+            let psg = if active == 0 {
+                0.0
+            } else {
+                mixed / f32::from(active)
+            };
+            let direct = self.direct_sound.mix_frame(bus, &regs, gain)?;
+            let value = psg * psg_gain + direct;
+            self.samples
+                .push((value * f32::from(i16::MAX)).clamp(-32768.0, 32767.0) as i16);
+        }
+        Ok(())
+    }
+
+    /// Direct Sound FIFO consumption counters for diagnostics.
+    #[must_use]
+    pub fn audio_stats(&self) -> AudioStats {
+        self.direct_sound.stats()
     }
 
     #[must_use]
@@ -334,162 +424,4 @@ pub fn wav_bytes(samples: &[i16], sample_rate: u32) -> Vec<u8> {
         bytes.extend_from_slice(&sample.to_le_bytes());
     }
     bytes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn square_regs() -> [u8; 0x48] {
-        let mut regs = [0u8; 0x48];
-        // 440 Hz: 2048 - 131072/440 = 1750.
-        regs[0x02..0x04].copy_from_slice(&0xF080u16.to_le_bytes());
-        regs[0x04..0x06].copy_from_slice(&(0x8000u16 | 1750u16).to_le_bytes());
-        regs[0x20..0x22].copy_from_slice(&0x0107u16.to_le_bytes());
-        regs[0x24] = 0x80;
-        regs
-    }
-
-    #[test]
-    fn square_tone_is_audible_and_periodic() {
-        let samples = render_psg(
-            &square_regs(),
-            SAMPLE_RATE as usize,
-            AudioSettings::default(),
-        );
-        assert_eq!(samples.len(), SAMPLE_RATE as usize);
-        assert!(samples.iter().any(|sample| *sample != 0));
-        let crossings = samples
-            .windows(2)
-            .filter(|pair| (pair[0] < 0) != (pair[1] < 0))
-            .count();
-        // One second of 440 Hz square has about 880 sign changes.
-        assert!((800..=960).contains(&crossings), "crossings={crossings}");
-    }
-
-    #[test]
-    fn mute_is_digital_silence_and_volume_scales() {
-        let tone = square_regs();
-        let muted = AudioSettings::new(100, true);
-        assert!(
-            render_psg(&tone, 4096, muted)
-                .iter()
-                .all(|sample| *sample == 0)
-        );
-        let full = render_psg(&tone, 4096, AudioSettings::new(100, false));
-        let half = render_psg(&tone, 4096, AudioSettings::new(50, false));
-        let full_peak = full
-            .iter()
-            .map(|sample| sample.unsigned_abs())
-            .max()
-            .unwrap();
-        let half_peak = half
-            .iter()
-            .map(|sample| sample.unsigned_abs())
-            .max()
-            .unwrap();
-        assert!(full_peak > 0 && half_peak > 0);
-        assert!(half_peak < full_peak);
-    }
-
-    #[test]
-    fn disabled_master_register_is_silent() {
-        let mut regs = square_regs();
-        regs[0x24] = 0;
-        assert!(
-            render_psg(&regs, 1024, AudioSettings::default())
-                .iter()
-                .all(|s| *s == 0)
-        );
-    }
-
-    #[test]
-    fn wav_header_is_canonical_and_sized() {
-        let samples = [0i16, 1, -1, 32767, -32768];
-        let wav = wav_bytes(&samples, SAMPLE_RATE);
-        assert_eq!(&wav[..4], b"RIFF");
-        assert_eq!(&wav[8..12], b"WAVE");
-        assert_eq!(&wav[36..40], b"data");
-        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 10);
-        assert_eq!(wav.len(), 44 + 10);
-        assert_eq!(
-            u32::from_le_bytes(wav[24..28].try_into().unwrap()),
-            SAMPLE_RATE
-        );
-    }
-
-    #[test]
-    fn tone_generator_uses_the_requested_pitch() {
-        let samples = render_tone(1000.0, 8192, AudioSettings::new(100, false));
-        assert!(samples.iter().any(|sample| *sample != 0));
-    }
-
-    #[test]
-    fn engine_advances_with_guest_instructions() {
-        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
-        let regs = square_regs();
-        engine.advance(&regs, 1024);
-        let first = engine.samples().len();
-        assert!(first > 0);
-        engine.advance(&regs, 1024);
-        assert!(engine.samples().len() > first);
-        assert!(engine.samples().iter().any(|sample| *sample != 0));
-    }
-
-    #[test]
-    fn engine_keeps_phase_across_register_changes() {
-        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
-        let low = square_regs();
-        let mut high = square_regs();
-        high[0x04..0x06].copy_from_slice(&(0x8000u16 | 1700u16).to_le_bytes());
-        engine.advance(&low, 200_000);
-        let first = engine.samples().len();
-        assert!(first > 0);
-        assert!(engine.samples().iter().any(|s| *s != 0));
-        engine.advance(&high, 200_000);
-        assert!(engine.samples().len() > first);
-        assert!(engine.samples()[first..].iter().any(|s| *s != 0));
-    }
-
-    #[test]
-    fn register_write_changes_the_next_sample_without_chunk_latency() {
-        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
-        let mut regs = square_regs();
-        engine.advance(&regs, 1_024);
-        let before = engine.samples().len();
-        // Disable the master sound register at this exact instruction boundary.
-        regs[0x24] = 0;
-        engine.advance_instruction(&regs);
-        engine.advance(&regs, 512);
-        assert!(engine.samples().len() > before);
-        assert!(
-            engine.samples()[before..].iter().all(|sample| *sample == 0),
-            "a register write must affect the next sample, not a later chunk"
-        );
-    }
-
-    #[test]
-    fn volume_write_changes_amplitude_at_the_next_sample() {
-        let mut engine = AudioEngine::new(AudioSettings::new(100, false));
-        let mut regs = square_regs();
-        engine.advance(&regs, 1_024);
-        assert!(engine.samples().iter().any(|sample| *sample != 0));
-        let before = engine.samples().len();
-        // Channel 1 envelope/volume nibble 0 silences the still-running channel.
-        regs[0x02] = 0x00;
-        regs[0x03] = 0x00;
-        engine.advance(&regs, 1_024);
-        assert!(engine.samples().len() > before);
-        assert!(
-            engine.samples()[before..].iter().all(|sample| *sample == 0),
-            "a volume write must affect the next generated sample"
-        );
-    }
-
-    #[test]
-    fn engine_mute_is_silent_after_stateful_advance() {
-        let mut engine = AudioEngine::new(AudioSettings::new(100, true));
-        engine.advance(&square_regs(), 8192);
-        assert!(engine.samples().iter().all(|sample| *sample == 0));
-    }
 }

@@ -881,20 +881,28 @@ contains no platform dependency:
 - `AudioEngine` keeps phase/LFSR state and advances once per guest instruction
   (`advance_instruction`), so a register write changes the very next generated
   sample instead of waiting for a fixed snapshot interval.
+- `AudioEngine::advance_instruction_bus` additionally mixes Direct Sound from
+  the live bus: FIFO A/B bytes are consumed at the timer-0/1 overflow rate
+  (`16.777216 MHz / (prescaler * (65536 - reload))`), SOUNDCNT_H volume/enable
+  and timer selection are applied, and a half-empty FIFO requests the
+  sound-timed DMA burst. An underrun holds the last sample; unsupported DMA
+  configurations return an explicit error.
 - `AudioSettings` supplies a 0..=100 master volume and digital mute; the
   persisted settings document stores `master_volume` and `muted`.
 - `wav_bytes` is a deterministic RIFF/WAVE sink. `render_tone` is a synthetic
   test signal, not game audio.
 
-The first guest-state host path is a WAV artifact from the reference runner and
-the AOT harness. The browser frontend persists the same volume/mute fields and
-can play a fixed 440 Hz WebAudio test tone, but it does not yet stream guest PCM;
-that sink remains outstanding in issue #29. Native live playback is
-target-specific and must not add a default-workspace dependency or unsafe code.
-The current mixer is deliberately bounded: it has no full
-sweep/envelope/length frame sequencer, no Direct Sound FIFO sample clock and no
-cycle-accurate resampling. Those gaps and the cross-target acceptance tests are
-tracked in issue #29. This is not a retail-audio or hardware-timing claim.
+The guest-state host path is a WAV artifact from the reference runner and the
+AOT harness; both now render PSG plus Direct Sound from guest state. The browser
+frontend persists the same volume/mute fields and can play a fixed 440 Hz
+WebAudio test tone, but it does not yet stream guest PCM; that sink remains
+outstanding in issue #29. Native live playback is target-specific and must not
+add a default-workspace dependency or unsafe code. The mixer is deliberately
+bounded: it has no full sweep/envelope/length frame sequencer and no
+cycle-accurate resampling. The Direct Sound rate is derived from the
+instruction-budget timer model, so it is an audio approximation, not hardware
+cycle timing. Those gaps and the cross-target acceptance tests are tracked in
+issue #29. This is not a retail-audio or hardware-timing claim.
 
 ## D44 — Host save library and synthetic save fixture
 

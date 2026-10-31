@@ -202,7 +202,7 @@ fn emit_tick(out: &mut String, indent: &str) {
     writeln!(out, "{indent}bus.tick_frame();").unwrap();
     writeln!(
         out,
-        "{indent}if let Some(engine) = audio.as_mut() {{ engine.advance_instruction(&bus.sound_registers()); }}"
+        "{indent}if let Some(engine) = audio.as_mut() {{ engine.advance_instruction_bus(bus)?; }}"
     )
     .unwrap();
     writeln!(out, "{indent}*budget -= 1;").unwrap();

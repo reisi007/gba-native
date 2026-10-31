@@ -18,6 +18,8 @@ fn wasm_module_embeds_binding_constants_without_rom_bytes() {
     let (_cart, artifact, source) = fixture();
     assert!(source.contains("#[wasm_bindgen]"));
     assert!(source.contains("pub fn run_rom(bytes: Vec<u8>)"));
+    assert!(source.contains("pub fn run_rom_audio(bytes: Vec<u8>)"));
+    assert!(source.contains("pub fn audio_sample_rate() -> u32"));
     assert!(source.contains(&format!(
         "const ROM_SHA256: &str = \"{}\";",
         artifact.rom_sha256_hex()
@@ -205,6 +207,9 @@ fn wasm_readme_documents_the_callable_module_and_external_binding() {
     let hash = cart.sha256_hex();
     for marker in [
         "run_rom(bytes)",
+        "run_rom_audio",
+        "audio_sample_rate()",
+        "PSG and Direct Sound",
         "Uint8Array",
         "input.files[0].arrayBuffer()",
         "browser-local `File`",

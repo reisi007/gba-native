@@ -218,10 +218,11 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
 - `crates/core/src/save.rs`: host save library with multiple named slots per ROM
   SHA-256, a default marker and path-safe slot names; `Bus::backup_image` /
   `Bus::load_backup` move raw backup images in and out of the device model.
-- `crates/core/src/audio.rs`: dependency-free PSG mixer, stateful `AudioEngine`,
-  volume/mute settings and a WAV sink. It has no platform dependency; native
-  live playback is target-specific and the browser uses WebAudio. Full PSG
-  timing and Direct Sound FIFO playback are tracked in #29.
+- `crates/core/src/audio.rs`, `audio/` (`direct_sound.rs`, `tests.rs`):
+  dependency-free PSG mixer plus timer-clocked Direct Sound FIFO A/B playback,
+  stateful `AudioEngine`, volume/mute settings and a WAV sink. It has no platform
+  dependency; native live playback is target-specific and the browser uses
+  WebAudio. Full PSG timing and live guest-PCM sinks remain tracked in #29.
 - `crates/core/src/bios/`: six documentation-driven HLE services (`mod.rs`,
   `arithmetic.rs`, `memory.rs`), the opt-in documented decompression formats
   (`decompress.rs`) and `BgAffineSet`/`ObjAffineSet` (`affine.rs`, `affine/`),

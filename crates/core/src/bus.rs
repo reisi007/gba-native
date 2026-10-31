@@ -356,6 +356,15 @@ impl Bus {
         self.io.sound().register_file()
     }
 
+    /// Nominal Direct Sound sample rate driven by timer 0 or 1.
+    ///
+    /// Returns `None` while that timer is stopped or cascaded. The value is a
+    /// host audio approximation, not hardware cycle timing.
+    #[must_use]
+    pub fn sound_timer_rate(&self, index: usize) -> Option<f32> {
+        self.io.timer().sound_rate(index)
+    }
+
     pub fn cart(&self) -> &Cartridge {
         &self.cart
     }

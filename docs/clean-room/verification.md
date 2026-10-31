@@ -160,9 +160,10 @@ lockfiles.
 - `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the instruction-count
   frame model raises VBlank/IF once when its 228-line `VCOUNT` progression enters
   line 160, IRQ gating requires IME/IE/pending, and timers follow the
-  instruction-budget counter model. Sound FIFO state is bounded and host-driven;
-  no audio, timer-triggered sample consumption or automatic FIFO DMA is
-  generated.
+  instruction-budget counter model. Sound FIFO state is bounded; plain bus
+  stepping consumes nothing. The host audio engine reads timer 0/1's overflow
+  rate and issues the explicit FIFO pop and sound-DMA refill calls described in
+  the Direct Sound round below.
   `VCOUNT` is readable as its modelled halfword and, since the byte-lane round,
   through exactly the two byte lanes at `0x04000006`/`0x04000007`. The halfword
   walks all documented lines `0..=227` and wraps to 0; the retained 93632
@@ -839,9 +840,9 @@ was used. No retail game is supported or known playable. No BIOS boots; only the
 bounded synthetic SWI path, behavior-only VBlank IRQ dispatcher frame/return,
 and documented CPU-only ALU SPSR return have synthetic-test coverage. IRQ
 nesting, FIQ, other interrupt sources, other exception entry/vectoring, save
-persistence, audio output, input interaction, DMA arbitration and automatic
-event timing, cycle timing, other BG modes/layers, OBJ/sprite rendering or a
-playable frontend are not verified. The static Mode 0 BG0 snapshot is
+persistence, hardware audio output or live speaker playback, input interaction,
+DMA arbitration and automatic event timing, cycle timing, other BG modes/layers,
+OBJ/sprite rendering or a playable frontend are not verified. The static Mode 0 BG0 snapshot is
 only a synthetic, documentation-driven capability slice; it is not evidence
 that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
 optional synthetic `apps/desktop` frontend presents
@@ -1450,11 +1451,12 @@ native AOT harness for `aarch64-apple-darwin` (2,000,000-instruction build,
 still matched `5cbbd998…80b8b`. This is guest-state-driven audio from our own
 fixture, not a retail soundtrack claim.
 
-Limits: the mixer has no complete sweep/envelope/length frame sequencer, no
-Direct Sound FIFO sample clock and no cycle-accurate resampling. Live native
-speaker output is target-specific and not yet wired; the WAV artifact is the
-native output path in this slice. Full audio is tracked in issue #29 and is not
-a retail-audio, hardware-timing or BIOS-audio claim.
+Limits at the time of this first slice: the mixer had no Direct Sound FIFO
+sample clock (added in the round below), no complete
+sweep/envelope/length frame sequencer and no cycle-accurate resampling. Live
+native speaker output is target-specific and not yet wired; the WAV artifact is
+the native output path. Full audio is tracked in issue #29 and is not a
+retail-audio, hardware-timing or BIOS-audio claim.
 
 ## Round: host save library and synthetic save-tester (2026-10-31)
 
@@ -1504,3 +1506,61 @@ local observation, not a retail-save compatibility or distribution claim.
 
 Limits: this is persistence for the explicitly selected SRAM/flash models, not
 save-device compatibility. No retail save data, ROM or BIOS bytes are committed.
+
+## Round: Direct Sound FIFO audio and cross-target PCM (2026-10-31)
+
+`core::audio` now mixes Direct Sound A/B on top of the PSG.
+`AudioEngine::advance_instruction_bus` (used by the reference scripted runner
+and generated AOT dispatchers) reads the SOUNDCNT_H volume/enable and
+timer-select fields, consumes one signed 8-bit FIFO byte per timer-0/1 overflow
+at `16.777216 MHz / (prescaler * (65536 - reload))`, and requests the 16-byte
+sound-timed DMA burst once a FIFO is at most half full. A drained FIFO holds the
+last sample; a malformed sound DMA returns an explicit error. The register-only
+`advance_instruction` path stays PSG-only for tests without a bus. The renderer
+is mono at the fixed 32,768 Hz host rate; stereo panning, SOUNDBIAS PWM and
+hardware cycle timing are not modeled.
+
+Evidence:
+
+- `cargo test -p gba-native-core --lib audio`: 17 tests pass, covering timer
+  rate (reload, prescaler, stop), FIFO consumption at the timer rate, a
+  half-full DMA refill from EWRAM, underrun hold, SOUNDCNT_H enable/volume and a
+  same-boundary Sound write.
+- `cargo test -p gba-native-aot wasm` passes; the emitted module now exports
+  `run_rom_audio` (mono `Int16Array`) and `audio_sample_rate` beside the existing
+  `run_rom` report. Both entry points perform the same length/SHA-256 binding
+  check before constructing any guest state.
+- Synthetic input-tester parity at 2,000,000 instructions and volume 80: the
+  native AOT harness and the wasm32 `run_rom_audio` export both produced 11,718
+  samples at 32,768 Hz, `audio_audible=true`, `fallbacks=0`, and the identical
+  WAV SHA-256
+  `7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`.
+  This fixture programs PSG only, so the Direct Sound path leaves its PCM
+  byte-identical; it also matches the pre-Direct-Sound digest.
+- `./scripts/input-tester.sh` passes end to end (20,000,000 instructions,
+  `fallbacks=0`, committed frame byte match, `audio_audible=true`, WAV SHA-256
+  `20f67766404d55d2e35eb7cd3ab8b0b77cc1bbf8cbbd7e50f14a86577a3a1448`) and now
+  also asserts `audio_direct_sound_samples=0`, `audio_direct_sound_underruns=0`
+  and `audio_direct_sound_dma_refills=0` for this PSG-only guest.
+- Emerald, local read-only ROM, 600,000,000 instructions: 3,515,625 samples,
+  `audio_direct_sound_samples=2870052`, `audio_direct_sound_dma_refills=179382`,
+  `audio_direct_sound_underruns=6`, `audio_audible=true`, range
+  `-18592..14476`, RMS 2772.69, WAV SHA-256
+  `c00a81a1af723e2dc920af5f2d4d0b254126e2c373e7c95befe7e932e26dfaa4`
+  (`pc=0x080069E4`). Per-second RMS rises from 0 to about 634..2347 over the
+  first twelve seconds; the last ten seconds contain 24,047 sign changes, so the
+  capture is time-varying audio rather than a fixed test tone. The ROM is never
+  copied, embedded or committed.
+- `./scripts/cross.sh` built the audio-enabled harness for `aarch64-apple-darwin`
+  (Mach-O arm64, 651,184 bytes, host run `audio=audible` with the expected frame
+  `5cbbd998…80b8b`), `x86_64-apple-darwin` (Mach-O x86_64), `x86_64-unknown-linux-gnu`
+  (ELF x86-64), `x86_64-pc-windows-gnu` (PE32+) and `wasm32-unknown-unknown`
+  (168,656-byte module). Linux and Windows artifacts are build-only on this
+  host; no execution or compatibility claim is made for them.
+
+Limits: this is synthetic/retail-ROM audio generation evidence, not a hardware
+audio-conformance claim. No live native speaker sink is wired: the native output
+is still a WAV artifact. The browser application does not execute guest ROMs;
+only the separately built wasm execution module returns guest PCM, and its
+caller owns the WebAudio sink and pacing. Direct Sound timing derives from the
+instruction-budget timer model, so it is an approximation, not cycle timing.

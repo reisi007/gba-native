@@ -170,7 +170,7 @@ pub fn run_scripted(
     budget: u64,
     script: &InputScript,
 ) -> Result<u64> {
-    drive_with(cpu, bus, budget, script, |_, _| {})
+    drive_with(cpu, bus, budget, script, |_, _| Ok(()))
 }
 
 /// Run the reference interpreter and advance a stateful mixer at every
@@ -184,7 +184,7 @@ pub fn run_scripted_audio(
     engine: &mut AudioEngine,
 ) -> Result<u64> {
     drive_with(cpu, bus, budget, script, |bus, _| {
-        engine.advance_instruction(&bus.sound_registers());
+        engine.advance_instruction_bus(bus)
     })
 }
 
@@ -196,7 +196,7 @@ fn drive_with<F>(
     mut observe: F,
 ) -> Result<u64>
 where
-    F: FnMut(&Bus, u64),
+    F: FnMut(&mut Bus, u64) -> Result<()>,
 {
     let mut used = 0u64;
     let mut next = 0usize;
@@ -219,7 +219,7 @@ where
         interpret::step(cpu, bus)?;
         bus.tick_frame();
         used += 1;
-        observe(bus, 1);
+        observe(bus, 1)?;
     }
     bus.set_pressed_keys(0);
     Ok(used)

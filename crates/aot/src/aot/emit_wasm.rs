@@ -66,7 +66,10 @@ fn verify_binding(bytes: &[u8]) -> gba_native::error::Result<()> {
     Ok(())
 }
 
-fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
+fn execute(
+    bytes: Vec<u8>,
+    audio: &mut Option<gba_native::audio::AudioEngine>,
+) -> gba_native::error::Result<String> {
     verify_binding(&bytes)?;
     let cart = Cartridge::from_bytes(bytes)?;
     let mut bus = Bus::new(cart);
@@ -74,13 +77,12 @@ fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
     cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(ENTRY_THUMB);
-    let mut audio = None;
     let program = run_program(
         &mut cpu,
         &mut bus,
         BUDGET,
         &gba_native::input::InputScript::default(),
-        &mut audio,
+        audio,
     )?;
     let mut report = String::new();
     report.push_str("status=ok\n");
@@ -119,6 +121,30 @@ fn execute(bytes: Vec<u8>) -> gba_native::error::Result<String> {
 /// bytes; this module never contains, fetches or writes them.
 #[wasm_bindgen]
 pub fn run_rom(bytes: Vec<u8>) -> std::result::Result<String, JsValue> {
-    execute(bytes).map_err(|error| JsValue::from_str(&format!("{error}")))
+    let mut audio = None;
+    execute(bytes, &mut audio).map_err(|error| JsValue::from_str(&format!("{error}")))
+}
+
+/// Execute the same bounded program and return guest-state PCM.
+///
+/// The samples are mono signed 16-bit PSG plus Direct Sound at
+/// `audio_sample_rate()`; the caller schedules playback. No unbounded run,
+/// filesystem access, speaker access or UI exists here. The ROM binding checks
+/// are identical to `run_rom`, so a wrong image throws before any guest state
+/// is constructed.
+#[wasm_bindgen]
+pub fn run_rom_audio(bytes: Vec<u8>) -> std::result::Result<Vec<i16>, JsValue> {
+    let mut audio = Some(gba_native::audio::AudioEngine::new(
+        gba_native::audio::AudioSettings::default(),
+    ));
+    execute(bytes, &mut audio).map_err(|error| JsValue::from_str(&format!("{error}")))?;
+    let mut engine = audio.expect("the audio engine stays present for this call");
+    Ok(engine.take_samples())
+}
+
+/// Host render rate of the PCM returned by `run_rom_audio`.
+#[wasm_bindgen]
+pub fn audio_sample_rate() -> u32 {
+    gba_native::audio::SAMPLE_RATE
 }
 "#;

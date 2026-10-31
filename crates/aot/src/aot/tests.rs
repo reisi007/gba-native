@@ -195,14 +195,14 @@ fn emitted_blocks_advance_audio_at_every_instruction_boundary() {
     let artifact = discover(&cart, demo::ENTRY, false, Limits::default()).expect("discover");
     let source = emit_program_module(&cart, &artifact).expect("emit program");
     let ticks = source
-        .matches("engine.advance_instruction(&bus.sound_registers());")
+        .matches("engine.advance_instruction_bus(bus)?;")
         .count();
     assert!(
         ticks >= artifact.stats.instructions as usize,
         "every translated instruction must advance the audio clock"
     );
     assert!(
-        !source.contains("engine.advance(&bus.sound_registers(),"),
+        !source.contains("engine.advance_bus(bus,"),
         "the dispatcher must not advance audio once per block with a block-end snapshot"
     );
 }
