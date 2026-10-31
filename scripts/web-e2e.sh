@@ -76,7 +76,7 @@ NODE_BIN="$ROOT/target/tools/node-pinned/bin/node"
 LINUX_DIAGNOSTICS_DIR=""
 LINUX_DIAGNOSTICS_ENABLED=""
 
-[ -f "$DIST/index.html" ] && [ -s "$DIST/app.css" ] ||
+[ -f "$DIST/index.html" ] && compgen -G "$DIST/app.*.css" >/dev/null ||
   fail "the bundle is missing; run ./scripts/web.sh --build-only first"
 [ -x "$SERVER" ] || fail "the static server binary is missing; run ./scripts/web.sh --build-only first"
 [ -x "$NODE_BIN" ] || fail "the pinned Node runtime is missing; run ./scripts/bootstrap-web-tools.sh"

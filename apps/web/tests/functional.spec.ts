@@ -1371,7 +1371,7 @@ test('initial oversized canvas errors immediately and a fresh-canvas restart rec
   await openApp(page, 'backend=webgl2');
   await waitForState(page, 'empty');
   await page.evaluate(() => {
-    const sheet = Array.from(document.styleSheets).find((item) => item.href?.endsWith('/app.css'));
+    const sheet = Array.from(document.styleSheets).find((item) => /\/app\.[0-9a-f]{12}\.css$/.test(item.href ?? ''));
     if (!sheet) throw new Error('same-origin application stylesheet was not found');
     sheet.insertRule(
       '#screen-slot{width:6000px!important;height:4500px!important;max-width:none!important;aspect-ratio:auto!important}',

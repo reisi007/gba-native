@@ -80,7 +80,7 @@ info "apps/web host unit tests"
 cargo test --locked --manifest-path apps/web/Cargo.toml
 
 info "apps/web browser lifecycle unit tests"
-"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs apps/web/tests/js/saves.test.mjs apps/web/tests/js/audio.test.mjs apps/web/tests/js/features.test.mjs
+"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs apps/web/tests/js/saves.test.mjs apps/web/tests/js/audio.test.mjs apps/web/tests/js/features.test.mjs apps/web/tests/js/bundle.test.mjs
 
 info "apps/web Clippy (host all-targets; wasm32 library)"
 cargo clippy --locked --manifest-path apps/web/Cargo.toml --all-targets -- -D warnings
@@ -116,12 +116,14 @@ fi
 rm -rf "$DIST"
 mkdir -p "$DIST/pkg"
 : >"$DIST/.gba-web-dist"
-cp apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs apps/web/www/saves.mjs apps/web/www/audio.mjs "$DIST"/
-
 info "wasm-bindgen $("$TOOLS/bin/wasm-bindgen" --version | awk '{print $2}') web bindings"
 "$TOOLS/bin/wasm-bindgen" --target web --no-typescript --out-dir "$DIST/pkg" \
   --out-name gba_native_web \
   "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/gba_native_web.wasm"
+
+info "served ES-module bundle (import-graph closure, content-hashed)"
+"$NODE_BIN" apps/web/tools/bundle.mjs --source apps/web/www --dist "$DIST" \
+  --generated "$DIST/pkg"
 
 info "locally built DaisyUI 5 + Tailwind 4 CSS"
 # Tailwind resolves `@import "tailwindcss"` relative to the input CSS file, so
@@ -133,22 +135,29 @@ mkdir -p "$BUILD_WWW"
 cp apps/web/www/input.css apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs "$BUILD_WWW"/
 "$NODE_BIN" "$NPM/node_modules/@tailwindcss/cli/dist/index.mjs" -i "$BUILD_WWW/input.css" \
   -o "$DIST/app.css" --minify
+"$NODE_BIN" apps/web/tools/bundle.mjs --dist "$DIST" --asset app.css
 
 info "bundle contracts: expected WASM exports, no remote runtime assets"
-grep -q 'export function renderToneWav' "$DIST/audio.mjs" ||
+grep -q 'export function renderToneWav' "$DIST"/audio.*.mjs ||
   fail "the served bundle is missing the tone-WAV module imported by app.js"
-grep -q 'export function set_status_sink' "$DIST/pkg/gba_native_web.js" ||
+GLUE=$(ls "$DIST"/pkg/gba_native_web.*.js 2>/dev/null | head -1)
+[ -n "$GLUE" ] || fail "the served bundle has no hashed wasm-bindgen glue module"
+grep -q 'export function set_status_sink' "$GLUE" ||
   fail "wasm-bindgen output is missing the set_status_sink export"
-grep -q 'export function start' "$DIST/pkg/gba_native_web.js" ||
+grep -q 'export function start' "$GLUE" ||
   fail "wasm-bindgen output is missing the start export"
-[ -s "$DIST/pkg/gba_native_web_bg.wasm" ] || fail "WASM binary is missing"
-if grep -a -q 'wasi_snapshot_preview1' "$DIST/pkg/gba_native_web_bg.wasm"; then
+WASM=$(ls "$DIST"/pkg/*.wasm 2>/dev/null | head -1)
+[ -n "$WASM" ] && [ -s "$WASM" ] || fail "WASM binary is missing"
+if grep -a -q 'wasi_snapshot_preview1' "$WASM"; then
   fail "the browser WASM imports WASI; the browser path must not need a host filesystem"
 fi
-[ -s "$DIST/app.css" ] || fail "built CSS is missing"
+CSS=$(ls "$DIST"/app.*.css 2>/dev/null | head -1)
+[ -n "$CSS" ] && [ -s "$CSS" ] || fail "built CSS is missing"
+ENTRY=$(ls "$DIST"/app.*.js 2>/dev/null | head -1)
+[ -n "$ENTRY" ] && [ -s "$ENTRY" ] || fail "hashed entry module is missing"
 if grep -RInE \
   '(src|href)="https?://|url\(["'"'"']?https?://|@import[^;]*https?://|fetch\(["'"'"']https?://|import\(["'"'"']https?://' \
-  "$DIST/index.html" "$DIST/app.js" "$DIST/app.css" "$DIST/pkg/gba_native_web.js" \
+  "$DIST/index.html" "$ENTRY" "$CSS" "$GLUE" \
   >/dev/null 2>&1; then
   fail "bundle references a remote resource; no CDN/runtime third-party request is allowed"
 fi

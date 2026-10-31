@@ -115,7 +115,7 @@ test.describe('ui-review captures', () => {
             if (state.prepare === 'oversize-initial') {
               await page.waitForFunction(() => document.body.dataset.appState === 'empty');
               await page.evaluate(() => {
-                const sheet = Array.from(document.styleSheets).find((item) => item.href?.endsWith('/app.css'));
+                const sheet = Array.from(document.styleSheets).find((item) => /\/app\.[0-9a-f]{12}\.css$/.test(item.href ?? ''));
                 if (!sheet) throw new Error('same-origin application stylesheet was not found');
                 sheet.insertRule(
                   '#gba-canvas{width:6000px!important;height:4500px!important}',
