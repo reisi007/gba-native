@@ -121,7 +121,7 @@ fn linux_ab_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
             .expect("copy Playwright config or suite");
     }
     std::fs::write(dist.join("index.html"), "fixture").expect("write fixture bundle");
-    std::fs::write(dist.join("app.css"), "fixture").expect("write fixture CSS");
+    std::fs::write(dist.join("app.0123456789ab.css"), "fixture").expect("write fixture CSS");
     std::fs::write(
         playwright_dir.join("cli.js"),
         "// fake Playwright entry point\n",
