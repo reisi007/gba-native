@@ -109,6 +109,37 @@ jobs:
   # unexpected runner fail loudly instead of silently testing another triple.
   # Both targets use synthetic fixtures only; no retail ROM or BIOS image is
   # read, and this is not a cross-compilation or platform-support claim.
+  # Android native compilation: the std-only workspace must link for the three
+  # Android ABIs against an installed NDK. This is compilation evidence only;
+  # no app, device or emulator is involved. The runner image ships an Android
+  # SDK; the NDK is installed through sdkmanager only when none is present.
+  android-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0 with the Android targets
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Ensure an Android NDK is installed
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$sdk/ndk" ] || [ -z "$(ls -A "$sdk/ndk" 2>/dev/null)" ]; then
+            if [ -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+              manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+            else
+              manager="$(command -v sdkmanager)"
+            fi
+            yes | "$manager" --sdk_root="$sdk" "ndk;29.0.14206865" >/dev/null
+          fi
+          ls -1 "$sdk/ndk"
+
+      - name: Android native compilation gate
+        run: ./scripts/android.sh
+
   macos-arm-native-aot:
     runs-on: macos-latest
     timeout-minutes: 45
