@@ -23,6 +23,7 @@ pub mod decode;
 pub mod demo;
 pub mod display;
 pub mod error;
+pub mod frontend;
 pub mod input;
 pub mod interpret;
 pub mod ir;
