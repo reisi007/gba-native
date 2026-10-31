@@ -223,6 +223,9 @@ fn native_module_composes_program_with_binding_driver() {
     assert!(source.contains("fn main()"));
     assert!(source.contains("verify_binding(&cart)?;"));
     assert!(source.contains("--rom"));
+    assert!(source.contains("--play"));
+    assert!(source.contains("fn play_audio(path: &str)"));
+    assert!(source.contains("audio_played=true"));
     assert!(source.contains("ROM_LEN"));
     assert!(!source.contains("ROM_BYTES"));
 }

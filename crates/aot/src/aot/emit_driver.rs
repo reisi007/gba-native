@@ -69,7 +69,7 @@ pub(super) fn emit_driver(
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    Ok(())").unwrap();
     writeln!(out, "}}").unwrap();
-    writeln!(out).unwrap();
+    out.push_str(PLAY_HELPER);
     writeln!(out, "fn run() -> Result<()> {{").unwrap();
     writeln!(
         out,
@@ -80,6 +80,7 @@ pub(super) fn emit_driver(
     writeln!(out, "    let mut input: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut snapshot: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut audio: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut play = false;").unwrap();
     writeln!(out, "    let mut save: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut volume: u8 = 80;").unwrap();
     writeln!(out, "    let mut muted = false;").unwrap();
@@ -91,11 +92,12 @@ pub(super) fn emit_driver(
     writeln!(out, "            \"--snapshot\" => {{ index += 1; snapshot = Some(args.get(index).ok_or_else(|| Error::Args(\"--snapshot needs a PPM path\".to_string()))?); }}").unwrap();
     writeln!(out, "            \"--audio\" => {{ index += 1; audio = Some(args.get(index).ok_or_else(|| Error::Args(\"--audio needs a WAV path\".to_string()))?); }}").unwrap();
     writeln!(out, "            \"--save\" => {{ index += 1; save = Some(args.get(index).ok_or_else(|| Error::Args(\"--save needs a raw backup path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--play\" => play = true,").unwrap();
     writeln!(out, "            \"--volume\" => {{ index += 1; volume = args.get(index).ok_or_else(|| Error::Args(\"--volume needs 0..=100\".to_string()))?.parse().map_err(|_| Error::Args(\"invalid --volume\".to_string()))?; if volume > 100 {{ return Err(Error::Args(\"--volume must be 0..=100\".to_string())); }} }}").unwrap();
     writeln!(out, "            \"--mute\" => muted = true,").unwrap();
     writeln!(
         out,
-        "            other => return Err(Error::Args(format!(\"usage: harness --rom PATH [--input SCRIPT] [--snapshot PPM] [--audio WAV] [--save BACKUP] [--volume 0..100] [--mute] (the ROM is not embedded); unknown option {{other}}\"))),"
+        "            other => return Err(Error::Args(format!(\"usage: harness --rom PATH [--input SCRIPT] [--snapshot PPM] [--audio WAV] [--play] [--save BACKUP] [--volume 0..100] [--mute] (the ROM is not embedded); unknown option {{other}}\"))),"
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();
@@ -244,6 +246,7 @@ pub(super) fn emit_driver(
     writeln!(out, "        println!(\"audio_direct_sound_underruns={{}}\", audio_stats.direct_sound_underruns);").unwrap();
     writeln!(out, "        println!(\"audio_direct_sound_dma_refills={{}}\", audio_stats.direct_sound_dma_refills);").unwrap();
     writeln!(out, "        println!(\"audio_wav_sha256={{}}\", gba_native::sha256::hex(&gba_native::sha256::digest(&wav)));").unwrap();
+    writeln!(out, "        if play {{ play_audio(path)?; }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    if let Some(path) = save_path {{").unwrap();
     writeln!(out, "        let image = bus.backup_image();").unwrap();
@@ -294,3 +297,67 @@ pub(super) fn emit_driver(
     writeln!(out, "}}").unwrap();
     Ok(())
 }
+
+const PLAY_HELPER: &str = r##"
+fn play_audio(path: &str) -> Result<()> {
+    let (program, args) = audio_player(path)?;
+    let status = std::process::Command::new(&program)
+        .args(&args)
+        .status()
+        .map_err(|error| Error::Args(format!("cannot run audio player {program}: {error}")))?;
+    if !status.success() {
+        return Err(Error::Args(format!("audio player {program} failed with {status}")));
+    }
+    println!("audio_player={program}");
+    println!("audio_played=true");
+    Ok(())
+}
+
+fn audio_player(path: &str) -> Result<(String, Vec<String>)> {
+    if let Some(value) = std::env::var_os("GBA_NATIVE_AUDIO_PLAYER") {
+        return Ok((value.to_string_lossy().into_owned(), vec![path.to_string()]));
+    }
+    if cfg!(target_os = "windows") {
+        let found = find_player("powershell").ok_or_else(|| {
+            Error::Args("--play found no installed audio player (tried powershell); set GBA_NATIVE_AUDIO_PLAYER=<program>".to_string())
+        })?;
+        let quoted = path.replace('\'', "''");
+        return Ok((
+            found.display().to_string(),
+            vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                format!("(New-Object Media.SoundPlayer '{quoted}').PlaySync()"),
+            ],
+        ));
+    }
+    if cfg!(target_os = "macos") {
+        if let Some(found) = find_player("afplay") {
+            return Ok((found.display().to_string(), vec![path.to_string()]));
+        }
+        return Err(Error::Args("--play found no installed audio player (tried afplay); install one or set GBA_NATIVE_AUDIO_PLAYER=<program>".to_string()));
+    }
+    if let Some(found) = find_player("paplay") {
+        return Ok((found.display().to_string(), vec![path.to_string()]));
+    }
+    if let Some(found) = find_player("aplay") {
+        return Ok((found.display().to_string(), vec!["-q".to_string(), path.to_string()]));
+    }
+    Err(Error::Args("--play found no installed audio player (tried paplay, aplay); install one or set GBA_NATIVE_AUDIO_PLAYER=<program>".to_string()))
+}
+
+fn find_player(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&path) {
+        let mut candidate = directory.join(name);
+        if cfg!(target_os = "windows") {
+            candidate.set_extension("exe");
+        }
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+"##;

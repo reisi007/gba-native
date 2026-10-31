@@ -53,7 +53,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT alpha/brightness; bitmap modes 3/4/5. No scanline timing, Mode 2, 2D OBJ mapping, double-size affine OBJ, OBJ/BG mosaic or window 1 |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
-| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--save` persists an explicit raw backup image; no playability or GUI claim |
+| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--audio WAV` plus fail-closed `--play`, `--save` persists an explicit raw backup image; no playability or GUI claim |
 | ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` report and `run_rom_audio` mono PCM module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
 | Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
@@ -100,6 +100,9 @@ suite.
   `SoundPlayer`). No player is downloaded or guessed: a missing or failing
   player is an explicit error, and `GBA_NATIVE_AUDIO_PLAYER` can name one.
   This is post-run playback of the WAV, not a streaming sink.
+- The generated AOT harness accepts the same `--play` contract as `run`:
+  `--audio FILE --play` writes the guest WAV and hands it to an installed
+  platform player; a missing player is an explicit harness error.
 - `run --save-dir DIR [--save-slot NAME]` loads and stores the selected raw
   backup image through the host save library; without a slot it uses the stored
   default, creating `default` on the first save. `save list/import/export/use/

@@ -1454,9 +1454,10 @@ fixture, not a retail soundtrack claim.
 Limits at the time of this first slice: the mixer had no Direct Sound FIFO
 sample clock (added in the round below), no complete
 sweep/envelope/length frame sequencer and no cycle-accurate resampling. Live
-native speaker output is target-specific and not yet wired; the WAV artifact is
-the native output path. Full audio is tracked in issue #29 and is not a
-retail-audio, hardware-timing or BIOS-audio claim.
+native speaker output was not wired then; the later playback round adds
+post-run `--play` through an installed platform player. The WAV artifact
+remains the portable output path. Full audio is tracked in issue #29 and is not
+a retail-audio, hardware-timing or BIOS-audio claim.
 
 ## Round: host save library and synthetic save-tester (2026-10-31)
 
@@ -1580,6 +1581,11 @@ Playback evidence:
 - A 20,000,000-instruction Emerald run with `--play` reported the Direct Sound
   counters above (`94932` samples, `5936` refills, `6` underruns), WAV SHA-256
   `b9c1e64e…f16`, `audio_player=/usr/bin/afplay` and `audio_played=true`.
+- The generated native AOT harness has the same `--play` contract: a synthetic
+  input-tester run reported `audio_player=/usr/bin/afplay`,
+  `audio_played=true` and the expected PCM digest, while an explicit
+  `GBA_NATIVE_AUDIO_PLAYER=/nonexistent` failed with
+  `cannot run audio player /nonexistent`.
 - `tests/cli_play.rs` covers explicit player invocation, `--play` without
   `--audio-out`, and a missing override failing closed. Unit tests cover PATH
   search, override precedence, empty overrides, player exit failure and the

@@ -891,9 +891,9 @@ contains no platform dependency:
   persisted settings document stores `master_volume` and `muted`.
 - `wav_bytes` is a deterministic RIFF/WAVE sink. `render_tone` is a synthetic
   test signal, not game audio.
-- `run --audio-out FILE --play` invokes an installed platform player
-  (`afplay`, `paplay`/`aplay`, or PowerShell `SoundPlayer`) after the bounded
-  run. Detection is fail-closed, a failing player is an error, and
+- `run --audio-out FILE --play` and the generated AOT harness
+  `--audio FILE --play` invoke an installed platform player (`afplay`,
+  `paplay`/`aplay`, or PowerShell `SoundPlayer`) after the bounded run. Detection is fail-closed, a failing player is an error, and
   `GBA_NATIVE_AUDIO_PLAYER` names an explicit executable. This is file
   playback, not a streaming sink; no player is downloaded or vendored.
 
