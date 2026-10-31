@@ -140,20 +140,20 @@ cp apps/web/www/input.css apps/web/www/index.html apps/web/www/app.js apps/web/w
 info "bundle contracts: expected WASM exports, no remote runtime assets"
 grep -q 'export function renderToneWav' "$DIST"/audio.*.mjs ||
   fail "the served bundle is missing the tone-WAV module imported by app.js"
-GLUE=$(ls "$DIST"/pkg/gba_native_web.*.js 2>/dev/null | head -1)
+GLUE=$(ls "$DIST"/pkg/gba_native_web.*.js 2>/dev/null | head -1 || true)
 [ -n "$GLUE" ] || fail "the served bundle has no hashed wasm-bindgen glue module"
 grep -q 'export function set_status_sink' "$GLUE" ||
   fail "wasm-bindgen output is missing the set_status_sink export"
 grep -q 'export function start' "$GLUE" ||
   fail "wasm-bindgen output is missing the start export"
-WASM=$(ls "$DIST"/pkg/*.wasm 2>/dev/null | head -1)
+WASM=$(ls "$DIST"/pkg/*.wasm 2>/dev/null | head -1 || true)
 [ -n "$WASM" ] && [ -s "$WASM" ] || fail "WASM binary is missing"
 if grep -a -q 'wasi_snapshot_preview1' "$WASM"; then
   fail "the browser WASM imports WASI; the browser path must not need a host filesystem"
 fi
-CSS=$(ls "$DIST"/app.*.css 2>/dev/null | head -1)
+CSS=$(ls "$DIST"/app.*.css 2>/dev/null | head -1 || true)
 [ -n "$CSS" ] && [ -s "$CSS" ] || fail "built CSS is missing"
-ENTRY=$(ls "$DIST"/app.*.js 2>/dev/null | head -1)
+ENTRY=$(ls "$DIST"/app.*.js 2>/dev/null | head -1 || true)
 [ -n "$ENTRY" ] && [ -s "$ENTRY" ] || fail "hashed entry module is missing"
 if grep -RInE \
   '(src|href)="https?://|url\(["'"'"']?https?://|@import[^;]*https?://|fetch\(["'"'"']https?://|import\(["'"'"']https?://' \
