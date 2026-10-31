@@ -1836,7 +1836,8 @@ including `audio settings and the WebAudio test tone are wired`,
 `the Save tone WAV button downloads the shared audio artifact`.
 
 CI confirms the same hashed bundle on Linux/SwiftShader (Web foundation run
-`41223516459` for `4d8d09e`, conclusion `success`, i.e. the current `main`):
+`41223516459`) at the code commit `4d8d09e`; the documentation commits that
+follow it do not change behavior or the served bundle:
 
 ```text
 ==> served ES-module bundle (import-graph closure, content-hashed)
