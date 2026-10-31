@@ -24,6 +24,7 @@ export function validSlotName(value) {
     value.length >= 1 &&
     value.length <= MAX_SLOT_NAME &&
     !value.startsWith(".") &&
+    !["__proto__", "prototype", "constructor"].includes(value) &&
     /^[A-Za-z0-9._-]+$/.test(value)
   );
 }
@@ -85,7 +86,7 @@ export class SaveStore {
     const document = this.readDocument();
     if (!validRomDigest(digest)) return [];
     const rom = document.roms[digest.toLowerCase()];
-    if (!rom) return [];
+    if (!rom || typeof rom.slots !== "object" || rom.slots === null) return [];
     return Object.entries(rom.slots)
       .filter(([name]) => validSlotName(name))
       .map(([name, slot]) => ({
@@ -110,7 +111,7 @@ export class SaveStore {
     const document = this.readDocument();
     const rom = this.rom(document, digest);
     rom.slots[name] = { data: bytesToBase64(bytes) };
-    if (!validSlotName(rom.default) || !(rom.default in rom.slots)) {
+    if (!validSlotName(rom.default) || !Object.hasOwn(rom.slots, rom.default)) {
       rom.default = name;
     }
     this.writeDocument(document);
@@ -120,7 +121,7 @@ export class SaveStore {
   remove(digest, name) {
     const document = this.readDocument();
     const rom = this.rom(document, digest);
-    if (!(name in rom.slots)) throw new Error(`unknown save slot ${name}`);
+    if (!Object.hasOwn(rom.slots, name)) throw new Error(`unknown save slot ${name}`);
     delete rom.slots[name];
     if (rom.default === name) {
       rom.default = Object.keys(rom.slots).sort()[0] ?? "";
@@ -132,7 +133,7 @@ export class SaveStore {
   setDefault(digest, name) {
     const document = this.readDocument();
     const rom = this.rom(document, digest);
-    if (!(name in rom.slots)) throw new Error(`unknown save slot ${name}`);
+    if (!Object.hasOwn(rom.slots, name)) throw new Error(`unknown save slot ${name}`);
     rom.default = name;
     this.writeDocument(document);
     return name;

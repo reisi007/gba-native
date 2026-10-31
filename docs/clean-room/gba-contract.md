@@ -35,8 +35,9 @@ not a roadmap promise and not a retail-game compatibility statement.
   `apps/desktop` and `apps/web` packages present the same static synthetic
   snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
   depend directly on the std-only `gba-native-core` package, accept no cartridge
-  or save data, are not playable/per-ROM frontends, and stay outside the default
-  CLI and its headless PPM output.
+  or retail save data, are not playable/per-ROM frontends, and stay outside the
+  default CLI and its headless PPM output. The browser panel manages synthetic
+  raw save images locally; it does not execute guest saves.
 - `aot build` compiles a headless release executable for a locally supported
   Cargo target from an externally bound ROM. It is an experimental artifact, not
   a playable game, GUI frontend, save-aware application, final app or browser
@@ -332,7 +333,8 @@ Implemented regions and widths:
   layout, the persisted settings document and instruction-indexed input
   scripts. The synthetic desktop and browser frontends use that model for
   keyboard/touch buttons, fullscreen and a settings page; they do not accept a
-  cartridge, save or audio stream, and the frontend input path is not a
+  cartridge, retail save data or guest audio stream. The browser panel manages
+  synthetic raw save images locally, and the frontend input path is not a
   retail-game or playability claim. BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.

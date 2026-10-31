@@ -68,7 +68,7 @@ test("digests are isolated and deletion falls back to a remaining slot", () => {
 
 test("invalid names and image lengths are rejected", () => {
   const store = new SaveStore(new MemoryStorage());
-  for (const name of ["", ".", "..", "../x", "a/b", "x".repeat(33)]) {
+  for (const name of ["", ".", "..", "../x", "a/b", "x".repeat(33), "__proto__", "constructor", "prototype"]) {
     assert.equal(validSlotName(name), false);
     assert.throws(() => store.save(ROM, name, Uint8Array.of(1)), /invalid slot name/);
   }
@@ -93,4 +93,12 @@ test("corrupt storage falls back to an empty library", () => {
   storage.setItem("gba-native-saves-v1", "{not json");
   const store = new SaveStore(storage);
   assert.deepEqual(store.list(ROM), []);
+});
+
+test("inherited property names cannot create or select slots", () => {
+  const store = new SaveStore(new MemoryStorage());
+  store.save(ROM, "alpha", Uint8Array.of(1));
+  assert.throws(() => store.setDefault(ROM, "toString"), /unknown save slot/);
+  assert.throws(() => store.remove(ROM, "__proto__"), /invalid slot name|unknown save slot/);
+  assert.deepEqual(store.list(ROM).map((slot) => slot.name), ["alpha"]);
 });

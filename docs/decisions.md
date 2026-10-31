@@ -826,8 +826,9 @@ exit. The browser frontend uses the same key codes/binding defaults in
 in `localStorage`; the Fullscreen API falls back to a CSS mode when a browser
 embedding denies it.
 
-This is a synthetic frontend: it does not accept a ROM, save or audio, and the
-buttons drive presentation state only. It is not a retail input or playability
+This is a synthetic frontend: it does not accept a ROM, retail save data or
+guest audio, and the buttons drive presentation state only. The browser save
+panel manages host-side synthetic raw images. It is not a retail input or playability
 claim. Android/iOS packaging remains open (#11); per-ROM input routing remains
 open (#7).
 

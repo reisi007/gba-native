@@ -114,6 +114,11 @@ fn emerald_save_round_trips_through_the_host_library() {
     assert_eq!(used, BUDGET);
 
     let image = bus.backup_image().to_vec();
+    assert_eq!(
+        image.len(),
+        128 * 1024,
+        "Emerald flash image must be the full 128 KiB"
+    );
     let non_erased = image.iter().filter(|byte| **byte != 0xFF).count();
     let save_sha = gba_native_core::sha256::hex(&gba_native_core::sha256::digest(&image));
     let out = evidence_dir();
