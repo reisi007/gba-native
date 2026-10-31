@@ -142,7 +142,7 @@ fn find_in_path(name: &str, path_env: Option<&OsStr>) -> Option<PathBuf> {
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::fs;
@@ -200,10 +200,16 @@ mod tests {
     #[test]
     fn path_search_finds_a_candidate_and_reports_when_none_exists() {
         let root = temp("path");
-        let player = script(&root, "afplay", "#!/bin/sh\nexit 0\n");
+        let afplay = script(&root, "afplay", "#!/bin/sh\nexit 0\n");
+        let paplay = script(&root, "paplay", "#!/bin/sh\nexit 0\n");
         let path_env = root.as_os_str();
         let resolved = detect(None, Some(path_env)).expect("detected");
-        assert_eq!(resolved.program(), player);
+        let expected = if cfg!(target_os = "macos") {
+            afplay
+        } else {
+            paplay
+        };
+        assert_eq!(resolved.program(), expected);
         let empty = temp("empty-path");
         fs::create_dir_all(&empty).expect("dir");
         assert!(detect(None, Some(empty.as_os_str())).is_err());
