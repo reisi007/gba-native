@@ -1564,9 +1564,13 @@ Evidence:
   (Mach-O arm64, 651,184 bytes, host run `audio=audible` with the expected frame
   `5cbbd998…80b8b`), `x86_64-apple-darwin` (Mach-O x86_64), `x86_64-unknown-linux-gnu`
   (ELF x86-64), `x86_64-pc-windows-gnu` (PE32+) and `wasm32-unknown-unknown`
-  (168,656-byte module). Linux and Windows artifacts are build-only on this
-  host; CI separately executes the same synthetic audio gate natively on Linux
-  and Windows runners, so a macOS-host build is not the only evidence.
+  (168,656-byte module). The `x86_64-apple-darwin` artifact was also executed
+  under Rosetta on the arm64 host: expected frame match, 11,718 samples,
+  `audio_audible=true` and WAV SHA-256
+  `7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`, the same
+  PCM as the arm64 harness and the wasm module. CI separately executes the same
+  synthetic audio gate natively on Linux and Windows runners, so no supported
+  native build target remains execution-unverified.
 
 Limits: this is synthetic/retail-ROM audio generation evidence, not a hardware
 audio-conformance claim. No live native speaker sink is wired: the native output
