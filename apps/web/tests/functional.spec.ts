@@ -1479,3 +1479,43 @@ test('save library imports, selects a default, exports and persists', async ({ p
     { name: 'beta', bytes: 32768, default: true },
   ]);
 });
+
+test('audio settings and the WebAudio test tone are wired', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  type AudioDiagnostics = {
+    settings: () => { masterVolume: number; muted: boolean; gain: number };
+    playTestTone: () => boolean;
+    contextState: () => string;
+  };
+  const settings = () =>
+    page.evaluate(() =>
+      (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.settings(),
+    );
+
+  const initial = await settings();
+  expect(initial.masterVolume).toBe(80);
+  expect(initial.muted).toBe(false);
+  expect(initial.gain).toBeCloseTo(0.8, 5);
+
+  const played = await page.evaluate(() =>
+    (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.playTestTone(),
+  );
+  expect(played).toBe(true);
+  const state = await page.evaluate(() =>
+    (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio.contextState(),
+  );
+  expect(['running', 'suspended']).toContain(state);
+
+  await page.locator('#mute-toggle').check();
+  expect((await settings()).gain).toBe(0);
+  await page.locator('#mute-toggle').uncheck();
+  await page.evaluate(() => {
+    const range = document.querySelector('#volume-range') as HTMLInputElement;
+    range.value = '40';
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const quieter = await settings();
+  expect(quieter.masterVolume).toBe(40);
+  expect(quieter.gain).toBeCloseTo(0.4, 5);
+});
