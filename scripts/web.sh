@@ -116,7 +116,7 @@ fi
 rm -rf "$DIST"
 mkdir -p "$DIST/pkg"
 : >"$DIST/.gba-web-dist"
-cp apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs apps/web/www/saves.mjs "$DIST"/
+cp apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs apps/web/www/saves.mjs apps/web/www/audio.mjs "$DIST"/
 
 info "wasm-bindgen $("$TOOLS/bin/wasm-bindgen" --version | awk '{print $2}') web bindings"
 "$TOOLS/bin/wasm-bindgen" --target web --no-typescript --out-dir "$DIST/pkg" \
@@ -135,6 +135,8 @@ cp apps/web/www/input.css apps/web/www/index.html apps/web/www/app.js apps/web/w
   -o "$DIST/app.css" --minify
 
 info "bundle contracts: expected WASM exports, no remote runtime assets"
+grep -q 'export function renderToneWav' "$DIST/audio.mjs" ||
+  fail "the served bundle is missing the tone-WAV module imported by app.js"
 grep -q 'export function set_status_sink' "$DIST/pkg/gba_native_web.js" ||
   fail "wasm-bindgen output is missing the set_status_sink export"
 grep -q 'export function start' "$DIST/pkg/gba_native_web.js" ||
