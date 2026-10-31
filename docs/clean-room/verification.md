@@ -1834,3 +1834,23 @@ against that bundle passes:
 including `audio settings and the WebAudio test tone are wired`,
 `PCM buffers shaped like the wasm module output play through WebAudio` and
 `the Save tone WAV button downloads the shared audio artifact`.
+
+CI confirms the same hashed bundle on Linux/SwiftShader (Web foundation run
+`41222635161` for `61c24ee`, conclusion `success`):
+
+```text
+==> served ES-module bundle (import-graph closure, content-hashed)
+bundle modules=6 assets=1 entry=app.e8f044f49ce6.js
+==> bundle contracts: expected WASM exports, no remote runtime assets
+ℹ tests 28
+ℹ pass 28
+ℹ fail 0
+  ✓ the bundle hashes every module and rewrites its import specifiers
+23 passed (24.1s)
+==> browser gate passed (build, host tests, WASM bundle, functional E2E)
+```
+
+The 28 Node tests are the lifecycle, input, saves, audio, features and bundle
+suites, so the browser feature-contract and tone-WAV checks run in CI, not only
+locally. The functional run is the full suite against the hashed names, and the
+second (variant B) launch passes `21` of the same specs.
