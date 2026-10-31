@@ -1519,3 +1519,27 @@ test('audio settings and the WebAudio test tone are wired', async ({ page }) => 
   expect(quieter.masterVolume).toBe(40);
   expect(quieter.gain).toBeCloseTo(0.4, 5);
 });
+
+test('PCM buffers shaped like the wasm module output play through WebAudio', async ({ page }) => {
+  await openApp(page, '');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  type AudioDiagnostics = {
+    playPcm: (samples: Int16Array, sampleRate?: number) => boolean;
+    contextState: () => string;
+  };
+  const result = await page.evaluate(() => {
+    const audio = (window as unknown as { __gbaNative: { audio: AudioDiagnostics } }).__gbaNative.audio;
+    const samples = new Int16Array(3277);
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = Math.round(Math.sin((2 * Math.PI * 440 * index) / 32768) * 8000);
+    }
+    return {
+      played: audio.playPcm(samples, 32768),
+      empty: audio.playPcm(new Int16Array(0), 32768),
+      state: audio.contextState(),
+    };
+  });
+  expect(result.played).toBe(true);
+  expect(result.empty).toBe(false);
+  expect(['running', 'suspended']).toContain(result.state);
+});

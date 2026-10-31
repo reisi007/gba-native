@@ -646,6 +646,28 @@ function playTestTone() {
   return true;
 }
 
+// Play mono signed 16-bit PCM from the wasm AOT module's run_rom_audio output.
+// The caller owns the sample source and pacing; this only schedules one buffer.
+function playPcm(samples, sampleRate = 32768) {
+  const Context = window.AudioContext ?? window.webkitAudioContext;
+  if (!Context || !samples || samples.length === 0) return false;
+  audioContext ??= new Context();
+  const buffer = audioContext.createBuffer(1, samples.length, sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let index = 0; index < samples.length; index += 1) {
+    const value = Number(samples[index]) / 32768;
+    channel[index] = Math.max(-1, Math.min(1, value));
+  }
+  const source = audioContext.createBufferSource();
+  const gain = audioContext.createGain();
+  source.buffer = buffer;
+  gain.gain.value = audioGain();
+  source.connect(gain);
+  gain.connect(audioContext.destination);
+  source.start();
+  return true;
+}
+
 const saveStore = new SaveStore();
 let saveStatus = "";
 
@@ -930,6 +952,7 @@ function setupInputUi() {
       gain: audioGain(),
     }),
     playTestTone,
+    playPcm,
     contextState: () => audioContext?.state ?? "closed",
   };
 }

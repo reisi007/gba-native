@@ -14,6 +14,7 @@ use gba_native::interpret;
 use gba_native::perf::PerfStats;
 
 use super::output::write_safely;
+use super::play;
 use super::run_output;
 
 pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
@@ -34,6 +35,7 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut audio_out: Option<PathBuf> = None;
     let mut audio_volume = AudioSettings::default().master_volume;
     let mut audio_muted = false;
+    let mut audio_play = false;
     let mut save_dir: Option<PathBuf> = None;
     let mut save_slot: Option<String> = None;
     while let Some(argument) = args.next() {
@@ -71,6 +73,7 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
                 }
             }
             "--mute" => audio_muted = true,
+            "--play" => audio_play = true,
             "--save-dir" => {
                 save_dir = Some(PathBuf::from(args.next().ok_or_else(|| {
                     Error::Args("--save-dir needs a directory".to_string())
@@ -106,6 +109,11 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             }
             _ => return Err(Error::Args(format!("unknown run option {argument}"))),
         }
+    }
+    if audio_play && audio_out.is_none() {
+        return Err(Error::Args(
+            "--play needs --audio-out <wav>; nothing was played".to_string(),
+        ));
     }
     if u8::from(backup_sram) + u8::from(backup_sram64k) + u8::from(backup_flash) > 1 {
         return Err(Error::Args(
@@ -212,12 +220,18 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let audio_written = if let (Some(path), Some(engine)) = (&audio_out, &audio_engine) {
         let wav = engine.wav();
         write_safely(path, &wav)?;
+        let played = if audio_play {
+            Some(play::play(path)?)
+        } else {
+            None
+        };
         Some((
             path.clone(),
             engine.samples().len(),
             gba_native::sha256::hex(&gba_native::sha256::digest(&wav)),
             engine.samples().iter().any(|sample| *sample != 0),
             engine.audio_stats(),
+            played,
         ))
     } else {
         None
@@ -234,7 +248,7 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
         println!("save_sha256={digest}");
         println!("save_default={default}");
     }
-    if let Some((path, samples, digest, audible, audio_stats)) = audio_written {
+    if let Some((path, samples, digest, audible, audio_stats, played)) = audio_written {
         println!("audio_out={}", path.display());
         println!("audio_sample_rate={}", gba_native::audio::SAMPLE_RATE);
         println!("audio_samples={samples}");
@@ -254,6 +268,10 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             audio_stats.direct_sound_dma_refills
         );
         println!("audio_wav_sha256={digest}");
+        if let Some(player) = played {
+            println!("audio_player={}", player.display());
+            println!("audio_played=true");
+        }
     }
     println!("pc=0x{:08X}", cpu.pc());
     println!("cpsr=0x{:08X}", cpu.cpsr());

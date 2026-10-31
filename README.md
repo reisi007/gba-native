@@ -54,12 +54,12 @@ the root workspace lockfile contains only these three internal path packages.
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
 | Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--save` persists an explicit raw backup image; no playability or GUI claim |
-| ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
+| ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` report and `run_rom_audio` mono PCM module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
 | Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
 | Input model | `core::input`: ten button bits, default/editable key bindings, 800x600 landscape + portrait touch layout, persisted settings document, instruction-indexed scripts |
 | Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
-| Audio (first slice) | Dependency-free PSG mixer and stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out` and the AOT harness `--audio`; browser WebAudio; full PSG timing/Direct Sound tracked in #29 |
+| Audio | Dependency-free PSG mixer plus timer-clocked Direct Sound FIFO A/B; stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out [--play]` (installed system player, fail-closed) and AOT harness `--audio`; wasm `run_rom_audio` PCM; browser WebAudio test tone and PCM playback helper; full PSG sweep/envelope timing tracked in #29 |
 | Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
 | Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
 | Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
@@ -75,7 +75,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
 cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
 cargo run -- save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
@@ -94,8 +94,12 @@ suite.
   (for example `0:A+B+Start:20000000`). The `run` report always includes
   `perf_*` wall-time, guest-instructions/second and real-time-factor lines with
   the explicit non-cycle caveat. `run --audio-out FILE [--volume 0..100]
-  [--mute]` also renders the guest sound-register timeline to a WAV through the
-  dependency-free PSG `AudioEngine`.
+  [--mute]` renders the guest sound-register timeline to a WAV through the
+  dependency-free PSG + Direct Sound `AudioEngine`. `--play` additionally runs an
+  installed platform player (`afplay`, `paplay`/`aplay`, PowerShell
+  `SoundPlayer`). No player is downloaded or guessed: a missing or failing
+  player is an explicit error, and `GBA_NATIVE_AUDIO_PLAYER` can name one.
+  This is post-run playback of the WAV, not a streaming sink.
 - `run --save-dir DIR [--save-slot NAME]` loads and stores the selected raw
   backup image through the host save library; without a slot it uses the stored
   default, creating `default` on the first save. `save list/import/export/use/

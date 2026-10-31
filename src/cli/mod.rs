@@ -16,6 +16,7 @@ mod demo_cmd;
 mod fixture_cmd;
 mod info_cmd;
 mod output;
+mod play;
 mod run_cmd;
 mod run_output;
 mod save_cmd;
@@ -29,7 +30,7 @@ usage:
   gba-native fixture input-tester --out output/<input-tester.gba>
   gba-native save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
   gba-native audio --out output/<tone.wav> [--frequency 440] [--seconds 2] [--volume 80] [--mute]
-  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--volume 0..100] [--mute] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+  gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--volume 0..100] [--mute] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/aot-proof]
   gba-native aot emit <rom.gba> <generated.rs>
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]

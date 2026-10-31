@@ -1572,12 +1572,31 @@ Evidence:
   synthetic audio gate natively on Linux and Windows runners, so no supported
   native build target remains execution-unverified.
 
+Playback evidence:
+
+- `run --audio-out output/play-smoke/tone.wav --play` on macOS invoked
+  `/usr/bin/afplay` and reported `audio_played=true` after the synthetic
+  input-tester WAV (`78045610…dacee`).
+- A 20,000,000-instruction Emerald run with `--play` reported the Direct Sound
+  counters above (`94932` samples, `5936` refills, `6` underruns), WAV SHA-256
+  `b9c1e64e…f16`, `audio_player=/usr/bin/afplay` and `audio_played=true`.
+- `tests/cli_play.rs` covers explicit player invocation, `--play` without
+  `--audio-out`, and a missing override failing closed. Unit tests cover PATH
+  search, override precedence, empty overrides, player exit failure and the
+  no-player diagnostic. Linux/Windows use `paplay`/`aplay` and PowerShell
+  `SoundPlayer`; these are detected, not guessed, and are not installed by the
+  emulator.
+- The browser E2E suite (22 Playwright tests) exercises
+  `__gbaNative.audio.playPcm(Int16Array, 32768)`, which schedules mono signed
+  16-bit PCM of the same shape returned by the wasm `run_rom_audio` export.
+
 Limits: this is synthetic/retail-ROM audio generation evidence, not a hardware
-audio-conformance claim. No live native speaker sink is wired: the native output
-is still a WAV artifact. The browser application does not execute guest ROMs;
-only the separately built wasm execution module returns guest PCM, and its
-caller owns the WebAudio sink and pacing. Direct Sound timing derives from the
-instruction-budget timer model, so it is an approximation, not cycle timing.
+audio-conformance claim. `--play` is post-run playback of a generated WAV, not a
+streaming speaker sink, and it depends on an installed platform player. The
+browser application does not execute guest ROMs; only the separately built wasm
+execution module returns guest PCM, and the caller owns the WebAudio scheduling.
+Direct Sound timing derives from the instruction-budget timer model, so it is an
+approximation, not cycle timing.
 
 ### Windows host execution
 
