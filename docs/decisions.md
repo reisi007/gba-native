@@ -893,10 +893,13 @@ contains no platform dependency:
   test signal, not game audio.
 
 The guest-state host path is a WAV artifact from the reference runner and the
-AOT harness; both now render PSG plus Direct Sound from guest state. The browser
-frontend persists the same volume/mute fields and can play a fixed 440 Hz
-WebAudio test tone, but it does not yet stream guest PCM; that sink remains
-outstanding in issue #29. Native live playback is target-specific and must not
+AOT harness; both render PSG plus Direct Sound from guest state. The wasm32 AOT
+module can also return the same mono PCM through `run_rom_audio`, and `aot
+build` now accepts the same explicit synthetic device policies for wasm as for
+native (only `--trace` remains native-only). The browser frontend persists the
+same volume/mute fields and can play a fixed 440 Hz WebAudio test tone, but it
+does not yet stream the wasm module's guest PCM; that sink remains outstanding
+in issue #29. Native live playback is target-specific and must not
 add a default-workspace dependency or unsafe code. The mixer is deliberately
 bounded: it has no full sweep/envelope/length frame sequencer and no
 cycle-accurate resampling. The Direct Sound rate is derived from the

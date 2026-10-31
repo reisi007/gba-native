@@ -204,10 +204,9 @@ fn build_native_artifact(request: BuildRequest) -> Result<()> {
 
 /// WASM branch: ROM-bound execution module plus importable JS glue.
 fn build_wasm_module(request: BuildRequest) -> Result<()> {
-    if request.trace.is_some() || !request.policy.is_strict() {
+    if request.trace.is_some() {
         return Err(Error::Args(
-            "--trace and synthetic device policies are supported only for native targets"
-                .to_string(),
+            "--trace is supported only for native targets".to_string(),
         ));
     }
     // Resolve and verify the pinned wasm-bindgen CLI before reading the ROM or
@@ -216,7 +215,8 @@ fn build_wasm_module(request: BuildRequest) -> Result<()> {
 
     let cart = Cartridge::from_path(Path::new(&request.rom))?;
     let artifact = aot::discover(&cart, ROM_BASE, false, aot::Limits::default())?;
-    let source = aot::emit_wasm_module(&cart, &artifact, request.budget)?;
+    let source =
+        aot::emit_wasm_module_with_policy(&cart, &artifact, request.budget, request.policy)?;
 
     let work = match request.out {
         Some(path) => create_fresh_directory(&path)?,

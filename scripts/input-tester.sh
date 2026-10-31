@@ -46,6 +46,12 @@ case "$(uname -s)" in
       *) fail "unsupported macOS architecture: $(uname -m)" ;;
     esac
     ;;
+  MINGW* | MSYS* | CYGWIN*)
+    case "$(uname -m)" in
+      x86_64 | amd64) TARGET="x86_64-pc-windows-msvc" ;;
+      *) fail "unsupported Windows architecture: $(uname -m)" ;;
+    esac
+    ;;
   *) fail "unsupported host for the native input-tester gate: $(uname -s)" ;;
 esac
 TARGET="${INPUT_TESTER_TARGET:-$TARGET}"
@@ -53,8 +59,10 @@ TARGET="${INPUT_TESTER_TARGET:-$TARGET}"
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{ print $1 }'
-  else
+  elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{ print $1 }'
+  else
+    fail "no SHA-256 tool available (sha256sum or shasum)"
   fi
 }
 
@@ -78,7 +86,9 @@ info "building the native AOT harness"
 cargo run --quiet --offline --bin gba-native -- aot build tests/roms/synthetic/input-tester.gba \
   --target "$TARGET" --budget "$BUDGET" --out "$WORK/native" >"$WORK/build.txt"
 
-HARNESS="$WORK/native/native/target/$TARGET/release/gba-native-aot-harness"
+EXE_SUFFIX=""
+case "$TARGET" in *windows*) EXE_SUFFIX=".exe" ;; esac
+HARNESS="$WORK/native/native/target/$TARGET/release/gba-native-aot-harness$EXE_SUFFIX"
 [ -x "$HARNESS" ] || fail "expected harness is missing: $HARNESS"
 
 info "running the harness with the committed input script"

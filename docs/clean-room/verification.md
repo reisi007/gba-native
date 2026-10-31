@@ -1537,6 +1537,15 @@ Evidence:
   `7804561066d21ab13e5531e7f4af2b7be44ac1522ebfdf3aa22b8de5e62dacee`.
   This fixture programs PSG only, so the Direct Sound path leaves its PCM
   byte-identical; it also matches the pre-Direct-Sound digest.
+- Emerald-scale wasm check: `aot build --target wasm32-unknown-unknown` with the
+  same explicit device policies as the native run (synthetic BIOS zero fill and
+  ROM-write handling, dropped ROM writes, volatile 128 KiB flash, documented
+  decompression and affine services) produced a module with no embedded ROM
+  bytes. At 20,000,000 instructions it returned 117,187 samples at 32,768 Hz,
+  `audio_audible=true`, peak 1628, RMS 106.798, and WAV SHA-256
+  `b9c1e64ef8b83030590fa9587e8b08818151d592c3f87c5fd8a106f462747f16` — byte for
+  byte identical to the native reference runner at the same budget, policies and
+  volume 80. The ROM was read only at call time and never copied or embedded.
 - `./scripts/input-tester.sh` passes end to end (20,000,000 instructions,
   `fallbacks=0`, committed frame byte match, `audio_audible=true`, WAV SHA-256
   `20f67766404d55d2e35eb7cd3ab8b0b77cc1bbf8cbbd7e50f14a86577a3a1448`) and now
@@ -1556,7 +1565,8 @@ Evidence:
   `5cbbd998…80b8b`), `x86_64-apple-darwin` (Mach-O x86_64), `x86_64-unknown-linux-gnu`
   (ELF x86-64), `x86_64-pc-windows-gnu` (PE32+) and `wasm32-unknown-unknown`
   (168,656-byte module). Linux and Windows artifacts are build-only on this
-  host; no execution or compatibility claim is made for them.
+  host; CI separately executes the same synthetic audio gate natively on Linux
+  and Windows runners, so a macOS-host build is not the only evidence.
 
 Limits: this is synthetic/retail-ROM audio generation evidence, not a hardware
 audio-conformance claim. No live native speaker sink is wired: the native output
@@ -1564,3 +1574,14 @@ is still a WAV artifact. The browser application does not execute guest ROMs;
 only the separately built wasm execution module returns guest PCM, and its
 caller owns the WebAudio sink and pacing. Direct Sound timing derives from the
 instruction-budget timer model, so it is an approximation, not cycle timing.
+
+### Windows host execution
+
+The `windows-input-tester` CI job runs `scripts/input-tester.sh` on
+`windows-latest` (host triple `x86_64-pc-windows-msvc`). It regenerates the
+committed synthetic fixture, builds the audio-enabled native AOT harness, runs
+it with the committed input script and `--audio`, checks the committed frame
+and the `audio_audible=true`/volume/mute lines, and asserts the PSG-only fixture
+consumes no Direct Sound samples. This is Windows host execution of the same
+requested audio path, not a retail-ROM or compatibility claim; the synthetic
+fixture is committed, so no retail ROM, BIOS or save data enters CI.

@@ -28,7 +28,7 @@ pub use artifact::{AotArtifact, AotBlock, DiscoveryStats, Limits};
 pub use discover::discover;
 pub use emit::{emit_native_module, emit_native_module_with_policy};
 pub use emit_program::emit_program_module;
-pub use emit_wasm::emit_wasm_module;
+pub use emit_wasm::{emit_wasm_module, emit_wasm_module_with_policy};
 pub use harness::NativeHarness;
 pub use policy::HarnessPolicy;
 pub use report::NativeReport;

@@ -68,6 +68,31 @@ jobs:
             output/save-tester.*/
           if-no-files-found: warn
 
+  # Windows host execution of the same audio-enabled synthetic AOT harness. The
+  # committed fixture is regenerated and run with --audio; no retail ROM, BIOS
+  # image or save data is read. Linux and macOS already execute this gate, so
+  # this closes the Windows execution gap without making a retail-game claim.
+  windows-input-tester:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+
+      - name: Native input-tester and guest audio on Windows
+        shell: bash
+        run: ./scripts/input-tester.sh
+
+      - name: Upload input-tester evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-tester-windows
+          path: output/input-tester.*/
+          if-no-files-found: warn
+
   # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets
   # below compile the generated harness for the *installed host* triple, so this
   # job is only meaningful on an Apple-silicon runner. The host check makes an
