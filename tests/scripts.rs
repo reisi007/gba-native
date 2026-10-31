@@ -384,3 +384,96 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     linux_gpu_features::assert_contract(&repo_root());
     linux_gpu_preflight::assert_contract();
 }
+
+fn android_ndk_host_tag() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin-x86_64"
+    } else {
+        "linux-x86_64"
+    }
+}
+
+fn fake_android_ndk(root: &Path, api: u32) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = root
+        .join("sdk/ndk/29.0.0/toolchains/llvm/prebuilt")
+        .join(android_ndk_host_tag())
+        .join("bin");
+    std::fs::create_dir_all(&bin).expect("create fake NDK bin");
+    for name in [
+        "aarch64-linux-android",
+        "armv7a-linux-androideabi",
+        "x86_64-linux-android",
+    ] {
+        let path = bin.join(format!("{name}{api}-clang"));
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write fake clang");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let readelf = bin.join("llvm-readelf");
+    std::fs::write(&readelf, "#!/bin/sh\nexit 0\n").expect("write fake readelf");
+    std::fs::set_permissions(&readelf, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    root.join("sdk/ndk/29.0.0")
+}
+
+fn fake_rustup_without_targets(directory: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = directory.join("rustup");
+    std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write fake rustup");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+#[test]
+fn android_gate_fails_closed_without_an_ndk() {
+    let temp = TempDir::new("android-missing-ndk");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+    let output = Command::new("bash")
+        .arg(repo_root().join("scripts/android.sh"))
+        .current_dir(repo_root())
+        .env("PATH", path_with_cargo(temp.path()))
+        .env("HOME", &home)
+        .env_remove("ANDROID_NDK_HOME")
+        .env_remove("ANDROID_NDK_ROOT")
+        .env_remove("ANDROID_HOME")
+        .env_remove("ANDROID_SDK_ROOT")
+        .output()
+        .expect("run android gate");
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(message.contains("no Android NDK found"), "{message}");
+    assert!(message.contains("ANDROID_NDK_HOME"), "{message}");
+}
+
+#[test]
+fn android_gate_fails_closed_when_rust_android_targets_are_missing() {
+    let temp = TempDir::new("android-missing-target");
+    let home = temp.path().join("home");
+    let tools = temp.path().join("tools");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&tools).expect("create tools");
+    let ndk = fake_android_ndk(temp.path(), 21);
+    fake_rustup_without_targets(&tools);
+    let output = Command::new("bash")
+        .arg(repo_root().join("scripts/android.sh"))
+        .args(["--abi", "aarch64-linux-android"])
+        .current_dir(repo_root())
+        .env(
+            "PATH",
+            format!("{}:{}", tools.display(), path_with_cargo(temp.path())),
+        )
+        .env("HOME", &home)
+        .env("ANDROID_NDK_HOME", &ndk)
+        .env_remove("ANDROID_NDK_ROOT")
+        .env_remove("ANDROID_HOME")
+        .env_remove("ANDROID_SDK_ROOT")
+        .output()
+        .expect("run android gate");
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(message.contains("not installed"), "{message}");
+    assert!(message.contains("aarch64-linux-android"), "{message}");
+    assert!(message.contains("rustup target add"), "{message}");
+}

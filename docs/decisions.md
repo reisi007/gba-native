@@ -944,3 +944,30 @@ Limits: this is storage for explicitly selected SRAM/flash models, not a
 save-device compatibility claim. The browser save panel manages synthetic raw
 images; it does not execute guest saves in the page. No retail save data, ROM or
 BIOS bytes are committed.
+
+## D45 — Android native compilation through an explicit NDK gate
+
+Decided 2026-10-31. Android is a compilation target, not an application
+surface yet:
+
+- `scripts/android.sh` builds the default workspace packages for
+  `aarch64-linux-android`, `armv7-linux-androideabi` and
+  `x86_64-linux-android` with an installed NDK and the matching Rust targets.
+  It defaults to API level 21, exposes `--release`, `--api` and `--abi`, and
+  verifies each artifact is an Android ELF with the expected machine and a
+  `/system/bin/linker*` interpreter.
+- The script never skips: a missing NDK, a missing Rust target, an unsupported
+  ABI or an absent clang wrapper is a hard error naming the next step. It
+  discovers `ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT`, then the newest
+  `<sdk>/ndk/<version>` under `ANDROID_HOME`/`ANDROID_SDK_ROOT` or the default
+  macOS/Linux SDK locations.
+- It is a separate gate like `scripts/cross.sh`, not part of `short.sh` or
+  `full.sh`, and CI runs it in the `android-native` job. CI installs the NDK
+  through `sdkmanager` only when the runner image has none.
+- There is no Android app, activity, JNI surface, audio sink or device claim.
+  Playback on Android remains future work; the emulator's `--play` contract
+  still requires an installed platform player and fails closed otherwise.
+
+Limits: compilation proves the std-only workspace links against the Android
+NDK for the three ABIs. It is not execution evidence on a device or emulator,
+not a Bionic runtime claim, and not an Android compatibility statement.

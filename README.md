@@ -62,7 +62,8 @@ the root workspace lockfile contains only these three internal path packages.
 | Audio | Dependency-free PSG mixer plus timer-clocked Direct Sound FIFO A/B; stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out [--play]` (installed system player, fail-closed) and AOT harness `--audio`; wasm `run_rom_audio` PCM; browser WebAudio test tone and PCM playback helper; full PSG sweep/envelope timing tracked in #29 |
 | Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
 | Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
-| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
+| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS are not claimed |
+| Android native compilation | `scripts/android.sh` cross-builds the default three-package workspace for `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android` with an installed NDK and verifies each artifact's ELF machine and `/system/bin/linker*` interpreter; compilation only, no Android app, UI, audio sink or device-support claim |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
 | Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings, a synthetic save-image library (import/export/use/default) and a `playPcm` WebAudio helper for the AOT module's PCM; static synthetic demo only; no ROM/AOT/guest-ROM execution |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
@@ -261,6 +262,7 @@ wasm-bindgen CLI from `./scripts/bootstrap-web-tools.sh` and the installed
 ./scripts/web.sh --ci  # optional browser package and fail-closed Chromium E2E
 ./scripts/save-tester.sh  # native save persistence (fresh/loaded, CLI slots)
 ./scripts/play-tester.sh  # native playback through a fake player on PATH
+./scripts/android.sh   # Android NDK cross-build for all three ABIs
 ```
 
 Per-package commands are available when a smaller loop is useful:

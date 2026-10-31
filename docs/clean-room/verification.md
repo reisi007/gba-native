@@ -1633,3 +1633,50 @@ The first Windows run passed on `windows-latest` with target
 — the same PCM digest as Linux. `.gitattributes` pins the expected PPM as
 non-text, the input script to LF and the synthetic ROM as binary so Windows
 `autocrlf` cannot disturb the byte-pinned fixtures.
+
+## Round: Android native compilation (2026-10-31)
+
+`scripts/android.sh` cross-builds the default three-package workspace
+(`gba-native-core`, `gba-native-aot`, root `gba-native`) for the Android NDK
+ABIs and verifies every artifact. On this host (macOS arm64, NDK
+`29.0.14206865`, Rust targets installed with `rustup target add`):
+
+```text
+abi=aarch64-linux-android
+profile=debug
+api=21
+linker=.../ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android21-clang
+artifact=target/aarch64-linux-android/debug/gba-native
+elf_machine=AArch64
+elf_interpreter=/system/bin/linker64
+
+abi=armv7-linux-androideabi
+elf_machine=ARM
+elf_interpreter=/system/bin/linker
+
+abi=x86_64-linux-android
+elf_machine=Advanced Micro Devices X86-64
+elf_interpreter=/system/bin/linker64
+
+android build ok: 3 ABI(s)
+```
+
+`--release --abi aarch64-linux-android` produced the same ELF machine and
+interpreter in `target/aarch64-linux-android/release/gba-native`.
+
+Failure paths are explicit, not silent skips:
+
+```text
+$ ANDROID_NDK_HOME=/nonexistent ./scripts/android.sh
+error: ANDROID_NDK_HOME=/nonexistent is not a directory
+$ ./scripts/android.sh --abi mips-linux-android
+error: unsupported Android ABI target: mips-linux-android
+```
+
+`tests/scripts.rs` covers a missing NDK and missing Rust targets with a fake
+NDK tree and a fake `rustup`, so the diagnostics are contractual.
+
+Limits: this is compilation and link evidence for the std-only workspace. No
+Android app, JNI surface, device or emulator execution, audio sink or
+compatibility claim is made. Android playback remains future work; `--play`
+still requires an installed platform player and fails closed.
