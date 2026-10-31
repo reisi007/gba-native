@@ -1751,3 +1751,23 @@ Limits: slots are synthetic raw images for the committed save-tester fixture;
 no retail save data is stored, imported or committed. The browser exposes
 import/export on top of the same fields; native pages create, select, default
 and delete slots in the app's own storage directory.
+
+### Cross-target feature parity
+
+The desktop and Android apps import the same `gba_native::frontend` modules for
+the demo frame, viewport, shell/fullscreen/settings/saves screens, settings
+file, save slots and tone artifact. Their tests assert the parity directly:
+
+```text
+apps/android::model::tests::demo_frame_matches_the_shared_frontend_digest
+apps/android::model::tests::shell_and_fullscreen_use_the_shared_screens
+apps/android::model::tests::settings_taps_change_state_and_persist_through_the_shared_file
+apps/android::model::tests::saves_page_creates_uses_defaults_and_deletes_slots
+apps/android::model::tests::tone_artifact_is_identical_to_the_shared_tone
+apps/desktop::saves::tests::creating_using_and_deleting_slots_round_trips
+```
+
+The browser foundation keeps the same settings fields in `localStorage`, the
+same save-slot fields in its saves panel and `playPcm` for audio, so every
+target exposes the same synthetic-shell feature set. The remaining differences
+are the window/input modality and the browser's import/export of save bytes.

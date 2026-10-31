@@ -1010,3 +1010,21 @@ Limits: a signed debug APK and host unit tests are not device or emulator
 execution evidence, not a playability claim and not an Android
 compatibility statement. Audio playback on Android stays an artifact write;
 there is no live device sink, matching the desktop artifact path.
+
+### Parity matrix
+
+| Feature | Desktop | Android | Browser |
+| --- | --- | --- | --- |
+| Synthetic demo frame | shared `frontend::image` | shared `frontend::image` | wasm/JS demo |
+| Shell + touch controls | shared `frontend::ui` | shared `frontend::ui` | JS shell |
+| Fullscreen | `F11` | settings toggle | Fullscreen API |
+| Settings (volume, mute, fullscreen, touch) | shared `frontend::settings` + `F1` page | shared settings + header page | `localStorage` settings panel |
+| Audio output | shared tone WAV artifact | shared tone WAV artifact | `playPcm` WebAudio |
+| Save slots (named, default, create/use/delete) | shared `frontend::saves` + `F2` page | shared saves + settings entry | saves panel |
+| ROM/BIOS/save payload | none | none | none |
+
+The two native apps run the same core code for every row except the window and
+input modality. The browser implements the same fields in JavaScript because it
+has no native shell. Import/export of save bytes is a browser storage
+affordance on top of the same slots; the native pages manage slots in the app's
+storage directory.
