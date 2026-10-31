@@ -1,0 +1,20 @@
+[workspace]
+
+[package]
+name = "gba-native-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Isolated Android synthetic GBA shell over the shared std-only frontend"
+publish = false
+
+[lib]
+name = "gba_native_android"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gba-native = { package = "gba-native-core", path = "../../crates/core" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+ndk = "0.9"

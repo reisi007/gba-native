@@ -62,3 +62,35 @@ owned_temp() {
 run_ratchet() {
   RATCHET_NO_UPDATE_CHECK=1 "$RATCHET" "$@"
 }
+
+# Resolve an installed Android SDK root. Returns 1 when none is found; callers
+# turn that into a gate-specific diagnostic.
+android_sdk_root() {
+  local sdk
+  for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" \
+    "$HOME/Library/Android/sdk" "$HOME/Android/Sdk" /usr/local/lib/android/sdk; do
+    [ -n "$sdk" ] && [ -d "$sdk" ] && {
+      printf '%s\n' "$sdk"
+      return 0
+    }
+  done
+  return 1
+}
+
+# Resolve an installed Android NDK: an explicit NDK root, or the newest
+# <sdk>/ndk/<version>. Returns 1 when none is found.
+android_ndk_root() {
+  local sdk newest
+  for sdk in "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}"; do
+    [ -n "$sdk" ] && [ -d "$sdk" ] && {
+      printf '%s\n' "$sdk"
+      return 0
+    }
+  done
+  sdk=$(android_sdk_root) || return 1
+  [ -d "$sdk/ndk" ] || return 1
+  newest=$(ls -1 "$sdk/ndk" 2>/dev/null |
+    sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+  [ -n "$newest" ] || return 1
+  printf '%s\n' "$sdk/ndk/$newest"
+}

@@ -78,8 +78,16 @@
   build regression and the native AOT proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
+- `crates/core/src/frontend/`: window-free frontend model shared by the
+  desktop and Android apps (`image`, `viewport`, `ui`, `settings`, `tone`).
+- `apps/android/`: separate NativeActivity package; `model.rs` is the
+  host-tested shell (composition, touch, settings, tone artifact) and `app.rs`
+  the Android-only window and event loop.
 - `scripts/android.sh`: Android NDK cross-build gate for the three ABIs, with
   ELF machine/interpreter verification; part of the `android-native` CI job.
+- `scripts/android-app.sh`: builds and signs the synthetic APK for the three
+  ABIs and verifies package, activity, native-code list and contents; part of
+  the `android-app` CI job.
 - `scripts/cross.sh`: optional local cross-build matrix for macOS arm64/x86_64,
   Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; it reports a
   missing linker instead of claiming success.

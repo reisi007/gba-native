@@ -1680,3 +1680,54 @@ Limits: this is compilation and link evidence for the std-only workspace. No
 Android app, JNI surface, device or emulator execution, audio sink or
 compatibility claim is made. Android playback remains future work; `--play`
 still requires an installed platform player and fails closed.
+
+## Round: Android app and shared frontend parity (2026-10-31)
+
+The window-free frontend moved into `crates/core/src/frontend` and the desktop
+app now re-exports it, so the desktop and Android targets run the same image
+pipeline, viewport math, shell/fullscreen/settings screens, settings file and
+tone artifact. Core tests cover the shared behaviour:
+
+```text
+frontend:: image 4 + viewport 4 + settings 3 + tone 3 + ui 5 = 19 tests
+cargo test -p gba-native-core --lib -> 157 passed
+```
+
+The Android app is a separate package with its own lockfile. Host unit tests
+never need a device:
+
+```text
+$ cargo test --locked --manifest-path apps/android/Cargo.toml
+test result: ok. 9 passed
+```
+
+They assert that the app's demo frame digest and bytes equal
+`frontend::demo_image()`, that shell/fullscreen composition equals the shared
+`frontend::ui` screens, that every touch control is reachable and released,
+that settings taps change and persist volume/mute/fullscreen/touch state
+through the shared settings file, and that the tone artifact is byte-identical
+to `frontend::tone::tone_wav`.
+
+`scripts/android-app.sh` builds the release library for all three ABIs, links a
+base APK with `aapt2`, adds `lib/<abi>/libgba_native_android.so`, signs it with
+`apksigner` and a generated debug key, and verifies the package:
+
+```text
+apk=output/android-app/gba-native-android.apk
+package=dev.gbanative.synthetic
+activity=android.app.NativeActivity
+profile=release
+native-code=arm64-v8a armeabi-v7a x86_64
+signature=verified
+Signer #1 certificate SHA-256 digest: 1d8c02968c1efd7c17abb40fc92ea0db1b95372e5921d9b6e0457392a4aaadb5
+android app build ok
+```
+
+The script also rejects an APK that lacks the launchable activity, misses one
+of the three libraries, or contains a `.gba`/`.sav`/`.bin`/asset payload.
+
+Limits: this is a signed debug APK and host unit tests, not device or emulator
+execution, not a playability or Android compatibility claim. The app composes
+only the committed synthetic demo snapshot and never loads a ROM, BIOS or save.
+Audio remains the shared tone WAV artifact; there is no live Android sink,
+matching the desktop artifact path.

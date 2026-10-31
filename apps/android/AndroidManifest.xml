@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NativeActivity shell: the APK carries no Java code, only the Rust shared
+  library built by scripts/android-app.sh. The app renders the synthetic demo
+  frame from the shared std-only frontend; it never loads a ROM, BIOS or save.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.gbanative.synthetic">
+
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="36" />
+
+    <application
+        android:label="gba-native synthetic"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:screenOrientation="sensorLandscape">
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="gba_native_android" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

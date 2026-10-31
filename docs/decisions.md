@@ -971,3 +971,36 @@ surface yet:
 Limits: compilation proves the std-only workspace links against the Android
 NDK for the three ABIs. It is not execution evidence on a device or emulator,
 not a Bionic runtime claim, and not an Android compatibility statement.
+
+## D46 — Android app on the shared frontend
+
+Decided 2026-10-31. The Android target is now an app, not only a compilation
+target:
+
+- `apps/android` is a separate package with its own lockfile. It builds a
+  `cdylib` `gba_native_android` through `android-activity`'s
+  `native-activity` glue and is packaged into a signed debug APK by
+  `scripts/android-app.sh` for arm64-v8a, armeabi-v7a and x86_64. The APK has
+  no Java code: the launcher is the framework `android.app.NativeActivity`,
+  which loads the Rust library named in the manifest.
+- `crates/core/src/frontend` owns the window-free feature set shared by the
+  desktop and Android apps: validated RGB-to-RGBA conversion and the synthetic
+  demo snapshot, integer letterbox viewport math, the shell/fullscreen/settings
+  screens, settings load/save and the tone WAV artifact. The desktop modules
+  re-export the same code, so rendering, input layout, settings and audio
+  cannot drift between those targets.
+- The Android shell adds touch routing for the shared control layout, a header
+  tap that opens the shared settings page, settings taps for volume/mute,
+  fullscreen and touch-controls state, persisted through the shared settings
+  file, and the shared tone artifact written to the app's internal data
+  directory.
+- Unit tests are host tests in `apps/android` (they never need a device) and
+  run in the `android-app` CI job; `scripts/android-app.sh` packages and
+  verifies the APK there as well.
+- The app renders only the committed synthetic demo snapshot. It never loads a
+  ROM, BIOS or save, and the APK verification rejects ROM/BIOS/save payloads.
+
+Limits: a signed debug APK and host unit tests are not device or emulator
+execution evidence, not a playability claim and not an Android
+compatibility statement. Audio playback on Android stays an artifact write;
+there is no live device sink, matching the desktop artifact path.

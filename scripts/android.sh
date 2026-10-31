@@ -83,33 +83,14 @@ case "$(uname -s)" in
   *) fail "unsupported host for the Android gate: $(uname -s)" ;;
 esac
 
-find_ndk_in_sdk() {
-  local sdk newest
-  for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" \
-    "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
-    [ -n "$sdk" ] && [ -d "$sdk/ndk" ] || continue
-    newest=$(ls -1 "$sdk/ndk" 2>/dev/null |
-      sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
-    if [ -n "$newest" ]; then
-      printf '%s\n' "$sdk/ndk/$newest"
-      return 0
-    fi
-  done
-  return 1
-}
-
-if [ -n "${ANDROID_NDK_HOME:-}" ]; then
-  [ -d "$ANDROID_NDK_HOME" ] ||
-    fail "ANDROID_NDK_HOME=$ANDROID_NDK_HOME is not a directory"
-  NDK=$ANDROID_NDK_HOME
-elif [ -n "${ANDROID_NDK_ROOT:-}" ]; then
-  [ -d "$ANDROID_NDK_ROOT" ] ||
-    fail "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT is not a directory"
-  NDK=$ANDROID_NDK_ROOT
-else
-  NDK=$(find_ndk_in_sdk) ||
-    fail "no Android NDK found; set ANDROID_NDK_HOME to an installed NDK or install one with sdkmanager (for example \"sdkmanager 'ndk;29.0.14206865'\")"
+if [ -n "${ANDROID_NDK_HOME:-}" ] && [ ! -d "$ANDROID_NDK_HOME" ]; then
+  fail "ANDROID_NDK_HOME=$ANDROID_NDK_HOME is not a directory"
 fi
+if [ -n "${ANDROID_NDK_ROOT:-}" ] && [ ! -d "$ANDROID_NDK_ROOT" ]; then
+  fail "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT is not a directory"
+fi
+NDK=$(android_ndk_root) ||
+  fail "no Android NDK found; set ANDROID_NDK_HOME to an installed NDK or install one with sdkmanager (for example \"sdkmanager 'ndk;29.0.14206865'\")"
 NDK_BIN="$NDK/toolchains/llvm/prebuilt/$NDK_HOST/bin"
 [ -d "$NDK_BIN" ] ||
   fail "NDK $NDK has no prebuilt toolchain for $NDK_HOST (expected $NDK_BIN)"
