@@ -211,19 +211,18 @@ The underlying gates are `cargo fmt --check`,
 `cargo test --release`. The root workspace lists the root package,
 `crates/core` and `crates/aot` in `default-members`, so those bare commands
 select all three; `apps/desktop` and `apps/web` are explicitly excluded. Ratchet is pinned to
-release `v0.5.0` of `all-the-rest/ratchet-cli` (peeled commit
-`99c25b1e18331a1473d43091d37e23f23bc1c30d`, tag object
-`1feb7b5fae653272a922ed9f0479660ecde22ed2`); CI installs it with the official
+release `v0.6.3` of `all-the-rest/ratchet-cli` (the tag is lightweight and
+points at commit `4cace52ac7731985130292ead6ae81d44b4d72d6`); CI installs it with the official
 action pinned to the commit. Locally the scripts use `RATCHET_BIN` or
 `ratchet` on `PATH`, validate the version and fail closed when it is missing:
 
 ```text
-RATCHET_BIN=/path/to/ratchet-0.5.0 ./scripts/short.sh
-RATCHET_BIN=/path/to/ratchet-0.5.0 ./scripts/full.sh
+RATCHET_BIN=/path/to/ratchet-0.6.3 ./scripts/short.sh
+RATCHET_BIN=/path/to/ratchet-0.6.3 ./scripts/full.sh
 ```
 
 The scripts resolve the repository root themselves, so they can be run from
-any working directory. The pinned source can be built from the `v0.5.0` tag of
+any working directory. The pinned source can be built from the `v0.6.3` tag of
 `all-the-rest/ratchet-cli`; the scripts never download or install anything.
 
 Every maintained Rust source/test file is limited to 500 physical lines

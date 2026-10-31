@@ -11,10 +11,9 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The Ratchet release this repository is gated with. The source is release
-# v0.6.2 of all-the-rest/ratchet-cli; its annotated tag object is
-# 1feb7b5fae653272a922ed9f0479660ecde22ed2 and the peeled commit is
-# 99c25b1e18331a1473d43091d37e23f23bc1c30d.
-RATCHET_VERSION="0.6.2"
+# v0.6.3 of all-the-rest/ratchet-cli; the tag is lightweight and points at
+# the commit 4cace52ac7731985130292ead6ae81d44b4d72d6.
+RATCHET_VERSION="0.6.3"
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -43,7 +42,7 @@ resolve_ratchet() {
   elif command -v ratchet >/dev/null 2>&1; then
     candidate=$(command -v ratchet)
   else
-    fail "ratchet $RATCHET_VERSION is not on PATH and RATCHET_BIN is unset; install the pinned release (all-the-rest/ratchet-cli v0.6.2) or set RATCHET_BIN"
+    fail "ratchet $RATCHET_VERSION is not on PATH and RATCHET_BIN is unset; install the pinned release (all-the-rest/ratchet-cli v0.6.3) or set RATCHET_BIN"
   fi
 
   actual=$("$candidate" --version 2>/dev/null) ||

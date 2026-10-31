@@ -22,7 +22,7 @@ jobs:
       # The official action installs the pinned Ratchet binary and verifies its
       # release checksum. The repository-level gates themselves run through the
       # same short/full scripts that a developer runs locally.
-      - name: Install pinned Ratchet v0.5.0
+      - name: Install pinned Ratchet v0.6.3
         uses: all-the-rest/ratchet-cli@4cace52ac7731985130292ead6ae81d44b4d72d6
         with:
           mode: validate

@@ -50,9 +50,9 @@ files. An empty selection is an error.
 
 `scripts/short.sh` is the fast local gate; `scripts/full.sh` adds the debug and
 release suites, the demo and the real native proof. CI executes the same two
-scripts. Ratchet is pinned to release v0.5.0 of `all-the-rest/ratchet-cli`
-(peeled commit `99c25b1e18331a1473d43091d37e23f23bc1c30d`; the annotated tag
-object is `1feb7b5fae653272a922ed9f0479660ecde22ed2`); a missing or mismatched
+scripts. Ratchet is pinned to release v0.6.3 of `all-the-rest/ratchet-cli` (the tag
+is lightweight and points at commit
+`4cace52ac7731985130292ead6ae81d44b4d72d6`); a missing or mismatched
 tool fails the gate instead of skipping it.
 
 ## D5 — Evidence language stays explicit

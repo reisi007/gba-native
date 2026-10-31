@@ -8,9 +8,9 @@ Run `./scripts/short.sh` for the fast gate and `./scripts/full.sh` for the
 complete gate. They invoke `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test`,
 `cargo test --release`, the demo and the real native AOT proof. Ratchet is
-pinned to release v0.5.0 of `all-the-rest/ratchet-cli` (peeled commit
-`99c25b1e18331a1473d43091d37e23f23bc1c30d`; the annotated tag object is
-`1feb7b5fae653272a922ed9f0479660ecde22ed2`); a missing or mismatched tool fails
+pinned to release v0.6.3 of `all-the-rest/ratchet-cli` (the tag is
+lightweight and points at commit `4cace52ac7731985130292ead6ae81d44b4d72d6`);
+a missing or mismatched tool fails
 instead of skipping the gate.
 
 ## Automated checks
