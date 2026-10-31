@@ -178,6 +178,23 @@ mod tests {
         }
     }
 
+    /// Retry a test-only script exec that briefly reports `ETXTBSY`. A
+    /// concurrently forked test process can inherit the descriptor while the
+    /// script is written; the retry keeps the assertion about playback, not
+    /// about that fork race.
+    #[cfg(unix)]
+    fn retry_text_file_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+        for _ in 0..50 {
+            match operation() {
+                Err(error) if format!("{error}").contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                outcome => return outcome,
+            }
+        }
+        operation()
+    }
+
     #[cfg(unix)]
     fn fake_player(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -200,7 +217,7 @@ mod tests {
         fs::write(&wav, b"RIFF").expect("wav");
         let resolved = resolve_player(Some(player.as_os_str()), None).expect("resolve override");
         assert_eq!(resolved.program, player);
-        let used = resolved.run(&wav).expect("run player");
+        let used = retry_text_file_busy(|| resolved.run(&wav)).expect("run player");
         assert_eq!(used, player);
         let recorded = fs::read_to_string(player.with_extension("args")).expect("record");
         assert_eq!(recorded.trim(), wav.display().to_string());
@@ -237,9 +254,9 @@ mod tests {
         fs::set_permissions(&player, permissions).expect("chmod");
         let wav = temp.0.join("tone.wav");
         fs::write(&wav, b"RIFF").expect("wav");
-        let error = Player::direct(&player.display().to_string(), &[])
-            .run(&wav)
-            .expect_err("failing player");
+        let error =
+            retry_text_file_busy(|| Player::direct(&player.display().to_string(), &[]).run(&wav))
+                .expect_err("failing player");
         assert!(format!("{error}").contains("failed with"), "{error}");
     }
 
