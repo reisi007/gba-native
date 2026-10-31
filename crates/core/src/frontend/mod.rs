@@ -6,6 +6,7 @@
 //! user-facing features cannot drift between targets.
 
 pub mod image;
+pub mod saves;
 pub mod settings;
 pub mod tone;
 pub mod ui;
@@ -14,6 +15,7 @@ pub mod viewport;
 pub use image::{
     ImageError, LoadError, MAX_IMAGE_PIXELS, RgbaImage, convert_rgb888_to_rgba, demo_image,
 };
+pub use saves::{MAX_SAVE_BYTES, SYNTHETIC_ROM_SHA, SaveSlot, SaveSlots};
 pub use settings::{load, save};
 pub use tone::{ToneArtifact, tone_wav, write_tone};
 pub use viewport::{Viewport, compute_viewport};

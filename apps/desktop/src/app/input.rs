@@ -1,5 +1,6 @@
 //! Keyboard, pointer and touch handling for the windowed shell.
 
+use gba_native::frontend::ui::SavesAction;
 use gba_native::input::Key;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, TouchPhase};
@@ -18,7 +19,29 @@ impl Frontend {
         };
 
         if pressed && !event.repeat {
+            if self.saves.is_open() {
+                match code {
+                    KeyCode::F2 | KeyCode::Escape => self.saves.close(),
+                    KeyCode::ArrowDown => self.saves.select(1),
+                    KeyCode::ArrowUp => self.saves.select(-1),
+                    KeyCode::KeyN => self.saves.apply(SavesAction::New),
+                    KeyCode::KeyU => self.saves.apply(SavesAction::Use),
+                    KeyCode::KeyD => self.saves.apply(SavesAction::Delete),
+                    KeyCode::Enter => self.saves.apply(SavesAction::MakeDefault),
+                    _ => {}
+                }
+                if let Some(status) = self.saves.status() {
+                    eprintln!("saves: {status}");
+                }
+                self.rebuild_display();
+                return;
+            }
             match code {
+                KeyCode::F2 => {
+                    self.saves.open();
+                    self.rebuild_display();
+                    return;
+                }
                 KeyCode::F1 => {
                     self.show_settings = !self.show_settings;
                     self.rebuild_display();

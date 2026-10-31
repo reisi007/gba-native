@@ -79,10 +79,13 @@
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the
-  desktop and Android apps (`image`, `viewport`, `ui`, `settings`, `tone`).
+  desktop and Android apps (`image`, `viewport`, `ui`, `settings`, `saves`,
+  `tone`).
 - `apps/android/`: separate NativeActivity package; `model.rs` is the
-  host-tested shell (composition, touch, settings, tone artifact) and `app.rs`
-  the Android-only window and event loop.
+  host-tested shell (composition, touch, settings, saves, tone artifact) and
+  `app.rs` the Android-only window and event loop.
+- `apps/desktop/src/saves.rs`, `apps/desktop/src/app/render.rs`: desktop saves
+  page state and screen selection, both over the shared frontend.
 - `scripts/android.sh`: Android NDK cross-build gate for the three ABIs, with
   ELF machine/interpreter verification; part of the `android-native` CI job.
 - `scripts/android-app.sh`: builds and signs the synthetic APK for the three

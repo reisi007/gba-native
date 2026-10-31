@@ -8,6 +8,7 @@
 use crate::input::{Settings, TouchLayout};
 
 use super::image::RgbaImage;
+use super::saves::SaveSlot;
 
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 600;
@@ -153,7 +154,14 @@ pub fn shell(screen: &RgbaImage, pressed: u16) -> RgbaImage {
         );
     }
 
-    draw_text(&mut rgba, 16, 566, "F1 SETTINGS   F11 FULLSCREEN", DIM, 2);
+    draw_text(
+        &mut rgba,
+        16,
+        566,
+        "F1 SETTINGS  F2 SAVES  F11 FULLSCREEN",
+        DIM,
+        2,
+    );
     draw_text(&mut rgba, 600, 566, "SYNTHETIC", ACCENT, 2);
     finish(rgba, screen.guest_budget())
 }
@@ -166,13 +174,90 @@ pub fn fullscreen(screen: &RgbaImage) -> RgbaImage {
     finish(rgba, screen.guest_budget())
 }
 
+/// Actions on the shared saves page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SavesAction {
+    Close,
+    New,
+    Use,
+    MakeDefault,
+    Delete,
+}
+
+/// Row geometry shared by the saves page and its hit testing.
+pub const SAVES_ROW_Y: u32 = 100;
+pub const SAVES_ROW_HEIGHT: u32 = 34;
+pub const SAVES_MAX_ROWS: usize = 10;
+
+/// Resolve a pointer inside the saves list to a row index.
+pub fn saves_row_at(x: u32, y: u32) -> Option<usize> {
+    if !(40..WIDTH - 40).contains(&x) || y < SAVES_ROW_Y {
+        return None;
+    }
+    let row = ((y - SAVES_ROW_Y) / SAVES_ROW_HEIGHT) as usize;
+    (row < SAVES_MAX_ROWS).then_some(row)
+}
+
+/// Resolve a pointer to a saves-page action button.
+pub fn saves_action_at(x: u32, y: u32) -> Option<SavesAction> {
+    let rects = [
+        ((40, 520, 120, 50), SavesAction::New),
+        ((180, 520, 120, 50), SavesAction::Use),
+        ((320, 520, 200, 50), SavesAction::MakeDefault),
+        ((540, 520, 120, 50), SavesAction::Delete),
+        ((670, 0, 130, 48), SavesAction::Close),
+    ];
+    rects
+        .iter()
+        .find(|(rect, _)| x >= rect.0 && x < rect.0 + rect.2 && y >= rect.1 && y < rect.1 + rect.3)
+        .map(|(_, action)| *action)
+}
+
+/// Saves page: named slots, lengths and the default marker.
+pub fn saves_page(slots: &[SaveSlot], selected: usize) -> RgbaImage {
+    let mut rgba = blank();
+    fill(&mut rgba, 0, 0, WIDTH, HEIGHT, BODY);
+    fill(&mut rgba, 0, 0, WIDTH, 48, PANEL);
+    draw_text(&mut rgba, 24, 14, "SAVES", ACCENT, 4);
+    draw_text(&mut rgba, 600, 18, "CLOSE", DIM, 2);
+
+    if slots.is_empty() {
+        draw_text(&mut rgba, 40, 110, "NO SLOTS YET", DIM, 3);
+    }
+    for (row, slot) in slots.iter().take(SAVES_MAX_ROWS).enumerate() {
+        let y = SAVES_ROW_Y + row as u32 * SAVES_ROW_HEIGHT;
+        let selected_here = row == selected;
+        let colour = if selected_here { ACCENT } else { TEXT };
+        if selected_here {
+            fill(
+                &mut rgba,
+                32,
+                y - 4,
+                WIDTH - 64,
+                SAVES_ROW_HEIGHT - 4,
+                PANEL,
+            );
+        }
+        let label = format!("{} {}", row + 1, slot.name.to_uppercase());
+        draw_text(&mut rgba, 40, y, &label, colour, 2);
+        draw_text(&mut rgba, 400, y, &format!("{} B", slot.bytes), DIM, 2);
+        if slot.default {
+            draw_text(&mut rgba, 620, y, "DEFAULT", ACCENT, 2);
+        }
+    }
+
+    draw_text(&mut rgba, 40, 566, "NEW   USE   DEFAULT   DELETE", DIM, 2);
+    finish(rgba, 0)
+}
+
 /// Persisted settings page with the active key bindings.
 pub fn settings_page(settings: &Settings) -> RgbaImage {
     let mut rgba = blank();
     fill(&mut rgba, 0, 0, WIDTH, HEIGHT, BODY);
     fill(&mut rgba, 0, 0, WIDTH, 48, PANEL);
     draw_text(&mut rgba, 24, 14, "SETTINGS", ACCENT, 4);
-    draw_text(&mut rgba, 500, 18, "F1 CLOSE", DIM, 2);
+    draw_text(&mut rgba, 360, 18, "SAVES", ACCENT, 2);
+    draw_text(&mut rgba, 640, 18, "CLOSE", DIM, 2);
 
     draw_text(&mut rgba, 40, 72, "KEY BINDINGS", DIM, 2);
     for (row, (button, keys)) in settings.binding_rows().iter().enumerate() {
@@ -233,6 +318,11 @@ pub fn settings_page(settings: &Settings) -> RgbaImage {
     finish(rgba, 0)
 }
 
+/// True when a pointer is on the settings page's saves entry.
+pub fn settings_saves_at(x: u32, y: u32) -> bool {
+    (330..480).contains(&x) && y < 48
+}
+
 /// Hit test a normalized pointer position against the windowed layout.
 pub fn hit_test(x: f32, y: f32) -> Option<crate::input::Button> {
     TouchLayout::landscape().hit_test(x, y)
@@ -288,6 +378,52 @@ mod tests {
         assert_eq!(&image.rgba()[top_left..top_left + 4], &[0, 0, 0, 0xFF]);
         let offset = ((60 * WIDTH + 40) * 4) as usize;
         assert_eq!(&image.rgba()[offset..offset + 4], &guest.rgba()[..4]);
+    }
+
+    #[test]
+    fn saves_page_lists_slots_and_exposes_row_and_action_zones() {
+        let slots = vec![
+            SaveSlot {
+                name: "intro".to_string(),
+                bytes: 512,
+                default: true,
+            },
+            SaveSlot {
+                name: "route-2".to_string(),
+                bytes: 1024,
+                default: false,
+            },
+        ];
+        let image = saves_page(&slots, 1);
+        assert_eq!((image.width(), image.height()), (WIDTH, HEIGHT));
+        assert_ne!(&image.rgba()[..4], &[0, 0, 0, 0xFF]);
+
+        assert_eq!(saves_row_at(60, SAVES_ROW_Y + 4), Some(0));
+        assert_eq!(
+            saves_row_at(60, SAVES_ROW_Y + SAVES_ROW_HEIGHT + 4),
+            Some(1)
+        );
+        assert_eq!(
+            saves_row_at(60, SAVES_ROW_Y + SAVES_ROW_HEIGHT * 3),
+            Some(3)
+        );
+        assert_eq!(saves_row_at(10, SAVES_ROW_Y), None);
+        assert_eq!(saves_row_at(60, SAVES_ROW_Y + SAVES_ROW_HEIGHT * 12), None);
+
+        assert_eq!(saves_action_at(60, 540), Some(SavesAction::New));
+        assert_eq!(saves_action_at(220, 540), Some(SavesAction::Use));
+        assert_eq!(saves_action_at(400, 540), Some(SavesAction::MakeDefault));
+        assert_eq!(saves_action_at(600, 540), Some(SavesAction::Delete));
+        assert_eq!(saves_action_at(700, 20), Some(SavesAction::Close));
+        assert_eq!(saves_action_at(400, 300), None);
+    }
+
+    #[test]
+    fn settings_page_offers_the_saves_entry() {
+        assert!(settings_saves_at(360, 20));
+        assert!(settings_saves_at(400, 40));
+        assert!(!settings_saves_at(300, 20));
+        assert!(!settings_saves_at(360, 60));
     }
 
     #[test]

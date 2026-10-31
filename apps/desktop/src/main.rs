@@ -10,6 +10,7 @@ mod app;
 mod audio_out;
 mod cli;
 mod presentation;
+mod saves;
 mod settings;
 mod ui;
 

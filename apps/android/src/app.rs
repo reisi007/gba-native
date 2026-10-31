@@ -11,7 +11,9 @@ use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
 use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::native_window::NativeWindow;
 
-use crate::model::{AppModel, SettingsAction, composition_pixel, locate};
+use gba_native::frontend::ui;
+
+use crate::model::{AppModel, Page, SettingsAction, composition_pixel, locate};
 
 /// `android-activity` entry point; it may run again if the activity is recreated.
 #[unsafe(no_mangle)]
@@ -101,22 +103,35 @@ fn on_down(model: &mut AppModel, surface: (u32, u32), x: f32, y: f32) -> bool {
         return false;
     };
     let (px, py) = composition_pixel(nx, ny);
-    if model.header_hit(px, py) {
-        model.toggle_settings(true);
-        return true;
-    }
-    if model.show_settings() {
-        let Some(action) = model.settings_action(px, py) else {
-            return false;
-        };
-        if action == SettingsAction::Close {
-            model.toggle_settings(false);
-        } else if let Err(error) = model.apply_settings_action(action) {
-            eprintln!("settings: cannot persist {action:?}: {error}");
+    match model.page() {
+        Page::Shell => {
+            if model.header_hit(px, py) {
+                model.toggle_settings(true);
+                return true;
+            }
+            model.touch_down(nx, ny).is_some()
         }
-        return true;
+        Page::Settings => {
+            let Some(action) = model.settings_action(px, py) else {
+                return false;
+            };
+            if action == SettingsAction::Close {
+                model.toggle_settings(false);
+            } else if let Err(error) = model.apply_settings_action(action) {
+                eprintln!("settings: cannot persist {action:?}: {error}");
+            }
+            true
+        }
+        Page::Saves => {
+            if let Some(action) = ui::saves_action_at(px, py) {
+                if let Err(error) = model.apply_saves_action(action) {
+                    eprintln!("saves: cannot apply {action:?}: {error}");
+                }
+                return true;
+            }
+            model.saves_row(px, py).is_some()
+        }
     }
-    model.touch_down(nx, ny).is_some()
 }
 
 fn on_up(model: &mut AppModel, surface: (u32, u32), x: f32, y: f32) -> bool {

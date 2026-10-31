@@ -22,6 +22,7 @@ use crate::presentation::{RgbaImage, compute_viewport, synthetic_demo_image};
 use crate::{settings, ui};
 
 mod input;
+mod render;
 
 pub const TITLE: &str = "gba-native synthetic GPU presentation (not playable retail)";
 
@@ -60,6 +61,7 @@ struct Frontend {
     image: RgbaImage,
     settings: Settings,
     settings_path: PathBuf,
+    saves: crate::saves::SavesState,
     show_settings: bool,
     input_mask: u16,
     pressed_keys: Vec<Key>,
@@ -79,10 +81,15 @@ struct Frontend {
 
 impl Frontend {
     fn new(options: Options, image: RgbaImage, settings: Settings, settings_path: PathBuf) -> Self {
+        let saves_root = settings_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("saves");
         Self {
             options,
             image,
             settings,
+            saves: crate::saves::SavesState::new(saves_root),
             settings_path,
             show_settings: false,
             input_mask: 0,
@@ -100,23 +107,6 @@ impl Frontend {
             minimized: false,
             failure: None,
         }
-    }
-
-    fn compose(&self) -> RgbaImage {
-        if self.show_settings {
-            ui::settings_page(&self.settings)
-        } else if self.fullscreen() {
-            ui::fullscreen(&self.image)
-        } else {
-            ui::shell(&self.image, self.input_mask)
-        }
-    }
-
-    fn fullscreen(&self) -> bool {
-        self.window
-            .as_ref()
-            .is_some_and(|window| window.fullscreen().is_some())
-            || (self.window.is_none() && self.settings.fullscreen)
     }
 
     fn persist_settings(&self) {

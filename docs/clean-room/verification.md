@@ -1731,3 +1731,23 @@ execution, not a playability or Android compatibility claim. The app composes
 only the committed synthetic demo snapshot and never loads a ROM, BIOS or save.
 Audio remains the shared tone WAV artifact; there is no live Android sink,
 matching the desktop artifact path.
+
+### Saves parity
+
+`crates/core/src/frontend/saves` stores named raw images over the same
+synthetic save-tester digest the browser panel uses. The shared page geometry,
+row hit testing and action zones live in `frontend::ui`, so the desktop (`F2`)
+and Android (settings → saves) pages are the same screens.
+
+```text
+frontend::saves -> 4 passed (round-trip, default fallback, invalid names,
+                               synthetic digest)
+frontend::ui::saves_page -> row/action zones and empty-state rendering
+apps/android -> 10 passed (saves create/default/use/delete and reload)
+apps/desktop -> saves state round-trip and selection wrap
+```
+
+Limits: slots are synthetic raw images for the committed save-tester fixture;
+no retail save data is stored, imported or committed. The browser exposes
+import/export on top of the same fields; native pages create, select, default
+and delete slots in the app's own storage directory.

@@ -994,6 +994,12 @@ target:
   fullscreen and touch-controls state, persisted through the shared settings
   file, and the shared tone artifact written to the app's internal data
   directory.
+- `crates/core/src/frontend/saves` adds named save slots with a default marker
+  over the synthetic save-tester digest used by the browser panel. The desktop
+  app opens the shared saves page with `F2` and the Android app from its
+  settings page; both create, select, default and delete slots, and the page
+  geometry and actions are shared. The browser keeps the same fields in
+  `localStorage`; import/export remain platform storage affordances.
 - Unit tests are host tests in `apps/android` (they never need a device) and
   run in the `android-app` CI job; `scripts/android-app.sh` packages and
   verifies the APK there as well.
