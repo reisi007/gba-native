@@ -55,12 +55,17 @@ jobs:
       - name: Native input-tester, Linux AOT and visual comparison
         run: ./scripts/input-tester.sh --visual
 
+      - name: Native save-tester, AOT persistence and CLI slots
+        run: ./scripts/save-tester.sh
+
       - name: Upload input-tester evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: input-tester-linux
-          path: output/input-tester.*/
+          path: |
+            output/input-tester.*/
+            output/save-tester.*/
           if-no-files-found: warn
 
   # ROM-bound native AOT for aarch64-apple-darwin. The two integration targets

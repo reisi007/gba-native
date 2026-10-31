@@ -53,7 +53,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT alpha/brightness; bitmap modes 3/4/5. No scanline timing, Mode 2, 2D OBJ mapping, double-size affine OBJ, OBJ/BG mosaic or window 1 |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
-| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; no playability, GUI or save claim |
+| Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--save` persists an explicit raw backup image; no playability or GUI claim |
 | ROM-bound WASM execution module (`aot build --target wasm32-unknown-unknown`) | wasm-bindgen `run_rom(Uint8Array)` module plus JS glue; embeds SHA-256+length, never ROM bytes; no browser app/UI, GPU renderer, input, persistence or playability claim |
 | Runtime fallback | Reference interpreter; per-instruction IRQ/frame-model events are preserved; RAM code is never AOT |
 | Nearest-neighbor PPM output | Implemented |
@@ -61,9 +61,10 @@ the root workspace lockfile contains only these three internal path packages.
 | Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
 | Audio (first slice) | Dependency-free PSG mixer and stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out` and the AOT harness `--audio`; browser WebAudio; full PSG timing/Direct Sound tracked in #29 |
 | Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
+| Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
 | Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS/Android are not claimed |
 | Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
-| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API and localStorage settings page; static synthetic demo only; no ROM/AOT/audio/save |
+| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings and a synthetic save-image library (import/export/use/default); static synthetic demo only; no ROM/AOT/guest-audio execution |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
@@ -74,8 +75,10 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
+cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
+cargo run -- save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
 cargo run -- audio --out output/<new-directory>/tone.wav [--frequency 440] [--seconds 2] [--volume 80] [--mute]
 cargo run -- aot proof [--out output/<new-directory>]
 cargo run -- aot emit <rom.gba> <generated.rs>
@@ -83,12 +86,21 @@ cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>
 cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
 
+`./scripts/save-tester.sh` is also part of the Linux CI job; the browser save
+panel is covered by `apps/web/tests/js/saves.test.mjs` and the Playwright E2E
+suite.
+
 - `run --input FILE` replays `at:KEYS:hold` instruction-indexed input events
   (for example `0:A+B+Start:20000000`). The `run` report always includes
   `perf_*` wall-time, guest-instructions/second and real-time-factor lines with
   the explicit non-cycle caveat. `run --audio-out FILE [--volume 0..100]
   [--mute]` also renders the guest sound-register timeline to a WAV through the
   dependency-free PSG `AudioEngine`.
+- `run --save-dir DIR [--save-slot NAME]` loads and stores the selected raw
+  backup image through the host save library; without a slot it uses the stored
+  default, creating `default` on the first save. `save list/import/export/use/
+  default/delete` manages multiple slots per ROM SHA-256. Device writes still
+  require one explicit `--synthetic-backup-*` opt-in.
 - `fixture input-tester` writes our own 4 KiB synthetic ROM. The committed
   fixture, input script and expected frame live under `tests/roms/synthetic/`;
   `scripts/input-tester.sh --visual` builds the native AOT artifact and compares
@@ -240,6 +252,7 @@ wasm-bindgen CLI from `./scripts/bootstrap-web-tools.sh` and the installed
 ./scripts/full.sh      # short + debug/release tests, demo, native proof, Ratchet slow
 ./scripts/frontend.sh  # optional desktop package: no Ratchet, no live GPU window
 ./scripts/web.sh --ci  # optional browser package and fail-closed Chromium E2E
+./scripts/save-tester.sh  # native save persistence (fresh/loaded, CLI slots)
 ```
 
 Per-package commands are available when a smaller loop is useful:
@@ -258,7 +271,13 @@ under `output/`:
 ```text
 GBA_NATIVE_LOCAL_ROM=/path/to/read-only.gba \
   cargo test -p gba-native-core --release --test local_name_entry -- --ignored --nocapture
+GBA_NATIVE_LOCAL_ROM=/path/to/read-only.gba \
+  cargo test -p gba-native-core --release --test local_emerald_save -- --ignored --nocapture
 ```
+
+The save test drives the observed intro/name/menu flow to an in-game save,
+persists the 128 KiB flash image through the save library and reloads it. It
+writes evidence only under `output/local-emerald-save-*`.
 
 The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and

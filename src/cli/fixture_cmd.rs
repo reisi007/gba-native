@@ -10,8 +10,8 @@ use super::output::write_safely;
 pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let kind = args
         .next()
-        .ok_or_else(|| Error::Args("fixture needs a kind: input-tester".to_string()))?;
-    if kind != "input-tester" {
+        .ok_or_else(|| Error::Args("fixture needs a kind: input-tester|save-tester".to_string()))?;
+    if kind != "input-tester" && kind != "save-tester" {
         return Err(Error::Args(format!("unknown fixture {kind:?}")));
     }
     let mut out = None;
@@ -25,9 +25,29 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             _ => return Err(Error::Args(format!("unknown fixture option {argument}"))),
         }
     }
-    let out = out.ok_or_else(|| {
-        Error::Args("fixture input-tester needs --out output/<name>.gba".to_string())
-    })?;
+    let out =
+        out.ok_or_else(|| Error::Args(format!("fixture {kind} needs --out output/<name>.gba")))?;
+    if kind == "save-tester" {
+        let cart = demo::save_tester_cartridge();
+        let bytes = cart.bytes();
+        write_safely(&out, bytes)?;
+        println!("fixture=save-tester");
+        println!("file={}", out.display());
+        println!("bytes={}", bytes.len());
+        println!("sha256={}", cart.sha256_hex());
+        println!("entry=0x08000000");
+        println!("budget={}", demo::SAVE_TESTER_BUDGET);
+        println!(
+            "fresh_image_sha256={}",
+            demo::expected_save_tester_image(false).sha256_hex()
+        );
+        println!(
+            "loaded_image_sha256={}",
+            demo::expected_save_tester_image(true).sha256_hex()
+        );
+        println!("note=synthetic save fixture only; no retail ROM, BIOS or save data");
+        return Ok(());
+    }
     let cart = demo::input_tester_cartridge();
     let bytes = cart.bytes();
     write_safely(&out, bytes)?;

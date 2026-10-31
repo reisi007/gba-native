@@ -29,8 +29,10 @@ actually implemented.
   `Cargo.lock` still contains exactly the three internal packages.
 
 The browser crate is `#![forbid(unsafe_code)]`. It accepts no cartridge path,
-save, upload, BIOS, audio or game input. The core stays std-only and has no
-browser host-filesystem convenience API.
+BIOS, guest audio or game input. The host-side JavaScript save library
+(`www/saves.mjs`) manages synthetic raw backup images in `localStorage` with
+import, export, use/default and delete; it does not execute guest saves. The
+core stays std-only and has no browser host-filesystem convenience API.
 
 ## Pinned dependencies
 
@@ -476,8 +478,10 @@ select, badge, alert, loading). It is responsive for desktop, mobile
 portrait and mobile landscape, keyboard operable (native select, buttons,
 skip link, `Enter`/`Space` start), with labelled controls and an `aria-live`
 status. The visible non-claim is: “Experimental synthetic GPU demo; no playable
-ROM, saves or game input yet.” There are no fake GBA buttons, save widgets or
-touch controls: those belong to #25/#8 and are not implemented.
+ROM or cartridge input; synthetic save management only.” The page does provide
+touch/pointer buttons, remappable keyboard bindings, fullscreen and a synthetic
+save-image library; these are UI/host features, not guest gameplay or retail
+save compatibility.
 
 Security: the development/test static server accepts only literal loopback
 `SocketAddr` IPs (`127.0.0.1` or `::1`), not wildcard, public IP or hostname

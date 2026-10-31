@@ -215,6 +215,9 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   persisted settings text format and instruction-indexed input scripts.
 - `crates/core/src/perf.rs`: wall-time, guest instructions/second and the stated
   real-time factor against the documented GBA clock.
+- `crates/core/src/save.rs`: host save library with multiple named slots per ROM
+  SHA-256, a default marker and path-safe slot names; `Bus::backup_image` /
+  `Bus::load_backup` move raw backup images in and out of the device model.
 - `crates/core/src/audio.rs`: dependency-free PSG mixer, stateful `AudioEngine`,
   volume/mute settings and a WAV sink. It has no platform dependency; native
   live playback is target-specific and the browser uses WebAudio. Full PSG
@@ -244,9 +247,12 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   owns the per-user file; `app/input.rs` handles keyboard, pointer and touch.
 - `apps/web/`: optional, separately excluded synthetic WASM/WebGPU/WebGL2
   package with its own Cargo/npm locks. It depends directly on `crates/core`,
-  not the AOT crate or root facade; it accepts no ROM, save or audio. Its
+  not the AOT crate or root facade; it accepts no ROM or guest audio and its
+  save panel manages synthetic raw images only. Its
   committed `www/input.mjs` maps browser keys and touch buttons to KEYINPUT and
-  persists the same settings fields in a JSON localStorage payload.
+  persists the same settings fields in a JSON localStorage payload. `www/saves.mjs`
+  is the browser save library (base64 raw images in localStorage, named slots,
+  default, import/export) and is covered by Node tests and Playwright E2E.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
@@ -256,9 +262,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   immutable inputs, not part of `cargo test` or CI. See the directory README for
   cross-target execution instructions and visible-pass criteria.
 - `tests/roms/synthetic/`: our own committed 4 KiB input-tester ROM, input
-  script and expected frame. `crates/core/tests/input_tester_fixture.rs` checks
-  the generator/digests and reference frame; `scripts/input-tester.sh` builds and
-  runs the native AOT artifact (visual Playwright comparison with `--visual`).
+  script, expected frame and the 4 KiB save-tester ROM.
+  `crates/core/tests/input_tester_fixture.rs` checks the generator/digests and
+  reference frame; `scripts/input-tester.sh` builds and runs the native AOT
+  artifact (visual Playwright comparison with `--visual`).
 - `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.
@@ -272,6 +279,8 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   missing linker instead of claiming success.
 - `scripts/input-tester.sh`: native input-tester gate, optionally with the
   pinned Chromium/Playwright pixel comparison.
+- `scripts/save-tester.sh`: native save-tester gate (fresh/loaded frames, two
+  independent raw images, CLI slots/default/import/export); part of Linux CI.
 - `crates/core/tests/local_name_entry.rs`: ignored, environment-gated local
   retail name-entry regression (`GBA_NATIVE_LOCAL_ROM`); never part of CI.
 - `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and

@@ -199,6 +199,26 @@
               Apply fullscreen
             </button>
           </div>
+          <div class="divider my-1"></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-semibold">Savegames — synthetic SAVETEST</h3>
+            <span class="badge badge-ghost badge-sm" id="save-rom">SAVETEST</span>
+          </div>
+          <p class="text-xs opacity-70">
+            Host-side library keyed by the synthetic ROM SHA-256 in
+            <code>localStorage</code>. Import or export raw <code>.sav</code> images and pick the
+            default slot. No account or remote storage is involved.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="save-name" class="input input-sm input-bordered w-32" maxlength="32"
+              placeholder="slot name" value="imported" aria-label="Save slot name" />
+            <input id="save-file" type="file" accept=".sav,.bin,application/octet-stream"
+              class="file-input file-input-sm file-input-bordered" aria-label="Save image" />
+            <button id="save-import" class="btn btn-sm btn-primary" type="button">Import</button>
+            <button id="save-export" class="btn btn-sm btn-outline" type="button">Export default</button>
+          </div>
+          <p id="save-status" class="text-xs" role="status"></p>
+          <ul id="save-list" class="space-y-1 text-sm" aria-label="Save slots"></ul>
         </div>
       </section>
 
@@ -229,11 +249,12 @@
               available on WebGL2; none are claimed.
             </li>
             <li>
-              No playable ROM, cartridge picker, save data or audio in this foundation. The
+              No playable ROM, cartridge picker or retail save data in this foundation. The
               windowed shell exposes touch/pointer buttons, keyboard bindings, fullscreen and a
               persisted settings page; these map the documented KEYINPUT bits to the synthetic
-              demo UI and are not a retail-game input path. Android/iOS packages remain open work
-              (#11, #25).
+              demo UI and are not a retail-game input path. The savegame panel is a host-side
+              library for synthetic raw backup images, not guest save execution. Android/iOS
+              packages remain open work (#11, #25).
             </li>
           </ul>
         </div>
@@ -242,7 +263,7 @@
 
     <footer class="mx-auto max-w-5xl px-4 pb-6 text-xs opacity-70">
       <p class="font-medium">
-        Experimental synthetic GPU demo; no playable ROM, cartridge input or saves.
+        Experimental synthetic GPU demo; no playable ROM or cartridge input; synthetic save management only.
       </p>
       <p>
         Adapter values are what this browser instance reported. A software rasterizer such as

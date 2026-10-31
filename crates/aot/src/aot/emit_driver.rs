@@ -80,6 +80,7 @@ pub(super) fn emit_driver(
     writeln!(out, "    let mut input: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut snapshot: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut audio: Option<&str> = None;").unwrap();
+    writeln!(out, "    let mut save: Option<&str> = None;").unwrap();
     writeln!(out, "    let mut volume: u8 = 80;").unwrap();
     writeln!(out, "    let mut muted = false;").unwrap();
     writeln!(out, "    let mut index = 0usize;").unwrap();
@@ -89,11 +90,12 @@ pub(super) fn emit_driver(
     writeln!(out, "            \"--input\" => {{ index += 1; input = Some(args.get(index).ok_or_else(|| Error::Args(\"--input needs a script path\".to_string()))?); }}").unwrap();
     writeln!(out, "            \"--snapshot\" => {{ index += 1; snapshot = Some(args.get(index).ok_or_else(|| Error::Args(\"--snapshot needs a PPM path\".to_string()))?); }}").unwrap();
     writeln!(out, "            \"--audio\" => {{ index += 1; audio = Some(args.get(index).ok_or_else(|| Error::Args(\"--audio needs a WAV path\".to_string()))?); }}").unwrap();
+    writeln!(out, "            \"--save\" => {{ index += 1; save = Some(args.get(index).ok_or_else(|| Error::Args(\"--save needs a raw backup path\".to_string()))?); }}").unwrap();
     writeln!(out, "            \"--volume\" => {{ index += 1; volume = args.get(index).ok_or_else(|| Error::Args(\"--volume needs 0..=100\".to_string()))?.parse().map_err(|_| Error::Args(\"invalid --volume\".to_string()))?; if volume > 100 {{ return Err(Error::Args(\"--volume must be 0..=100\".to_string())); }} }}").unwrap();
     writeln!(out, "            \"--mute\" => muted = true,").unwrap();
     writeln!(
         out,
-        "            other => return Err(Error::Args(format!(\"usage: harness --rom PATH [--input SCRIPT] [--snapshot PPM] [--audio WAV] [--volume 0..100] [--mute] (the ROM is not embedded); unknown option {{other}}\"))),"
+        "            other => return Err(Error::Args(format!(\"usage: harness --rom PATH [--input SCRIPT] [--snapshot PPM] [--audio WAV] [--save BACKUP] [--volume 0..100] [--mute] (the ROM is not embedded); unknown option {{other}}\"))),"
     )
     .unwrap();
     writeln!(out, "        }}").unwrap();
@@ -159,6 +161,13 @@ pub(super) fn emit_driver(
     writeln!(out, "    cpu.initialize_bios_stacks();").unwrap();
     writeln!(out, "    cpu.set_pc(ENTRY);").unwrap();
     writeln!(out, "    cpu.set_thumb(ENTRY_THUMB);").unwrap();
+    writeln!(out, "    let save_path = save;").unwrap();
+    writeln!(out, "    if let Some(path) = save_path {{").unwrap();
+    writeln!(out, "        if std::path::Path::new(path).exists() {{").unwrap();
+    writeln!(out, "            let bytes = std::fs::read(path).map_err(|error| Error::Args(format!(\"cannot read save {{path}}: {{error}}\")))?;").unwrap();
+    writeln!(out, "            bus.load_backup(&bytes)?;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "    let script = match input {{").unwrap();
     writeln!(out, "        Some(path) => {{").unwrap();
     writeln!(out, "            let text = std::fs::read_to_string(path).map_err(|error| Error::Args(format!(\"cannot read input script {{path}}: {{error}}\")))?;").unwrap();
@@ -271,6 +280,13 @@ pub(super) fn emit_driver(
     writeln!(out, "        println!(\"audio_muted={{muted}}\");").unwrap();
     writeln!(out, "        println!(\"audio_audible={{}}\", !muted && engine.samples().iter().any(|sample| *sample != 0));").unwrap();
     writeln!(out, "        println!(\"audio_wav_sha256={{}}\", gba_native::sha256::hex(&gba_native::sha256::digest(&wav)));").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    if let Some(path) = save_path {{").unwrap();
+    writeln!(out, "        let image = bus.backup_image();").unwrap();
+    writeln!(out, "        std::fs::write(path, image).map_err(|error| Error::Args(format!(\"cannot write save {{path}}: {{error}}\")))?;").unwrap();
+    writeln!(out, "        println!(\"save={{}}\", path);").unwrap();
+    writeln!(out, "        println!(\"save_bytes={{}}\", image.len());").unwrap();
+    writeln!(out, "        println!(\"save_sha256={{}}\", gba_native::sha256::hex(&gba_native::sha256::digest(image)));").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    let stats = gba_native::perf::PerfStats::new(").unwrap();
     writeln!(out, "        BUDGET - program.budget_remaining,").unwrap();

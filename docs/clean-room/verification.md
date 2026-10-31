@@ -1377,7 +1377,7 @@ a retail compatibility level.
 | `x86_64-apple-darwin` | Mach-O x86_64; built (host is arm64) |
 | `x86_64-unknown-linux-gnu` | ELF 64-bit x86-64 PIE; built with `zig cc` |
 | `x86_64-pc-windows-gnu` | PE32+ x86-64 console executable; built with mingw-w64 |
-| `wasm32-unknown-unknown` | 161,980-byte module; built with pinned wasm-bindgen 0.2.129 |
+| `wasm32-unknown-unknown` | 163,537-byte module; built with pinned wasm-bindgen 0.2.129 |
 
 The Linux artifact is build evidence on a macOS host; execution is covered by
 the Linux CI job. Windows MSVC, iOS and Android are not claimed; they need their
@@ -1455,3 +1455,52 @@ Direct Sound FIFO sample clock and no cycle-accurate resampling. Live native
 speaker output is target-specific and not yet wired; the WAV artifact is the
 native output path in this slice. Full audio is tracked in issue #29 and is not
 a retail-audio, hardware-timing or BIOS-audio claim.
+
+## Round: host save library and synthetic save-tester (2026-10-31)
+
+The host save library is `core::save::SaveLibrary`: raw backup images live under
+`<root>/<rom-sha256>/<slot>.sav` with a `default` marker. Slot names are
+path-safe (1..=32 characters, no leading dot, no separators). `Bus::backup_image`
+and `Bus::load_backup` move the selected device image in and out. The CLI adds
+`run --save-dir/--save-slot` and
+`save list|import|export|use|default|delete`.
+
+Synthetic evidence, all from our own 4 KiB `tests/roms/synthetic/save-tester.gba`
+(ROM SHA-256 `f8dbe41f4dcd1e134759a23cce988b4a05f1185f102b3153d69240600e76c4e3`):
+
+- fresh frame `53ff58d4cb667ee14a36ec6d6723fbfa623a7ddc489c4a11551254cdeaad8755`,
+  32 KiB SRAM image SHA-256
+  `39640902e8ceb5ebcce5769a9d891df7e0c3f1a9d8b0c3b0c175a34f3a823dca`;
+- loaded frame `259d7e7302a5d04611c276395f3f9a5901e7c65061b4fb0e6b9b6f786905434c`,
+  image SHA-256
+  `bc470afabfeeece7e51c912dabc4178e507fd6535e1402b36370ddb4f6f1e938`.
+
+`crates/core/tests/save_tester_fixture.rs` checks the committed ROM, both
+frames, multiple slots and default selection. `tests/cli_save.rs` runs the CLI
+twice into one slot and observes the fresh then loaded digest, then imports,
+exports, uses and deletes additional slots. `scripts/save-tester.sh` builds the
+native AOT harness, verifies the fresh and loaded frames against the same raw
+`--save` image, checks a second independent image, and repeats the multi-slot,
+default and import/export flow through the CLI. The Linux CI job runs it.
+
+The browser save panel uses `apps/web/www/saves.mjs`: base64 raw images in
+`localStorage`, named slots, default selection, import/export and delete.
+`apps/web/tests/js/saves.test.mjs` covers the storage model; the Playwright test
+imports two synthetic 32 KiB images, selects the default, downloads the default
+image, reloads the page and checks persistence. The panel is host-side
+management of synthetic raw images; the page does not execute guest saves.
+
+Local retail proof: `crates/core/tests/local_emerald_save.rs` is ignored and
+environment-gated (`GBA_NATIVE_LOCAL_ROM`), reads the retail ROM read-only, drives
+the observed intro/name/truck/menu flow (`DOWN` to leave the truck, `START`,
+menu navigation, `B` to close the bag, then `SICHERN`), persists the flash image
+through `SaveLibrary` and reloads it. A 7,600,000,000-instruction run produced a
+131,072-byte flash image with `save_non_erased_bytes=56331` and SHA-256
+`7a71d40ac8a14200f78a3115b1c4017843a47d368caee870226030ed6de1dc16`
+(`pc=0x08007B64`). Evidence is written only under
+`output/local-emerald-save-12910-1793443071481114000`; the ROM is read-only. The test asserts a
+non-erased image, reloads the exact bytes, and is never part of CI. This is a
+local observation, not a retail-save compatibility or distribution claim.
+
+Limits: this is persistence for the explicitly selected SRAM/flash models, not
+save-device compatibility. No retail save data, ROM or BIOS bytes are committed.

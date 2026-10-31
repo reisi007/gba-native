@@ -894,3 +894,35 @@ The current mixer is deliberately bounded: it has no full
 sweep/envelope/length frame sequencer, no Direct Sound FIFO sample clock and no
 cycle-accurate resampling. Those gaps and the cross-target acceptance tests are
 tracked in issue #29. This is not a retail-audio or hardware-timing claim.
+
+## D44 — Host save library and synthetic save fixture
+
+Decided 2026-10-31. Saves are host-side backup images, keyed by the cartridge
+SHA-256 and never copied into the repository:
+
+- `core::save::SaveLibrary` stores `<root>/<sha256>/<slot>.sav` plus a `default`
+  marker. Slot names are restricted to `A-Z`, `a-z`, `0-9`, `.`, `_`, `-`
+  (1..=32 characters, no leading dot) so a name cannot escape the directory.
+- The CLI exposes `run --save-dir/--save-slot` and
+  `save list|import|export|use|default|delete`. The first stored slot becomes
+  the default; deleting the default falls back to a remaining slot.
+- The browser keeps the same fields in a JSON `localStorage` document, encoded
+  as base64 raw images. The settings page supports import, export, use and
+  delete; no upload or account is involved.
+- The generated AOT harness accepts `--save PATH` and loads/writes the raw
+  backup image next to the ROM binding.
+
+The committed `tests/roms/synthetic/save-tester.gba` writes a magic and counter
+to byte-wide SRAM. A fresh run paints one frame and counter 1; a run with the
+persisted image paints a different frame and counter 2. `core::save`,
+`scripts/save-tester.sh` and the Linux CI job exercise multiple slots, default
+selection and import/export. A separate ignored, environment-gated test proves
+the same host persistence locally with a user-supplied Emerald ROM: the observed
+intro/name/truck/menu flow reaches SICHERN, writes a 128 KiB flash image with
+56,331 non-erased bytes, reloads it through `SaveLibrary`, and writes its
+evidence only under `output/`.
+
+Limits: this is storage for explicitly selected SRAM/flash models, not a
+save-device compatibility claim. The browser save panel manages synthetic raw
+images; it does not execute guest saves in the page. No retail save data, ROM or
+BIOS bytes are committed.

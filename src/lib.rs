@@ -15,5 +15,5 @@ pub use gba_native_aot::aot;
 pub use gba_native_core::{Error, Result};
 pub use gba_native_core::{
     audio, bios, bus, cart, cpu, decode, demo, display, error, input, interpret, ir, memory, perf,
-    render, semantics, sha256,
+    render, save, semantics, sha256,
 };

@@ -23,6 +23,9 @@ pub enum Error {
     UnsupportedSave {
         addr: u32,
     },
+    SaveImage {
+        len: usize,
+    },
     Unmapped {
         addr: u32,
     },
@@ -135,6 +138,9 @@ impl fmt::Display for Error {
             ),
             Error::UnsupportedSave { addr } => {
                 write!(f, "save hardware at 0x{addr:08X} is not implemented")
+            }
+            Error::SaveImage { len } => {
+                write!(f, "save image length {len} is not 1..=131072 bytes")
             }
             Error::Unmapped { addr } => write!(f, "unmapped address 0x{addr:08X}"),
             Error::UnalignedHalfword { addr } => {

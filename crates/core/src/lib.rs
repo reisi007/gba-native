@@ -29,6 +29,7 @@ pub mod ir;
 pub mod memory;
 pub mod perf;
 pub mod render;
+pub mod save;
 pub mod semantics;
 pub mod sha256;
 

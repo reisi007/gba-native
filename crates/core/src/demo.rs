@@ -14,11 +14,13 @@ use crate::error::Result;
 use crate::interpret;
 
 pub mod input_tester;
+pub mod save_tester;
 
 pub use input_tester::{
     ENTRY as INPUT_TESTER_ENTRY, INPUT_TESTER_BUDGET, INPUT_TESTER_SAMPLE_MASK,
     expected_input_tester_image, input_tester_cartridge,
 };
+pub use save_tester::{SAVE_TESTER_BUDGET, expected_save_tester_image, save_tester_cartridge};
 
 pub const ENTRY: u32 = ROM_BASE;
 pub const DEMO_BUDGET: u64 = 230_411;
@@ -200,6 +202,16 @@ fn arm_add_imm(rd: u32, rn: u32, imm8: u32) -> u32 {
 
 fn arm_cmp_imm(rn: u32, imm8: u32) -> u32 {
     0xE350_0000 | (rn << 16) | imm8
+}
+
+fn arm_ldrb(rd: u32, rn: u32, offset: u32) -> u32 {
+    assert!(offset < 4096);
+    0xE5D0_0000 | (rn << 16) | (rd << 12) | offset
+}
+
+fn arm_strb(rd: u32, rn: u32, offset: u32) -> u32 {
+    assert!(offset < 4096);
+    0xE5C0_0000 | (rn << 16) | (rd << 12) | offset
 }
 
 fn arm_strh(rd: u32, rn: u32, offset: u32) -> u32 {

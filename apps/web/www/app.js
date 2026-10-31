@@ -7,7 +7,8 @@
 //     required because a canvas context type cannot change).
 //   - One automatic WebGPU -> WebGL2 compatibility retry, recorded once.
 //   - Restart budget: at most three explicit restarts per 30 seconds.
-// No ROM, save, upload, remote asset or game-input path exists here.
+// No ROM, retail save data, upload, remote asset or game-input path exists
+// here; the save panel is a host-side library for synthetic backup images.
 
 import init, { poll_gpu_status, set_status_sink, start } from "./pkg/gba_native_web.js";
 import {
@@ -21,6 +22,7 @@ import {
   restoreFallbackNotice,
   statusForFallbackPage,
 } from "./lifecycle.mjs";
+import { SYNTHETIC_SAVE_ROM, SaveStore, validSlotName } from "./saves.mjs";
 import {
   BUTTONS,
   bindingLabel,
@@ -644,9 +646,107 @@ function playTestTone() {
   return true;
 }
 
+const saveStore = new SaveStore();
+let saveStatus = "";
+
+function saveSlots() {
+  return saveStore.list(SYNTHETIC_SAVE_ROM.sha);
+}
+
+function renderSaves() {
+  const list = byId("save-list");
+  list.replaceChildren();
+  const slots = saveSlots();
+  for (const slot of slots) {
+    const item = document.createElement("li");
+    item.className = "flex flex-wrap items-center gap-2";
+    item.dataset.slot = slot.name;
+    const label = document.createElement("span");
+    label.textContent = `${slot.name} · ${slot.bytes.length} B${slot.default ? " · default" : ""}`;
+    if (slot.default) label.className = "font-semibold";
+    const use = document.createElement("button");
+    use.type = "button";
+    use.className = "btn btn-xs btn-outline";
+    use.textContent = "Use";
+    use.addEventListener("click", () => {
+      saveStore.setDefault(SYNTHETIC_SAVE_ROM.sha, slot.name);
+      saveStatus = `default=${slot.name}`;
+      renderSaves();
+    });
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "btn btn-xs btn-ghost";
+    exportButton.textContent = "Export";
+    exportButton.addEventListener("click", () => {
+      exportSave(slot.name);
+    });
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "btn btn-xs btn-error btn-outline";
+    removeButton.textContent = "Delete";
+    removeButton.addEventListener("click", () => {
+      const next = saveStore.remove(SYNTHETIC_SAVE_ROM.sha, slot.name);
+      saveStatus = `deleted=${slot.name} default=${next}`;
+      renderSaves();
+    });
+    item.append(label, use, exportButton, removeButton);
+    list.append(item);
+  }
+  byId("save-status").textContent =
+    saveStatus || (slots.length === 0 ? "No save slots yet." : `${slots.length} slot(s)`);
+}
+
+function exportSave(name) {
+  const slot = saveSlots().find((candidate) => candidate.name === name);
+  if (!slot) {
+    saveStatus = `unknown slot ${name}`;
+    renderSaves();
+    return false;
+  }
+  const url = URL.createObjectURL(new Blob([slot.bytes], { type: "application/octet-stream" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${SYNTHETIC_SAVE_ROM.name}-${name}.sav`;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  saveStatus = `exported=${name}`;
+  renderSaves();
+  return true;
+}
+
+function importSaveBytes(name, bytes) {
+  if (!validSlotName(name)) {
+    saveStatus = "invalid slot name";
+    renderSaves();
+    return false;
+  }
+  try {
+    saveStore.save(SYNTHETIC_SAVE_ROM.sha, name, bytes);
+  } catch (error) {
+    saveStatus = String(error.message ?? error);
+    renderSaves();
+    return false;
+  }
+  saveStatus = `imported=${name}`;
+  renderSaves();
+  return true;
+}
+
+async function importSaveFile() {
+  const file = byId("save-file").files?.[0];
+  if (!file) {
+    saveStatus = "choose a .sav file";
+    renderSaves();
+    return false;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return importSaveBytes(byId("save-name").value.trim(), bytes);
+}
+
 function setupInputUi() {
   renderSettings();
   renderInputStatus();
+  renderSaves();
 
   byId("settings-button").addEventListener("click", () => {
     showSettings(byId("settings-panel").hidden);
@@ -686,6 +786,13 @@ function setupInputUi() {
   });
   byId("test-tone").addEventListener("click", () => {
     void playTestTone();
+  });
+  byId("save-import").addEventListener("click", () => {
+    void importSaveFile();
+  });
+  byId("save-export").addEventListener("click", () => {
+    const name = saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha);
+    if (name) exportSave(name);
   });
   byId("reset-settings").addEventListener("click", () => {
     inputState.settings = normaliseSettings();
@@ -806,6 +913,15 @@ function setupInputUi() {
     release: releaseButton,
     showSettings,
     fullscreen: () => document.fullscreenElement !== null || document.body.classList.contains("input-fullscreen"),
+  };
+  window.__gbaNative.saves = {
+    digest: SYNTHETIC_SAVE_ROM.sha,
+    list: () => saveSlots().map((slot) => ({ name: slot.name, bytes: slot.bytes.length, default: slot.default })),
+    defaultSlot: () => saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha),
+    importBytes: (name, bytes) => importSaveBytes(name, Uint8Array.from(bytes)),
+    use: (name) => saveStore.setDefault(SYNTHETIC_SAVE_ROM.sha, name),
+    remove: (name) => saveStore.remove(SYNTHETIC_SAVE_ROM.sha, name),
+    exportDefault: () => exportSave(saveStore.defaultSlot(SYNTHETIC_SAVE_ROM.sha)),
   };
   window.__gbaNative.audio = {
     settings: () => ({

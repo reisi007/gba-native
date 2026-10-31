@@ -1,7 +1,9 @@
 //! Game Pak backup window: explicit policies for volatile SRAM and flash.
 //!
-//! The prototype has no persistence. The strict policy reports every access in
-//! the 64 KiB backup window as an explicit error. The opt-ins model a
+//! The strict policy reports every access in the 64 KiB backup window as an
+//! explicit error. The selected device model is in-memory; host callers may
+//! persist or restore its raw image through `core::save::SaveLibrary` and
+//! `Bus::backup_image`/`Bus::load_backup`. The opt-ins model a
 //! byte-wide, volatile SRAM or a 128 KiB flash with the documented command
 //! subset; all start erased. The backing store is a fixed 128 KiB erased image
 //! so the guest-state digest does not depend on the selected host policy; the
@@ -22,15 +24,14 @@ pub const SAVE_LEN_FLASH: usize = 128 * 1024;
 
 /// Host-selected model for the 64 KiB Game Pak backup window.
 ///
-/// The prototype has no persistence. The strict policy reports every access as
-/// [`Error::UnsupportedSave`]. The SRAM opt-ins model byte-accessible storage
+/// The strict policy reports every access as [`Error::UnsupportedSave`]. The SRAM opt-ins model byte-accessible storage
 /// that starts erased (`0xFF`), is lost when the process ends, and has no flash
 /// command engine. The flash opt-in models two 64 KiB banks with the documented
 /// autoselect/bank-switch/program/erase subset. Neither model claims general
 /// save-device or flash compatibility.
 ///
-/// This is a device model, not a save feature: nothing is written to disk.
-/// The selected policy is host configuration and is excluded from
+/// The model itself is volatile; persistence is a host concern through the save
+/// library. The selected policy is host configuration and is excluded from
 /// [`Bus::state_digest`]; only the SRAM contents are guest state and are
 /// hashed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -90,6 +91,32 @@ pub(super) struct FlashState {
 }
 
 impl Bus {
+    /// Backing-image length exposed by the selected backup policy.
+    #[must_use]
+    pub fn backup_capacity(&self) -> usize {
+        self.backup_policy.capacity()
+    }
+
+    /// Persistable backup image for the selected policy.
+    #[must_use]
+    pub fn backup_image(&self) -> &[u8] {
+        &self.backup[..self.backup_policy.capacity()]
+    }
+
+    /// Load a host save image into the backing store.
+    ///
+    /// Shorter images keep the erased (`0xFF`) fill for the rest of the
+    /// backing store; longer or empty images are explicit errors. The selected
+    /// device policy still gates guest access.
+    pub fn load_backup(&mut self, data: &[u8]) -> Result<()> {
+        if data.is_empty() || data.len() > SAVE_LEN_FLASH {
+            return Err(Error::SaveImage { len: data.len() });
+        }
+        self.backup.fill(0xFF);
+        self.backup[..data.len()].copy_from_slice(data);
+        Ok(())
+    }
+
     /// Applies the selected backup-device model to a read in the save window.
     ///
     /// The selected SRAM/flash device model answers; the rest of the 64 KiB

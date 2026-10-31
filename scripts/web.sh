@@ -80,7 +80,7 @@ info "apps/web host unit tests"
 cargo test --locked --manifest-path apps/web/Cargo.toml
 
 info "apps/web browser lifecycle unit tests"
-"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs
+"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs apps/web/tests/js/saves.test.mjs
 
 info "apps/web Clippy (host all-targets; wasm32 library)"
 cargo clippy --locked --manifest-path apps/web/Cargo.toml --all-targets -- -D warnings
@@ -116,7 +116,7 @@ fi
 rm -rf "$DIST"
 mkdir -p "$DIST/pkg"
 : >"$DIST/.gba-web-dist"
-cp apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs "$DIST"/
+cp apps/web/www/index.html apps/web/www/app.js apps/web/www/lifecycle.mjs apps/web/www/input.mjs apps/web/www/saves.mjs "$DIST"/
 
 info "wasm-bindgen $("$TOOLS/bin/wasm-bindgen" --version | awk '{print $2}') web bindings"
 "$TOOLS/bin/wasm-bindgen" --target web --no-typescript --out-dir "$DIST/pkg" \

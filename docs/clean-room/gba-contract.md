@@ -132,10 +132,12 @@ byte-wide, volatile 32 KiB or 64 KiB SRAM (`run --synthetic-backup-sram`,
 (`run --synthetic-backup-flash128k`) with two 64 KiB banks and the documented
 autoselect (`0x90`), bank-switch (`0xB0`), program (`0xA0`), sector-erase
 (`0x30`) and chip-erase (`0x10`) subset. Autoselect returns the Sanyo 128K ID
-`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. All three start erased, are lost when the process ends, and
-have no persistence. Wider accesses and the window beyond the selected device
-capacity stay explicit `UnsupportedSave` errors. This is a device model for
-bounded progress experiments, not a save feature; the storage bytes and flash
+`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. All three start erased and the device model itself does not write to disk; a
+host caller may persist or restore the raw image through the save library
+(`core::save::SaveLibrary`, `run --save-dir/--save-slot`, AOT `--save`). Wider
+accesses and the window beyond the selected device capacity stay explicit
+`UnsupportedSave` errors. This is a device model for bounded progress
+experiments, not a save-device compatibility claim; the storage bytes and flash
 command/bank state are guest state included in `Bus::state_digest`, while the
 selected policy is host configuration and is not hashed. Selecting more than one
 backup-device flag is an argument error.
