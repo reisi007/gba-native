@@ -80,7 +80,7 @@ info "apps/web host unit tests"
 cargo test --locked --manifest-path apps/web/Cargo.toml
 
 info "apps/web browser lifecycle unit tests"
-"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs apps/web/tests/js/saves.test.mjs
+"$NODE_BIN" --test apps/web/tests/js/lifecycle.test.mjs apps/web/tests/js/input.test.mjs apps/web/tests/js/saves.test.mjs apps/web/tests/js/audio.test.mjs apps/web/tests/js/features.test.mjs
 
 info "apps/web Clippy (host all-targets; wasm32 library)"
 cargo clippy --locked --manifest-path apps/web/Cargo.toml --all-targets -- -D warnings
