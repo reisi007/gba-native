@@ -9,6 +9,7 @@
 mod app;
 mod audio_out;
 mod cli;
+mod features;
 mod presentation;
 mod saves;
 mod settings;

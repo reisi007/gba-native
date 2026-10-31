@@ -21,6 +21,7 @@ use crate::cli::Options;
 use crate::presentation::{RgbaImage, compute_viewport, synthetic_demo_image};
 use crate::{settings, ui};
 
+mod audio;
 mod input;
 mod render;
 

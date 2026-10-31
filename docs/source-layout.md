@@ -80,12 +80,16 @@
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the
   desktop and Android apps (`image`, `viewport`, `ui`, `settings`, `saves`,
-  `tone`).
+  `tone`, `player`, `features`). It is the canonical feature contract.
 - `apps/android/`: separate NativeActivity package; `model.rs` is the
   host-tested shell (composition, touch, settings, saves, tone artifact) and
   `app.rs` the Android-only window and event loop.
-- `apps/desktop/src/saves.rs`, `apps/desktop/src/app/render.rs`: desktop saves
-  page state and screen selection, both over the shared frontend.
+- `apps/desktop/src/saves.rs`, `apps/desktop/src/app/render.rs`,
+  `apps/desktop/src/app/audio.rs`: desktop saves page, screen selection and
+  tone playback over the shared frontend.
+- `apps/web/www/audio.mjs`, `apps/web/www/features.mjs`: browser tone WAV
+  artifact and the browser feature declaration checked against the Rust
+  contract by `tests/js/features.test.mjs`.
 - `scripts/android.sh`: Android NDK cross-build gate for the three ABIs, with
   ELF machine/interpreter verification; part of the `android-native` CI job.
 - `scripts/android-app.sh`: builds and signs the synthetic APK for the three

@@ -42,6 +42,10 @@ impl Frontend {
                     self.rebuild_display();
                     return;
                 }
+                KeyCode::KeyP => {
+                    self.play_tone();
+                    return;
+                }
                 KeyCode::F1 => {
                     self.show_settings = !self.show_settings;
                     self.rebuild_display();

@@ -22,6 +22,7 @@ import {
   restoreFallbackNotice,
   statusForFallbackPage,
 } from "./lifecycle.mjs";
+import { renderToneWav } from "./audio.mjs";
 import { SYNTHETIC_SAVE_ROM, SaveStore, validSlotName } from "./saves.mjs";
 import {
   BUTTONS,
@@ -646,6 +647,19 @@ function playTestTone() {
   return true;
 }
 
+// Download the shared tone artifact: the browser equivalent of the native WAV
+// written by `frontend::tone`, so every target can produce the same artifact.
+function downloadTone() {
+  const blob = new Blob([renderToneWav(audioGain())], { type: "audio/wav" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "gba-native-tone.wav";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
 // Play mono signed 16-bit PCM from the wasm AOT module's run_rom_audio output.
 // The caller owns the sample source and pacing; this only schedules one buffer.
 function playPcm(samples, sampleRate = 32768) {
@@ -809,6 +823,9 @@ function setupInputUi() {
   byId("test-tone").addEventListener("click", () => {
     void playTestTone();
   });
+  byId("save-tone").addEventListener("click", () => {
+    downloadTone();
+  });
   byId("save-import").addEventListener("click", () => {
     void importSaveFile();
   });
@@ -953,6 +970,7 @@ function setupInputUi() {
     }),
     playTestTone,
     playPcm,
+    downloadTone,
     contextState: () => audioContext?.state ?? "closed",
   };
 }

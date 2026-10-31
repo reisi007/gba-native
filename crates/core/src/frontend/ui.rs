@@ -179,6 +179,8 @@ pub fn fullscreen(screen: &RgbaImage) -> RgbaImage {
 pub enum SavesAction {
     Close,
     New,
+    Import,
+    Export,
     Use,
     MakeDefault,
     Delete,
@@ -201,11 +203,13 @@ pub fn saves_row_at(x: u32, y: u32) -> Option<usize> {
 /// Resolve a pointer to a saves-page action button.
 pub fn saves_action_at(x: u32, y: u32) -> Option<SavesAction> {
     let rects = [
-        ((40, 520, 120, 50), SavesAction::New),
-        ((180, 520, 120, 50), SavesAction::Use),
-        ((320, 520, 200, 50), SavesAction::MakeDefault),
-        ((540, 520, 120, 50), SavesAction::Delete),
-        ((670, 0, 130, 48), SavesAction::Close),
+        ((30, 520, 100, 50), SavesAction::New),
+        ((140, 520, 120, 50), SavesAction::Import),
+        ((270, 520, 120, 50), SavesAction::Export),
+        ((400, 520, 90, 50), SavesAction::Use),
+        ((500, 520, 160, 50), SavesAction::MakeDefault),
+        ((670, 520, 110, 50), SavesAction::Delete),
+        ((680, 0, 120, 48), SavesAction::Close),
     ];
     rects
         .iter()
@@ -219,7 +223,7 @@ pub fn saves_page(slots: &[SaveSlot], selected: usize) -> RgbaImage {
     fill(&mut rgba, 0, 0, WIDTH, HEIGHT, BODY);
     fill(&mut rgba, 0, 0, WIDTH, 48, PANEL);
     draw_text(&mut rgba, 24, 14, "SAVES", ACCENT, 4);
-    draw_text(&mut rgba, 600, 18, "CLOSE", DIM, 2);
+    draw_text(&mut rgba, 690, 18, "CLOSE", DIM, 2);
 
     if slots.is_empty() {
         draw_text(&mut rgba, 40, 110, "NO SLOTS YET", DIM, 3);
@@ -246,7 +250,14 @@ pub fn saves_page(slots: &[SaveSlot], selected: usize) -> RgbaImage {
         }
     }
 
-    draw_text(&mut rgba, 40, 566, "NEW   USE   DEFAULT   DELETE", DIM, 2);
+    draw_text(
+        &mut rgba,
+        30,
+        566,
+        "NEW  IMPORT  EXPORT  USE  DEFAULT  DELETE",
+        DIM,
+        2,
+    );
     finish(rgba, 0)
 }
 
@@ -274,6 +285,7 @@ pub fn settings_page(settings: &Settings) -> RgbaImage {
     }
 
     let state = |value: bool| if value { "ON" } else { "OFF" };
+    draw_text(&mut rgba, 40, 424, "PLAY TONE", ACCENT, 3);
     draw_text(
         &mut rgba,
         40,
@@ -316,6 +328,11 @@ pub fn settings_page(settings: &Settings) -> RgbaImage {
     );
     draw_text(&mut rgba, 470, 544, "M MUTE  -/+ VOL", DIM, 2);
     finish(rgba, 0)
+}
+
+/// True when a pointer is on the settings page's play-tone row.
+pub fn settings_play_tone_at(x: u32, y: u32) -> bool {
+    (40..300).contains(&x) && (414..452).contains(&y)
 }
 
 /// True when a pointer is on the settings page's saves entry.
@@ -411,10 +428,12 @@ mod tests {
         assert_eq!(saves_row_at(60, SAVES_ROW_Y + SAVES_ROW_HEIGHT * 12), None);
 
         assert_eq!(saves_action_at(60, 540), Some(SavesAction::New));
-        assert_eq!(saves_action_at(220, 540), Some(SavesAction::Use));
-        assert_eq!(saves_action_at(400, 540), Some(SavesAction::MakeDefault));
-        assert_eq!(saves_action_at(600, 540), Some(SavesAction::Delete));
-        assert_eq!(saves_action_at(700, 20), Some(SavesAction::Close));
+        assert_eq!(saves_action_at(180, 540), Some(SavesAction::Import));
+        assert_eq!(saves_action_at(300, 540), Some(SavesAction::Export));
+        assert_eq!(saves_action_at(430, 540), Some(SavesAction::Use));
+        assert_eq!(saves_action_at(560, 540), Some(SavesAction::MakeDefault));
+        assert_eq!(saves_action_at(720, 540), Some(SavesAction::Delete));
+        assert_eq!(saves_action_at(720, 20), Some(SavesAction::Close));
         assert_eq!(saves_action_at(400, 300), None);
     }
 
@@ -424,6 +443,8 @@ mod tests {
         assert!(settings_saves_at(400, 40));
         assert!(!settings_saves_at(300, 20));
         assert!(!settings_saves_at(360, 60));
+        assert!(settings_play_tone_at(100, 430));
+        assert!(!settings_play_tone_at(100, 400));
     }
 
     #[test]

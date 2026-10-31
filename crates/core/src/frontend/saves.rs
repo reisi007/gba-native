@@ -17,6 +17,9 @@ pub const SYNTHETIC_ROM_SHA: &str =
 /// Largest raw backup image a slot may hold.
 pub const MAX_SAVE_BYTES: usize = 128 * 1024;
 
+/// Raw image a native frontend imports when the user taps "import".
+pub const IMPORT_FILE: &str = "import.sav";
+
 /// One stored slot as the settings/saves pages display it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveSlot {
@@ -59,6 +62,37 @@ impl SaveSlots {
 
     pub fn load(&self, name: &str) -> SaveResult<Vec<u8>> {
         self.library.load(SYNTHETIC_ROM_SHA, name)
+    }
+
+    /// Root directory that holds the synthetic slots.
+    pub fn root(&self) -> &std::path::Path {
+        self.library.root()
+    }
+
+    /// Import `<root>/import.sav` as the `imported` slot.
+    pub fn import_from_file(&self) -> SaveResult<String> {
+        let path = self.root().join(IMPORT_FILE);
+        let bytes = std::fs::read(&path)?;
+        self.import("imported", &bytes)?;
+        Ok("imported".to_string())
+    }
+
+    /// Export a slot to `<root>/export-<name>.sav` and return that path.
+    pub fn export_to_file(&self, name: &str) -> SaveResult<std::path::PathBuf> {
+        let bytes = self.export(name)?;
+        let path = self.root().join(format!("export-{name}.sav"));
+        std::fs::write(&path, bytes)?;
+        Ok(path)
+    }
+
+    /// Export a slot's raw bytes, for a file or a browser download.
+    pub fn export(&self, name: &str) -> SaveResult<Vec<u8>> {
+        self.load(name)
+    }
+
+    /// Import raw slot bytes under a validated name.
+    pub fn import(&self, name: &str, bytes: &[u8]) -> SaveResult<()> {
+        self.store(name, bytes)
     }
 
     pub fn delete(&self, name: &str) -> SaveResult<()> {
@@ -150,6 +184,41 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "a");
         assert!(listed[0].default);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_and_export_round_trip_raw_images() {
+        let root = temp("import-export");
+        let slots = SaveSlots::new(&root);
+        let bytes = SaveSlots::synthetic_image(9);
+        slots.import("imported", &bytes).expect("import");
+        assert_eq!(slots.export("imported").expect("export"), bytes);
+        assert_eq!(
+            slots.default_slot().expect("default"),
+            Some("imported".into())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn file_import_and_export_round_trip() {
+        let root = temp("files");
+        let slots = SaveSlots::new(&root);
+        std::fs::create_dir_all(slots.root()).expect("root");
+        let bytes = SaveSlots::synthetic_image(4);
+        std::fs::write(slots.root().join(IMPORT_FILE), &bytes).expect("import file");
+        assert_eq!(slots.import_from_file().expect("import"), "imported");
+        let exported = slots.export_to_file("imported").expect("export");
+        assert_eq!(std::fs::read(exported).expect("read"), bytes);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_missing_import_file_is_an_error() {
+        let root = temp("missing-import");
+        let slots = SaveSlots::new(&root);
+        assert!(slots.import_from_file().is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 

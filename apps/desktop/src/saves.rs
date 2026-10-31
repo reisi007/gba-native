@@ -81,6 +81,36 @@ impl SavesState {
                     self.status = Some(format!("cannot create {name}: {error}"));
                 }
             }
+            SavesAction::Import => match self.library.import_from_file() {
+                Ok(name) => {
+                    self.status = Some(format!(
+                        "imported {name} from {}",
+                        self.library
+                            .root()
+                            .join(gba_native::frontend::IMPORT_FILE)
+                            .display()
+                    ));
+                }
+                Err(error) => {
+                    self.status = Some(format!(
+                        "import failed; place a raw image at {} ({error})",
+                        self.library
+                            .root()
+                            .join(gba_native::frontend::IMPORT_FILE)
+                            .display()
+                    ));
+                }
+            },
+            SavesAction::Export => {
+                if let Some(name) = self.slots.get(self.selected).map(|slot| slot.name.clone()) {
+                    match self.library.export_to_file(&name) {
+                        Ok(path) => {
+                            self.status = Some(format!("exported {name} to {}", path.display()));
+                        }
+                        Err(error) => self.status = Some(format!("cannot export {name}: {error}")),
+                    }
+                }
+            }
             SavesAction::Use | SavesAction::MakeDefault => {
                 if let Some(name) = self.slots.get(self.selected).map(|slot| slot.name.clone()) {
                     if let Err(error) = self.library.set_default(&name) {
@@ -154,6 +184,24 @@ mod tests {
         state.open();
         state.apply(SavesAction::Delete);
         assert_eq!(state.slots().len(), 1);
+
+        let bytes = SaveSlots::synthetic_image(6);
+        std::fs::create_dir_all(state.library.root()).expect("saves dir");
+        std::fs::write(
+            state.library.root().join(gba_native::frontend::IMPORT_FILE),
+            &bytes,
+        )
+        .expect("import file");
+        state.apply(SavesAction::Import);
+        assert!(state.slots().iter().any(|slot| slot.name == "imported"));
+        state.selected = state
+            .slots()
+            .iter()
+            .position(|slot| slot.name == "imported")
+            .expect("imported slot");
+        state.apply(SavesAction::Export);
+        let exported = root.join("export-imported.sav");
+        assert_eq!(std::fs::read(exported).expect("exported"), bytes);
         let _ = std::fs::remove_dir_all(root);
     }
 

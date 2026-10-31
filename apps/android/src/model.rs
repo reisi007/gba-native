@@ -30,6 +30,7 @@ pub enum Page {
 pub enum SettingsAction {
     Close,
     OpenSaves,
+    PlayTone,
     ToggleMute,
     ToggleFullscreen,
     ToggleTouchControls,
@@ -114,6 +115,17 @@ impl AppModel {
         &self.slot_list
     }
 
+    /// Directory that holds the shared save slots and the import file.
+    pub fn slots_root(&self) -> &Path {
+        self.slots.root()
+    }
+
+    pub fn select_slot(&mut self, index: usize) {
+        if index < self.slot_list.len() {
+            self.selected = index;
+        }
+    }
+
     pub fn selected_slot(&self) -> usize {
         self.selected
     }
@@ -177,6 +189,8 @@ impl AppModel {
         }
         if ui::settings_saves_at(x, y) {
             Some(SettingsAction::OpenSaves)
+        } else if ui::settings_play_tone_at(x, y) {
+            Some(SettingsAction::PlayTone)
         } else if inside(FULLSCREEN_RECT, x, y) {
             Some(SettingsAction::ToggleFullscreen)
         } else if inside(TOUCH_RECT, x, y) {
@@ -202,6 +216,7 @@ impl AppModel {
                 self.reload_slots();
                 self.page = Page::Saves;
             }
+            SettingsAction::PlayTone => {}
             SettingsAction::ToggleMute => self.settings.muted = !self.settings.muted,
             SettingsAction::ToggleFullscreen => {
                 self.settings.fullscreen = !self.settings.fullscreen;
@@ -252,6 +267,34 @@ impl AppModel {
                         self.status = Some(format!("cannot select {}: {error}", slot.name));
                     } else if action == SavesAction::Use {
                         self.page = Page::Shell;
+                    }
+                }
+            }
+            SavesAction::Import => match self.slots.import_from_file() {
+                Ok(name) => {
+                    self.status = Some(format!(
+                        "imported {name} from {}",
+                        self.slots.root().join(frontend::IMPORT_FILE).display()
+                    ));
+                }
+                Err(error) => {
+                    self.status = Some(format!(
+                        "import failed; place a raw image at {} ({error})",
+                        self.slots.root().join(frontend::IMPORT_FILE).display()
+                    ));
+                }
+            },
+            SavesAction::Export => {
+                if let Some(name) = self
+                    .slot_list
+                    .get(self.selected)
+                    .map(|slot| slot.name.clone())
+                {
+                    match self.slots.export_to_file(&name) {
+                        Ok(path) => {
+                            self.status = Some(format!("exported {name} to {}", path.display()));
+                        }
+                        Err(error) => self.status = Some(format!("cannot export {name}: {error}")),
                     }
                 }
             }

@@ -1771,3 +1771,34 @@ The browser foundation keeps the same settings fields in `localStorage`, the
 same save-slot fields in its saves panel and `playPcm` for audio, so every
 target exposes the same synthetic-shell feature set. The remaining differences
 are the window/input modality and the browser's import/export of save bytes.
+
+### Feature-contract evidence
+
+`crates/core/src/frontend/features.rs` is the single source of truth
+(`FEATURE_IDS` and `Feature::ALL`): demo frame, touch controls, fullscreen,
+settings, audio artifact, audio playback, save slots and save import/export.
+
+```text
+core        frontend::features -> 3 passed (enum/id agreement, unique ids,
+                                          complete contract)
+desktop     feature_parity_with_the_shared_contract -> 13 passed
+android     feature_parity_with_the_shared_contract -> 11 passed
+browser     node --test tests/js/features.test.mjs -> parses the Rust contract
+                                                     and compares features.mjs
+```
+
+Closing the previous gaps:
+
+- Save import/export is shared: `SaveSlots::import_from_file` reads
+  `<saves>/import.sav`, `export_to_file` writes `<saves>/export-<slot>.sav`.
+  Both native saves pages expose Import and Export actions; the browser keeps
+  the file picker/download.
+- Audio playback is implemented on every target: the desktop writes the shared
+  tone WAV and plays it through `frontend::player` (afplay/paplay/aplay/
+  PowerShell, `GBA_NATIVE_AUDIO_PLAYER` override), Android uses
+  `android.media.MediaPlayer` over JNI on the same WAV, and the browser plays
+  WebAudio and also downloads the WAV artifact.
+
+Limits: Android playback is compile-verified in CI but not executed on a
+device in this repository; the shared `frontend::player` rules are unit-tested
+on the host. The contract test enforces feature presence, not runtime quality.

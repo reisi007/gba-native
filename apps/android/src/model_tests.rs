@@ -1,4 +1,5 @@
 use super::*;
+use gba_native::frontend::SaveSlots;
 use gba_native::frontend::ui::SavesAction;
 use gba_native::input::TouchLayout;
 use gba_native::sha256;
@@ -132,6 +133,7 @@ fn header_band_opens_the_settings_page() {
 fn settings_page_offers_saves_and_every_control_has_a_tap_zone() {
     let zones = [
         ((360, 20), SettingsAction::OpenSaves),
+        ((100, 430), SettingsAction::PlayTone),
         ((150, 470), SettingsAction::ToggleFullscreen),
         ((150, 510), SettingsAction::ToggleTouchControls),
         ((500, 520), SettingsAction::ToggleMute),
@@ -183,6 +185,30 @@ fn saves_page_creates_uses_defaults_and_deletes_slots() {
     assert_eq!(model.slots()[0].name, "slot1");
     assert!(model.slots()[0].default);
 
+    let imported_bytes = SaveSlots::synthetic_image(9);
+    std::fs::create_dir_all(model.slots_root()).expect("saves dir");
+    std::fs::write(
+        model.slots_root().join(frontend::IMPORT_FILE),
+        &imported_bytes,
+    )
+    .expect("import file");
+    model
+        .apply_saves_action(SavesAction::Import)
+        .expect("import");
+    let imported_index = model
+        .slots()
+        .iter()
+        .position(|slot| slot.name == "imported")
+        .expect("imported slot");
+    model.select_slot(imported_index);
+    model
+        .apply_saves_action(SavesAction::Export)
+        .expect("export");
+    assert_eq!(
+        std::fs::read(model.slots_root().join("export-imported.sav")).expect("exported"),
+        imported_bytes
+    );
+
     model.apply_saves_action(SavesAction::Use).expect("use");
     assert_eq!(model.page(), Page::Shell);
 
@@ -191,8 +217,9 @@ fn saves_page_creates_uses_defaults_and_deletes_slots() {
         let path = model.settings_path.clone();
         (AppModel::new(path).expect("reload"), ())
     };
-    assert_eq!(reloaded.slots().len(), 1);
-    assert_eq!(reloaded.slots()[0].name, "slot1");
+    assert_eq!(reloaded.slots().len(), 2);
+    assert!(reloaded.slots().iter().any(|slot| slot.name == "slot1"));
+    assert!(reloaded.slots().iter().any(|slot| slot.name == "imported"));
     let _ = std::fs::remove_dir_all(directory);
 }
 
