@@ -1802,3 +1802,35 @@ Closing the previous gaps:
 Limits: Android playback is compile-verified in CI but not executed on a
 device in this repository; the shared `frontend::player` rules are unit-tested
 on the host. The contract test enforces feature presence, not runtime quality.
+
+### Hashed import-graph web bundle
+
+The served browser set is now derived from `app.js`'s imports, not from a
+hand-written list, and every served file is content-hashed:
+
+```text
+$ node --test apps/web/tests/js/bundle.test.mjs
+pass 6 / fail 0
+
+$ ./scripts/web.sh --build-only
+asset=app.9f40db6592ef.css
+==> bundle contracts: expected WASM exports, no remote runtime assets
+==> build-only gate passed
+
+$ ls output/web-dist
+app.9f40db6592ef.css  app.f2559f5f5107.js  audio.974170efc3e5.mjs
+bundle-manifest.json  index.html            pkg/gba_native_web.be42995960f6.js
+pkg/gba_native_web_bg.763a62b24d11.wasm
+```
+
+`bundle-manifest.json` lists each module/asset with its SHA-256, and
+index.html points at the hashed entry and stylesheet. The full functional suite
+against that bundle passes:
+
+```text
+23 passed (39.6s)
+```
+
+including `audio settings and the WebAudio test tone are wired`,
+`PCM buffers shaped like the wasm module output play through WebAudio` and
+`the Save tone WAV button downloads the shared audio artifact`.

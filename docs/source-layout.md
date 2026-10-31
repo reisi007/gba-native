@@ -90,6 +90,9 @@
 - `apps/web/www/audio.mjs`, `apps/web/www/features.mjs`: browser tone WAV
   artifact and the browser feature declaration checked against the Rust
   contract by `tests/js/features.test.mjs`.
+- `apps/web/tools/bundle.mjs`, `apps/web/tests/js/bundle.test.mjs`: the
+  import-graph bundle step with content-hashed names and a manifest, and its
+  unit tests.
 - `scripts/android.sh`: Android NDK cross-build gate for the three ABIs, with
   ELF machine/interpreter verification; part of the `android-native` CI job.
 - `scripts/android-app.sh`: builds and signs the synthetic APK for the three

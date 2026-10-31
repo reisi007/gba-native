@@ -1034,3 +1034,28 @@ has no native shell.
 code and their tests compare the declared ids with the contract; the browser
 Node test parses the Rust contract and compares it with `www/features.mjs`. A
 target that drops a feature fails its own CI job.
+
+## D47 — Content-hashed import-graph bundle
+
+Decided 2026-10-31. The browser app is not bundled by Vite or Webpack; it stays
+native ES modules plus wasm-bindgen output, but the "copy the www files" step
+was a hand-maintained list and could silently omit a module (it did: the new
+`audio.mjs` import broke the served page). The build now derives the served set
+from the code:
+
+- `apps/web/tools/bundle.mjs` walks the relative imports of `app.js`, reads the
+  generated `pkg/` root for wasm-bindgen output, and fails on a missing import,
+  an import that leaves the source tree, or a cycle.
+- Served artifacts are content-hashed (`app.<hash>.js`, `audio.<hash>.mjs`,
+  `app.<hash>.css`, `pkg/gba_native_web_bg.<hash>.wasm`); import specifiers,
+  the glue's wasm reference and the index.html entry/CSS references are
+  rewritten to the hashed names.
+- `bundle-manifest.json` records the served path and SHA-256 of every module and
+  asset, so the bundle can be audited and cached by immutable name.
+- `scripts/web.sh` checks the hashed glue/wasm and that the bundle has no remote
+  references, and `web-e2e.sh`/the browser tests accept the hashed CSS name.
+
+Limits: this is still not an application bundler (no tree shaking, no
+minification, no code splitting); it only makes module closure and cache-safe
+names deterministic and fail-closed. A Vite/Webpack migration remains possible
+but would add another pinned toolchain to the browser gate.
