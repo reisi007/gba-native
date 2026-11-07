@@ -10,6 +10,9 @@ use crate::input::{Settings, TouchLayout};
 use super::image::RgbaImage;
 use super::saves::SaveSlot;
 
+mod shell;
+pub use shell::{shell, shell_with_controls};
+
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 600;
 
@@ -116,54 +119,6 @@ fn blank() -> Vec<u8> {
 
 fn finish(rgba: Vec<u8>, budget: u64) -> RgbaImage {
     RgbaImage::from_rgba(WIDTH, HEIGHT, rgba, budget).expect("UI image is valid")
-}
-
-/// Windowed GBA-shell composition with the guest image at 2x.
-pub fn shell(screen: &RgbaImage, pressed: u16) -> RgbaImage {
-    let mut rgba = blank();
-    fill(&mut rgba, 0, 0, WIDTH, HEIGHT, BODY);
-    fill(&mut rgba, 0, 0, WIDTH, 26, PANEL);
-    draw_text(&mut rgba, 16, 8, "GBA-NATIVE", ACCENT, 2);
-    draw_text(&mut rgba, 600, 8, "WINDOWED", DIM, 2);
-
-    let layout = TouchLayout::landscape();
-    let (sx, sy, sw, sh) = layout.screen.pixels(WIDTH, HEIGHT);
-    fill(&mut rgba, sx - 8, sy - 8, sw + 16, sh + 16, BEZEL);
-    blit_scaled(&mut rgba, screen, sx, sy, sw, sh);
-
-    for (button, rect) in &layout.controls {
-        let (bx, by, bw, bh) = rect.pixels(WIDTH, HEIGHT);
-        let active = pressed & button.bit() != 0;
-        fill(
-            &mut rgba,
-            bx,
-            by,
-            bw,
-            bh,
-            if active { PRESSED } else { BUTTON },
-        );
-        let label = button.name();
-        let tw = text_width(label, 2);
-        draw_text(
-            &mut rgba,
-            bx + bw.saturating_sub(tw) / 2,
-            by + bh / 2 - 5,
-            label,
-            if active { BODY } else { TEXT },
-            2,
-        );
-    }
-
-    draw_text(
-        &mut rgba,
-        16,
-        566,
-        "F1 SETTINGS  F2 SAVES  F11 FULLSCREEN",
-        DIM,
-        2,
-    );
-    draw_text(&mut rgba, 600, 566, "SYNTHETIC", ACCENT, 2);
-    finish(rgba, screen.guest_budget())
 }
 
 /// Fullscreen frame: the 240x160 guest image at 3x, centred on black.

@@ -79,8 +79,26 @@
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the
-  desktop and Android apps (`image`, `viewport`, `ui`, `settings`, `saves`,
-  `tone`, `player`, `features`). It is the canonical feature contract.
+  desktop, Android and Rune apps (`image`, `viewport`, `ui` including
+  `ui/shell.rs`, `settings`, `saves`, `tone`, `player`, `features`). It is the
+  canonical feature contract.
+- `apps/rune/`: isolated, additive Rune migration app pinned to one upstream
+  revision with its own lock. A shared Rune model/view targets Linux, macOS,
+  Windows, browser/WASM and iOS; `www/` and `scripts/rune-web.sh` build its
+  WebGPU browser shell, while `scripts/rune-web-screenshots.sh` checks the
+  desktop settings/save flow and captures desktop/mobile review states. It reuses the core synthetic shell
+  compositor, settings and save contracts, with platform adapters for host
+  input, native/browser file operations and test-tone output. Mobile layouts
+  wrap, stack and scroll. `scripts/rune-ios-simulator.sh` links device and
+  simulator executables, packages and launches a simulator app, and captures
+  its screen in macOS CI; physical-device signing and execution plus native
+  audio/document-picker adapters remain open. iOS save slots and WAV artifacts
+  use the Files-shared Documents folder, with import from `saves/import.sav`.
+  WebGL is not buildable with the pinned revision. `scripts/rune-native-snapshot.sh` exercises the native
+  offscreen renderer; Linux CI provisions Mesa software Vulkan, not a physical
+  GPU. Android remains outside this migration. Existing desktop and web targets
+  stay until parity is independently verified; issue #30 is the migration
+  record.
 - `apps/android/`: separate NativeActivity package; `model.rs` is the
   host-tested shell (composition, touch, settings, saves, tone artifact) and
   `app.rs` the Android-only window and event loop.
