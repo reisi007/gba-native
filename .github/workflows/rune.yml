@@ -1,0 +1,118 @@
+name: Rune UI
+
+# The Rune app is an isolated, additive migration target. These jobs verify
+# host builds, a Linux native offscreen render, the WASM/browser adapters and
+# iOS simulator launch; they do not replace existing frontends or claim
+# physical-GPU/iOS-device execution.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Rune host gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Rust 1.98.0
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Rune host gate (headless)
+        run: bash scripts/rune.sh
+
+      - name: Install Mesa software Vulkan for native render check
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libvulkan1 mesa-vulkan-drivers
+
+      - name: Render Rune UI with native software Vulkan
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/rune-native-snapshot.sh
+
+      - name: Upload native Rune render capture
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rune-native-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/rune-native-review-*/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ios-cross:
+    name: Rune iOS cross-check (compile only)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: target/rune
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Rust 1.98.0 with iOS device and simulator targets
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Check iOS device target
+        run: cargo check --locked --manifest-path apps/rune/Cargo.toml --all-targets --target aarch64-apple-ios
+
+      - name: Check iOS simulator target
+        run: cargo check --locked --manifest-path apps/rune/Cargo.toml --all-targets --target aarch64-apple-ios-sim
+
+      - name: Package and launch the iOS simulator app
+        run: bash scripts/rune-ios-simulator.sh
+
+      - name: Upload iOS simulator launch capture
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rune-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/rune-ios-review-*/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  browser:
+    name: Rune browser foundation (WASM, adapter tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Rust 1.98.0 with wasm32
+        uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Provision pinned browser tools and Chromium
+        run: bash scripts/web-browsers-install.sh
+
+      - name: Rune WASM and browser-adapter gate
+        env:
+          CARGO_TARGET_DIR: target/rune
+        run: bash scripts/rune-browser.sh
+
+      - name: Rune desktop/mobile browser visual capture
+        env:
+          CARGO_TARGET_DIR: target/rune
+        run: bash scripts/rune-web-screenshots.sh
+
+      - name: Upload Rune browser review captures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rune-web-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/rune-web-review-*/
+          if-no-files-found: ignore
+          retention-days: 14
