@@ -62,8 +62,8 @@ implementations have only dated historical evidence below.
   including wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-  --locked`. It pins the current core, AOT and root targets (600 selected
-  package tests) and the full default `cargo test -- --list` inventory (607
+  --locked`. It pins the current core, AOT and root targets (602 selected
+  package tests) and the full default `cargo test -- --list` inventory (609
   tests). The browser-tool bootstrap self-test is included in the root
   integration targets. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
@@ -177,7 +177,8 @@ implementations have only dated historical evidence below.
   r13/r14 with USER/SYSTEM sharing, independent exception SPSRs, and state
   digests that include inactive banks.
 - Rejected encodings (multiply-long/halfword multiply, unpredictable SWP aliases,
-  unsupported block transfers, malformed PSR fixed fields, ARMv5 BLX/BXJ, Thumb PUSH/BLX) report
+  block transfers with `S=1`/PC base, malformed PSR fixed fields, ARMv5 BLX/BXJ,
+  Thumb PUSH/BLX) report
   the raw word/state and leave PC unchanged. A decoded `S=1, Rd=PC` return with
   no valid SPSR is an explicit `Error::Psr` and leaves the complete CPU state
   unchanged.
@@ -295,9 +296,12 @@ expectations, not from the decoder/interpreter:
   reserved register bits, ARMv5 LDRD/STRD rejection, and alias/writeback errors.
 - `crates/core/tests/arm_block.rs`: IA/IB/DA/DB ascending addresses for both
   directions, writeback and ARMv4 base-in-list specials, PC load alignment/store
-  value, `S=1`/empty/PC-base rejection, unaligned-base transfer alignment with
-  original-base writeback (including base-in-list), and a documented observable
-  partial-failure outcome.
+  value, ARM empty-list PC transfers and 16-word writeback, `S=1`/PC-base
+  rejection, unaligned-base transfer alignment with original-base writeback
+  (including base-in-list), and a documented observable partial-failure outcome.
+- `crates/aot/tests/aot_arm_empty_block.rs`: generated ARM empty-list `STMIA`
+  and `LDMDB` execute as native PC transfers with distinct `+/-0x40`
+  writebacks, exact budget, zero fallback, and reference-state/bus match.
 - `crates/core/tests/thumb_memory.rs`: THUMB.7 word/byte register offsets,
   THUMB.8 half/signed register forms, THUMB.9 word/byte immediate scaling,
   preserved THUMB.10 halfword shape, THUMB.11 SP-relative word transfers and the

@@ -63,8 +63,9 @@
   typed guest SWI decode/execution tests, independent ISA golden vectors and
   ARM/Thumb single/block/stack memory vectors.
 - `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
-  fixtures, the native RAM self-modification regression, the target-profile
-  build regression and the native AOT proof.
+  fixtures (including the ARMv4 empty-list PC transfer), the native RAM
+  self-modification regression, the target-profile build regression and the
+  native AOT proof.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the

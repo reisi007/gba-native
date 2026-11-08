@@ -105,20 +105,28 @@ fn rejects_arm_multiply_and_block_space() {
     ));
     assert!(decode_arm(0, 0xE040_0091).is_err());
     // A plain STMDB sp!,{lr} is now implemented; the still-unsupported S=1
-    // user-bank form and an empty list stay explicit errors.
+    // user-bank form stays an explicit error; empty list is marked distinctly.
     assert!(matches!(
         decode_arm(0, 0xE92D_4000).expect("STMDB sp!,{lr}").op,
         Op::BlockTransfer {
             load: false,
             rn: 13,
             regs: 0x4000,
+            empty_list: false,
             pre_index: true,
             add: false,
             writeback: true,
         }
     ));
     assert!(decode_arm(0, 0xE96D_4000).is_err());
-    assert!(decode_arm(0, 0xE92D_0000).is_err());
+    assert!(matches!(
+        decode_arm(0, 0xE92D_0000).expect("empty STM").op,
+        Op::BlockTransfer {
+            regs: 0x8000,
+            empty_list: true,
+            ..
+        }
+    ));
     // SWP shares the multiply/PSR decode region but has its own typed operation.
     assert_eq!(
         decode_arm(0, 0xE100_1092).expect("SWP r1,r2,[r0]").op,

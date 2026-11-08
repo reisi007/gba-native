@@ -161,11 +161,72 @@ fn pc_in_list_load_aligns_and_store_writes_instruction_address_plus_twelve() {
 }
 
 #[test]
-fn s_user_bank_empty_and_pc_base_encodings_are_rejected() {
+fn empty_arm_list_is_one_pc_transfer_with_sixteen_word_writeback() {
+    let base = EWRAM_BASE + 0x100;
+    for (p, u, start, label) in [
+        (0, 1, base, "IA"),
+        (1, 1, base + 4, "IB"),
+        (0, 0, base, "DA"),
+        (1, 0, base - 4, "DB"),
+    ] {
+        for writeback in [false, true] {
+            let raw = block(0xE, p, u, 0, u32::from(writeback), 0, 0, 0);
+            let (mut cpu, mut bus) = arm(raw);
+            cpu.set_reg(0, base);
+            cpu.set_nzcv(true, false, true, false);
+            let flags = cpu.flags();
+            interpret::step(&mut cpu, &mut bus).expect(label);
+            assert_eq!(bus.read32(start), Ok(EWRAM_BASE + 12), "STM{label}");
+            assert_eq!(
+                cpu.reg(0),
+                if writeback {
+                    base.wrapping_add_signed(if u == 1 { 0x40 } else { -0x40 })
+                } else {
+                    base
+                }
+            );
+            assert_eq!(cpu.flags(), flags);
+
+            let (mut cpu, mut bus) = arm(block(0xE, p, u, 0, u32::from(writeback), 1, 0, 0));
+            bus.write32(start, 0x0800_1237).expect("seed PC");
+            cpu.set_reg(0, base);
+            cpu.set_nzcv(true, false, true, false);
+            let flags = cpu.flags();
+            interpret::step(&mut cpu, &mut bus).expect(label);
+            assert_eq!(cpu.pc(), 0x0800_1234, "LDM{label}");
+            assert!(!cpu.thumb());
+            assert_eq!(
+                cpu.reg(0),
+                if writeback {
+                    base.wrapping_add_signed(if u == 1 { 0x40 } else { -0x40 })
+                } else {
+                    base
+                }
+            );
+            assert_eq!(cpu.flags(), flags);
+        }
+    }
+    // Explicit {PC} is distinct and retains the ordinary one-word update.
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 0, 0, 0x8000));
+    cpu.set_reg(0, base);
+    interpret::step(&mut cpu, &mut bus).expect("explicit STM {PC}");
+    assert_eq!(cpu.reg(0), base + 4);
+
+    let (mut cpu, mut bus) = arm(block(0xE, 0, 1, 0, 1, 1, 0, 0x8000));
+    cpu.set_reg(0, base);
+    bus.write32(base, 0x0800_1234).expect("explicit PC load");
+    interpret::step(&mut cpu, &mut bus).expect("explicit LDM {PC}");
+    assert_eq!(cpu.pc(), 0x0800_1234);
+    assert_eq!(cpu.reg(0), base + 4);
+}
+
+#[test]
+fn s_user_bank_and_pc_base_are_rejected() {
     for raw in [
         block(0xE, 0, 1, 1, 0, 1, 0, 0b0010),  // S=1
-        block(0xE, 0, 1, 0, 0, 1, 0, 0),       // empty list
+        block(0xE, 0, 1, 1, 0, 1, 0, 0),       // empty LDM with S=1
         block(0xE, 0, 1, 0, 0, 1, 15, 0b0010), // Rn=PC
+        block(0xE, 0, 1, 0, 0, 1, 15, 0),      // empty list with Rn=PC
     ] {
         let (mut cpu, mut bus) = arm(raw);
         cpu.set_reg(0, EWRAM_BASE + 0x100);
@@ -284,6 +345,7 @@ fn block_ir_is_typed_and_flags_are_never_changed() {
             load: false,
             rn: 13,
             regs: 0x4000,
+            empty_list: false,
             pre_index: true,
             add: false,
             writeback: true,

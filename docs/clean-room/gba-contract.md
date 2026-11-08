@@ -544,7 +544,7 @@ nesting are explicit errors.
 | Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
 | Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
-| Block | `LDM`/`STM` IA/IB/DA/DB with non-empty register lists, optional writeback, ARMv4 base-in-list specials, PC load/store entries | `S=1` user-bank/SPSR transfer, empty list, PC base |
+| Block | `LDM`/`STM` IA/IB/DA/DB, optional writeback, ARMv4 base-in-list specials and PC entries; ARM empty list acts as one PC transfer with 16-word (`0x40`) writeback when W=1 | `S=1` user-bank/SPSR transfer, PC base |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
 | Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression and affine opt-ins) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
 | Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; `UMULL`/`UMLAL`/`SMULL`/`SMLAL` with a 64-bit result/accumulator and `S`-driven 64-bit N/Z; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `RdHi=RdLo`, halfword multiplies |
@@ -623,8 +623,11 @@ this prototype is willing to generalize:
   be zero. `L=0,S=1` is the ARMv5 doubleword space and is rejected, not treated
   as `STRH`. Odd `LDRH` rotates the 32-bit halfword result; odd `LDRSH` is a
   signed byte at the odd address.
-- ARM `LDM`/`STM` implement IA/IB/DA/DB, non-empty lists, `W`, and PC entries.
-  `S=1`, PC as base and empty lists are explicit errors. Registers always move
+- ARM `LDM`/`STM` implement IA/IB/DA/DB, `W`, PC entries and the ARMv4 empty
+  list quirk. The implementation places the sole PC transfer using the selected
+  IA/IB/DA/DB one-word address calculation; W=1 changes the base by `+/-0x40`,
+  unlike explicit `{PC}` (`+/-4`).
+  `S=1` and PC as base remain explicit errors. Registers always move
   in ascending address order. With writeback and the base in the list, STM
   stores the old base when it is the first (lowest) entry and the new base
   otherwise; LDM has no additional writeback and the loaded base value wins
@@ -643,7 +646,7 @@ this prototype is willing to generalize:
   order and the LR/PC bit; `POP PC` clears bit 0 and keeps Thumb state.
   `LDMIA`/`STMIA` use the ARMv4 base-in-list special documented for Thumb:
   STM stores the old base if it is the first entry, otherwise the new base;
-  LDM's loaded base wins. For the documented ARMv4 empty-list quirk, empty
+  LDM's loaded base wins. For Thumb's documented empty-list quirk, empty
   `LDMIA`/`STMIA` transfers R15 as the sole word and writes `Rb+0x40`; empty
   `PUSH`/`POP` remain explicit errors. Empty-list LDM loads an even-aligned PC
   and retains Thumb state; empty-list STM stores the instruction address plus 6,

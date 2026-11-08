@@ -34,10 +34,20 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             load,
             rn,
             regs,
+            empty_list,
             pre_index,
             add,
             writeback,
-        } => block_body(instruction, load, rn, regs, pre_index, add, writeback),
+        } => block_body(
+            instruction,
+            load,
+            rn,
+            regs,
+            empty_list,
+            pre_index,
+            add,
+            writeback,
+        ),
         Op::Push { regs, lr } => push_body(instruction, regs, lr),
         Op::Pop { regs, pc } => pop_body(instruction, regs, pc),
         Op::ThumbBlock { load, rn, regs } => thumb_block_body(instruction, load, rn, regs),
@@ -146,11 +156,13 @@ fn mem_single_body(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn block_body(
     instruction: &IrInstr,
     load: bool,
     rn: u8,
     regs: u16,
+    empty_list: bool,
     pre_index: bool,
     add: bool,
     writeback: bool,
@@ -171,7 +183,8 @@ fn block_body(
     .unwrap();
     writeln!(
         out,
-        "    let new_base = gba_native::memory::block_written_back(base, {count}u32, {add});"
+        "    let new_base = gba_native::memory::block_written_back(base, {}u32, {add});",
+        if empty_list { 16 } else { count }
     )
     .unwrap();
 

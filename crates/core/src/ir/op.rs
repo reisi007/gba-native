@@ -126,12 +126,14 @@ pub enum Op {
         writeback: bool,
         user_access: bool,
     },
-    /// ARM `LDM`/`STM` with IA/IB/DA/DB addressing. `regs` is the non-empty
-    /// register bitmap; `S=1` user-bank/SPSR transfers are rejected before IR.
+    /// ARM `LDM`/`STM` with IA/IB/DA/DB addressing. Empty encoded lists are
+    /// represented by `regs = {PC}` and `empty_list = true` to preserve their
+    /// ARMv4 16-word writeback quirk. `S=1` transfers are rejected before IR.
     BlockTransfer {
         load: bool,
         rn: u8,
         regs: u16,
+        empty_list: bool,
         pre_index: bool,
         add: bool,
         writeback: bool,
@@ -250,6 +252,7 @@ impl Op {
                 load,
                 rn,
                 regs,
+                empty_list: _,
                 writeback,
                 ..
             } => (load && regs & (1 << register) != 0) || (writeback && rn == register),

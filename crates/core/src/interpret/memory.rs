@@ -113,6 +113,7 @@ pub(super) fn execute_block(
     load: bool,
     rn: u8,
     regs: u16,
+    empty_list: bool,
     pre_index: bool,
     add: bool,
     writeback: bool,
@@ -121,7 +122,7 @@ pub(super) fn execute_block(
     let transfer = addr::aligned_block_base(base);
     let count = addr::register_count(regs);
     let start = addr::block_start(transfer, count, pre_index, add);
-    let new_base = addr::block_written_back(base, count, add);
+    let new_base = addr::block_written_back(base, if empty_list { 16 } else { count }, add);
     let first = addr::first_register(regs);
     let mut index = 0u32;
 
