@@ -40,12 +40,12 @@ done
 
 info "Rune dependency boundary"
 TREE=$(cargo tree --locked --manifest-path apps/rune/Cargo.toml)
-printf '%s\n' "$TREE" | grep -q 'gba-native-core v' ||
+grep -Fq 'gba-native-core v' <<<"$TREE" ||
   fail "Rune app is missing the direct gba-native-core runtime"
-if printf '%s\n' "$TREE" | grep -Eq '(^|[[:space:]])gba-native-aot v'; then
+if grep -Eq '(^|[[:space:]])gba-native-aot v' <<<"$TREE"; then
   fail "Rune app must not depend on host-side gba-native-aot tooling"
 fi
-if printf '%s\n' "$TREE" | grep -Eq '(^|[[:space:]])gba-native v'; then
+if grep -Eq '(^|[[:space:]])gba-native v' <<<"$TREE"; then
   fail "Rune app must not depend on the root gba-native compatibility facade"
 fi
 
