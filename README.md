@@ -222,8 +222,10 @@ is covered by its host/browser tests and Playwright checks.
   `aot proof`, `run` and `aot build` create fresh directories: explicit `--out`
   targets must not already exist, while `aot proof` without `--out` allocates a
   unique workspace for every run. Existing regular file outputs are replaced via
-  a sibling temporary file and rename, leaving any other hard links untouched;
-  special files and symlinks are refused.
+  a sibling temporary file and rename, leaving any other hard links untouched.
+  If the platform or filesystem cannot rename over an existing file (including
+  some Windows configurations), the command fails and leaves the destination
+  unchanged. Special files and symlinks are refused.
 - Scaling is integer nearest-neighbor only, with exact 3:2 centering and black
   letterboxing. Vendor backends are rejected with a clear error.
 
