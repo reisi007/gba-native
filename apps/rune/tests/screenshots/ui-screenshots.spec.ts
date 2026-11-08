@@ -96,7 +96,17 @@ test.describe('Rune UI review captures', () => {
 
     await page.keyboard.press('F1');
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await page.mouse.click(640, 217); // Mute toggle at 1280×900.
+    const muteOffControl = page.getByRole('button', { name: 'Mute: Off', exact: true });
+    await expect(muteOffControl).toBeVisible();
+    const muteBounds = await muteOffControl.boundingBox();
+    if (!muteBounds) throw new Error('Rune mute control has no browser geometry');
+    const muteCenter = {
+      x: muteBounds.x + muteBounds.width / 2,
+      y: muteBounds.y + muteBounds.height / 2,
+    };
+    await page.mouse.move(muteCenter.x, muteCenter.y);
+    await page.waitForTimeout(100);
+    await page.mouse.click(muteCenter.x, muteCenter.y);
     await page.mouse.move(1240, 880);
     await expect(page.getByRole('button', { name: 'Mute: On', exact: true })).toBeVisible();
     const settingsDocument = await page.evaluate(() => localStorage.getItem('gba-native.rune.settings'));
