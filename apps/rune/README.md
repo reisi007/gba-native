@@ -1,12 +1,13 @@
 # Rune UI application
 
-**Status:** canonical desktop, browser and iOS UI entrypoint; cutover wiring is
-in place. `apps/desktop` and `apps/web` remain explicit behavioral references,
-not alternate product entrypoints. Android stays on its existing adapter and is
-outside this Rune migration. Issue [#30](https://github.com/reisi007/gba-native/issues/30)
-remains open until independent review, remote CI, the iOS simulator runtime and
-the remaining documented platform/behavior evidence are complete; this status is
-not a claim that all runtime gates have passed.
+**Status:** canonical desktop, browser and iOS UI entrypoint; supported-platform
+cutover gates passed on commit `cf2ac67` and the evidence is recorded in
+[`docs/clean-room/verification.md`](../../docs/clean-room/verification.md).
+`apps/desktop` and `apps/web` remain behavioral references, not alternate
+product entrypoints. Android stays on its existing adapter pending Rune Android
+support (tracked in issue [#31](https://github.com/reisi007/gba-native/issues/31)).
+This status does not claim physical-GPU, physical-iOS, audible-output or
+assistive-technology behavior.
 
 This isolated package shares one Rune `AppSpec`, view and host-state model across
 Linux, macOS, Windows, browser/WASM and Rune's iOS target. It pins Rune to
@@ -21,15 +22,15 @@ frame or cycle timing.
 
 | Target | Implemented in this package | Verification limits |
 |---|---|---|
-| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | The host gate runs on each OS in CI; this cutover's remote matrix has not run yet. Linux CI also runs an offscreen render with Mesa software Vulkan, not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
-| Browser/WASM | Rune WebGPU shell; localStorage settings and synthetic slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | Chromium screenshot review and WASM build pass. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
-| iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both Rust target checks pass locally; `scripts/rune-ios-simulator.sh` still needs macOS CI to package, install and launch the simulator app. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
+| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. This is not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
+| Browser/WASM | Rune WebGPU shell; localStorage settings and synthetic slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | WASM, adapter and Chromium interaction/capture gates passed in run `42470521196`. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
+| iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
 
 The legacy desktop and browser packages remain behavioral references, and their
 separate CI gates continue to exercise those implementations. A successful
-cross-build or browser capture is not runtime parity. Do not claim issue #30
-complete until the remaining platform and behavior gates have independent
-evidence.
+cross-build or browser capture alone is not runtime parity; the Rune-specific
+host, browser and iOS runtime gates above are separately recorded in the
+verification log.
 
 The Rune host/browser feature declaration is checked against the full core
 contract. The iOS feature subset is tested against the isolated adapter's

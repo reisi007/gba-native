@@ -75,7 +75,7 @@ the root workspace lockfile contains only these three internal path packages.
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
-| Platform verification | Rune UI covers Rune-supported desktop, browser/WASM and iOS; Android remains on its existing native UI. The iOS simulator workflow and independent cutover review/CI remain open gates; no physical iOS-device or GPU claim is made. |
+| Platform verification | Rune UI covers Rune-supported desktop, browser/WASM and iOS; all Rune UI gates passed on `cf2ac67` (CI run `42470521196`). Android remains on its existing native UI pending upstream Rune support (#31). No physical iOS-device, physical-GPU, audible-output or assistive-technology claim is made. |
 
 ## Commands
 

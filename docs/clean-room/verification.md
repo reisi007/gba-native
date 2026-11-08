@@ -851,11 +851,13 @@ OBJ/sprite rendering or a playable frontend are not verified. The static Mode 0
 BG0 snapshot is only a synthetic, documentation-driven capability slice; it is
 not evidence that a supplied ROM configures BG0 or reaches a recognizable/booted
 screen. Canonical `apps/rune` covers Rune-supported desktop, browser/WASM and iOS
-UI targets; Android remains on its existing frontend. The local Linux Rune host
-gate, browser/WASM Playwright interaction/capture gate, and Rust checks for both
-iOS device/simulator targets pass. They do not prove live native GPU presentation,
-screen-reader behavior, or iOS runtime behavior. The macOS/Windows CI host matrix
-and iOS simulator packaging/launch workflow remain remote gates.
+UI targets; Android remains on its existing frontend pending upstream Rune
+support (issue #31). On cutover commit `cf2ac67`, Rune UI CI run `42470521196`
+passed the Linux/macOS/Windows host jobs, Linux Mesa software-Vulkan offscreen
+render, WASM/Chromium interaction suite, and iOS device/simulator target checks
+plus simulator package/install/launch. These do not prove physical-GPU
+presentation, physical iOS behavior, screen-reader behavior, audible output or
+real document-picker interaction.
 The former `apps/desktop` and `apps/web` implementations are retained behavioral
 references; their prior build/test evidence does not establish Rune parity. The
 separate ROM-bound WASM module from
@@ -866,9 +868,36 @@ No Windows/Linux physical-GPU run, cross-platform presentation claim or
 visible-frame counter is verified. PSR-transfer and banking evidence is
 limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE
 services have synthetic-test evidence only; BIOS execution and hardware
-conformance remain unverified. No real GBA hardware
-measurement is claimed. Neither FSR nor DLSS nor AI upscaling has been integrated
-or tested. REA native analysis remains blocked as recorded.
+conformance remain unverified. No real GBA hardware measurement is claimed.
+Neither FSR nor DLSS nor AI upscaling has been integrated or tested. REA native
+analysis remains blocked as recorded.
+
+## Round: Rune UI cutover hosted verification (2026-11-08)
+
+The product/workflow change at `cf2ac67` was independently reviewed and approved
+with no blocking findings. The pinned action still verifies the staged
+Ratchet binary against the staged release checksum. Local `ratchet check` passed
+all 9 rules. The full local `scripts/web.sh --ci` run passed 16 browser adapter
+tests and 14 Playwright tests
+(four desktop-only cases skipped on mobile projects).
+
+All five hosted workflows on `cf2ac67` completed successfully:
+
+| Workflow | Run | Result |
+|---|---:|---|
+| CI, including root full gates | `42470521145` | Passed |
+| Agent gates | `42470521174` | Passed |
+| Rune UI (Linux/macOS/Windows, browser/WASM, iOS simulator) | `42470521196` | Passed |
+| Legacy desktop reference (Linux/Windows/macOS) | `42470521162` | Passed |
+| Legacy browser reference | `42470521122` | Passed |
+
+The root dependency tree remains limited to `gba-native`, `gba-native-aot` and
+`gba-native-core`; the canonical Rune package depends on Rune rather than the
+former Pixels desktop implementation. The legacy desktop/browser packages and
+their GUI dependencies remain intentionally available as behavioral references
+under the repository's project rules. This is not a claim of physical-GPU or
+physical-iOS execution, audible output, assistive-technology validation, or
+Android Rune support.
 
 Low/low Thumb `ADD`, ARMv5 `BLX`/`BXJ`, other exception entry/vectoring, and all
 load/store expansion beyond the listed literal/halfword forms remain explicitly
