@@ -21,8 +21,11 @@ jobs:
 
       # The release-download URL has repeatedly returned HTTP 504 on hosted
       # runners. Stage the exact v0.6.3 assets through GitHub's release API;
-      # the pinned action still performs its normal checksum verification.
+      # authenticated API access avoids anonymous throttling. The helper scopes
+      # the job token to api.github.com; the pinned action still verifies SHA.
       - name: Stage pinned Ratchet v0.6.3 release assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash scripts/check_ratchet_release_assets.sh
 
       # The official action installs the pinned Ratchet binary and verifies its
