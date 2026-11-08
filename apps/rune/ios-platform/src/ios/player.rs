@@ -76,11 +76,11 @@ unsafe extern "C" {
 
 static PLAYERS: OnceLock<Mutex<Vec<(usize, usize)>>> = OnceLock::new();
 
-#[link(name = "System")]
+#[link(name = "System", kind = "dylib")]
 unsafe extern "C" {
-    fn dispatch_get_main_queue() -> *mut std::ffi::c_void;
+    static _dispatch_main_q: u8;
     fn dispatch_async_f(
-        queue: *mut std::ffi::c_void,
+        queue: *const u8,
         context: *mut std::ffi::c_void,
         work: extern "C" fn(*mut std::ffi::c_void),
     );
@@ -142,7 +142,7 @@ fn schedule_release(delegate: *mut std::ffi::c_void) {
     // The callback may arrive on a non-main thread. Queue cleanup so AVAudioPlayer
     // and its MainThreadOnly delegate are released on the main thread, after the
     // delegate callback has returned.
-    unsafe { dispatch_async_f(dispatch_get_main_queue(), delegate, release_on_main) };
+    unsafe { dispatch_async_f(&raw const _dispatch_main_q, delegate, release_on_main) };
 }
 
 extern "C" fn release_on_main(delegate: *mut std::ffi::c_void) {
