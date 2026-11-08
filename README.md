@@ -51,7 +51,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No save type or persistence is modelled by this store policy; the backup window is governed by its own device policy below |
 | Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model volatile 32/64 KiB SRAM, and `--synthetic-backup-flash128k` models a volatile 128 KiB flash with the documented autoselect/bank/program/erase subset. No persistence; wider accesses stay explicit errors |
 | Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
-| Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window, BG/OBJ mosaic and BLDCNT alpha/brightness; bitmap modes 3/4/5. Mosaic is static-snapshot only; no scanline timing, Mode 2, 2D OBJ mapping, double-size affine OBJ or window 1 |
+| Display snapshot | Mode 0 BG0-BG3 text + OBJ, Mode 1 BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window, BG/OBJ mosaic and BLDCNT alpha/brightness; bitmap modes 3/4/5. OBJ supports DISPCNT-selected 1D/2D character mapping. Static-snapshot only; no scanline timing, Mode 2, double-size affine OBJ or window 1 |
 | Typed IR + reference interpreter | Implemented |
 | Hybrid AOT discovery/emission/native proof | Implemented for synthetic fixtures; generated source binds SHA-256+length, never embeds ROM bytes |
 | Compiled native AOT artifact (`aot build`) | Experimental headless release executable for one Cargo target triple; external SHA-256/length-bound ROM; `--audio WAV` plus fail-closed `--play`, `--save` persists an explicit raw backup image; no playability or GUI claim |
@@ -465,9 +465,9 @@ open pending independent verification and CI; local tests alone do not close it.
 - Display: 240x160 static snapshot. Mode 0 BG0-BG3 text + OBJ, Mode 1
   BG0/BG1 text + BG2 affine + OBJ, window 0/OBJ window and BLDCNT
   alpha/brightness blending and BG/OBJ mosaic; modes 3-5 retain the bitmap
-  paths. Mosaic is static-snapshot only. 2D OBJ tile mapping, semi-transparent
-  OBJ mode, double-size affine OBJ, window 1, Mode 2 and scanline effects are
-  unsupported.
+  paths. OBJ character mapping supports 1D and 2D layouts. Mosaic is static-
+  snapshot only. Semi-transparent OBJ mode, double-size affine OBJ, window 1,
+  Mode 2 and scanline effects are unsupported.
 - AOT: only immutable ROM blocks; unknown targets use the reference interpreter;
   RAM is always interpreted freshly.
 

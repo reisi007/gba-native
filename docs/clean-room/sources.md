@@ -212,12 +212,16 @@ Relevant anchors actually consulted for this milestone:
   `#lcd-obj---vram-character-tile-mapping`, `#lcd-io-window-feature` and
   `#lcd-io-color-special-effects`: Mode 0/1 layer enable and priority, text and
   affine BG control/scroll, BG2/BG3 affine matrix/reference registers, OAM
-  normal/affine attributes, 1D OBJ tile mapping, window ranges/masks and
+  normal/affine attributes, 1D/2D OBJ tile mapping, window ranges/masks and
   BLDCNT/BLDALPHA/BLDY blending modes. Only the static snapshot subset described
-  in `gba-contract.md` is implemented; 2D OBJ mapping, double-size affine OBJ
-  and window 1 remain absent. These anchors were consulted on 2026-10-29 in the
-  S1 rendering at <https://mgba-emu.github.io/gbatek/>; that retrieval was not
-  separately retained or hashed.
+  in `gba-contract.md` is implemented; double-size affine OBJ and window 1
+  remain absent. The 2D mapping slice was retrieved 2026-11-08 from the public
+  page at <https://problemkaputt.de/gbatek.htm>: DISPCNT bit 6 selects
+  1D/2D, and the 2D 32x32 matrix has a 32-unit row stride (16 physical 8bpp
+  tiles). No emulator implementation source was used. Earlier anchors were
+  consulted on 2026-10-29 in the S1 rendering at
+  <https://mgba-emu.github.io/gbatek/>; that retrieval was not separately
+  retained or hashed.
 
 - `#lcd-io-mosaic-function`: MOSAIC BG horizontal/vertical sizes are encoded as
   size minus one; bits 8..15 separately encode OBJ horizontal/vertical sizes;

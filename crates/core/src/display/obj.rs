@@ -1,9 +1,9 @@
 //! Static Mode 0 OBJ (sprite) layer for the supported OAM forms.
 //!
-//! Supports normal and affine sprites, 1D tile mapping, 4/8bpp tiles, flips and
-//! per-pixel priority and per-OBJ mosaic. 2D tile mapping, semi-transparent OBJ
-//! mode and double-size affine sprites are explicit errors rather than
-//! approximated layers.
+//! Supports normal and affine sprites, 1D/2D tile mapping, 4/8bpp tiles, flips,
+//! per-pixel priority and per-OBJ mosaic. Semi-transparent OBJ mode and
+//! double-size affine sprites are explicit errors rather than approximated
+//! layers.
 
 use super::layer::{LayerPixel, choose};
 use super::{HEIGHT, WIDTH};
@@ -60,9 +60,6 @@ impl AffineMosaicSampler {
 }
 
 pub(super) fn render(bus: &Bus, dispcnt: u16) -> Result<ObjLayer> {
-    if dispcnt & 0x0040 == 0 {
-        return Err(Error::UnsupportedPpuFeature { dispcnt });
-    }
     let mosaic = bus.mosaic();
     let mosaic_width = i32::from((mosaic >> 8) & 0xF) + 1;
     let mosaic_height = i32::from((mosaic >> 12) & 0xF) + 1;
@@ -203,8 +200,13 @@ fn render_entry(
                 continue;
             };
             let tile_step = if color_8bpp { 2 } else { 1 };
-            let tile = tile_base
-                + tile_step * ((source_y as usize / 8) * (width / 8) + source_x as usize / 8);
+            let source_tile_x = source_x as usize / 8;
+            let source_tile_y = source_y as usize / 8;
+            let tile = if dispcnt & 0x0040 != 0 {
+                tile_base + tile_step * (source_tile_y * (width / 8) + source_tile_x)
+            } else {
+                tile_base + source_tile_y * 32 + tile_step * source_tile_x
+            };
             let pixel_x = source_x as usize % 8;
             let pixel_y = source_y as usize % 8;
             let Some(color_index) = read_tile_pixel(bus, tile, pixel_x, pixel_y, color_8bpp)?
@@ -281,7 +283,7 @@ fn read_tile_pixel(
     y: usize,
     color_8bpp: bool,
 ) -> Result<Option<usize>> {
-    // In 1D mapping the OAM tile number is a 32-byte unit for both depths;
+    // The OAM tile number is a 32-byte unit for both depths;
     // 8bpp tiles occupy two consecutive units (GBATEK's 04h/06h example).
     let offset = if color_8bpp {
         OBJ_TILE_BASE as usize + tile * 32 + y * 8 + x

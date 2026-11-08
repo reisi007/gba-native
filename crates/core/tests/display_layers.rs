@@ -271,15 +271,18 @@ fn alpha_and_brightness_blending_follow_bldcnt() {
 }
 
 #[test]
-fn mode0_8bpp_obj_uses_32_byte_tile_units() {
+fn mode0_obj_uses_32_byte_tile_units_in_1d_and_2d() {
     let mut bus = bus();
     put_palette(&mut bus, 0, 0x7FFF);
     put_obj_palette(&mut bus, 5, 0x001F);
     put_obj_palette(&mut bus, 6, 0x03E0);
-    // 1D 8bpp tiles are numbered in 32-byte units: tile 2 is at +0x40,
-    // tile 4 at +0x80.
-    put_vram8(&mut bus, 0x1_0040, 5);
-    put_vram8(&mut bus, 0x1_0080, 6);
+    put_obj_palette(&mut bus, 7, 0x7C00);
+    put_obj_palette(&mut bus, 8, 0x7FFF);
+    // The 2x2 tiles are distinct in both layouts. 1D uses indices 2,4,6,8;
+    // 2D uses indices 2,4,34,36 (8bpp still advances in 32-byte units).
+    for (tile, color) in [(2, 5), (4, 6), (6, 7), (8, 8), (34, 8), (36, 7)] {
+        put_vram8(&mut bus, 0x1_0000 + tile * 32, color);
+    }
     bus.write16(OAM_BASE, 0x2000).expect("8bpp attr0");
     bus.write16(OAM_BASE + 2, 0x4000).expect("16x16 attr1");
     bus.write16(OAM_BASE + 4, 2).expect("tile 2 attr2");
@@ -287,6 +290,29 @@ fn mode0_8bpp_obj_uses_32_byte_tile_units() {
     let image = display::snapshot(&bus).expect("8bpp OBJ snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_0000);
     assert_eq!(image.pixel(8, 0), 0x0000_FF00);
+    assert_eq!(image.pixel(0, 8), 0x0000_00FF);
+    assert_eq!(image.pixel(8, 8), 0x00FF_FFFF);
+
+    bus.write16(DISPCNT_ADDR, OBJ_ON).expect("2D OBJ");
+    let image = display::snapshot(&bus).expect("2D 8bpp OBJ snapshot");
+    assert_eq!(image.pixel(0, 0), 0x00FF_0000);
+    assert_eq!(image.pixel(8, 0), 0x0000_FF00);
+    assert_eq!(image.pixel(0, 8), 0x00FF_FFFF);
+    assert_eq!(image.pixel(8, 8), 0x0000_00FF);
+
+    for (index, color) in [(1, 0x001F), (2, 0x03E0), (3, 0x7C00), (4, 0x7FFF)] {
+        put_obj_palette(&mut bus, index, color);
+    }
+    for (tile, color_index) in [(1, 1), (2, 2), (33, 3), (34, 4)] {
+        put_vram8(&mut bus, 0x1_0000 + tile * 32, color_index);
+    }
+    bus.write16(OAM_BASE, 0).expect("4bpp OBJ");
+    bus.write16(OAM_BASE + 4, 1).expect("2D 4bpp tile base");
+    let image = display::snapshot(&bus).expect("2D 4bpp OBJ snapshot");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(0x001F));
+    assert_eq!(image.pixel(8, 0), display::rgb555_to_rgb888(0x03E0));
+    assert_eq!(image.pixel(0, 8), display::rgb555_to_rgb888(0x7C00));
+    assert_eq!(image.pixel(8, 8), display::rgb555_to_rgb888(0x7FFF));
 }
 
 #[test]

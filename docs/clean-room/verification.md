@@ -2024,3 +2024,27 @@ on-device MediaPlayer playback remains outside CI.
 - This remains static synthetic snapshot behavior, not a scanline/timing test
   or hardware validation. 2D OBJ mapping, double-size affine sprites and the
   rest of issue #3's acceptance work remain incomplete; #3 stays open.
+
+## Round: 2D OBJ character-mapping snapshot slice (2026-11-08)
+
+- Added DISPCNT-selected 2D OBJ character mapping while retaining 1D mapping.
+  2D source tile rows advance by 32 attr2 32-byte units; `tile_step` remains 1
+  for 4bpp and 2 for 8bpp. The 8bpp 2x2 test distinguishes both layouts and
+  verifies bottom-row entries base+32 and base+34; the 4bpp 2x2 oracle checks
+  its one-unit horizontal steps and base+32 row stride.
+- Source grounding: public GBATEK
+  `#lcd-obj---vram-character-tile-mapping`, fetched 2026-11-08 from
+  <https://problemkaputt.de/gbatek.htm>. No emulator implementation sources
+  were used.
+- Independent review round 1 requested 4bpp coverage in addition to the 8bpp
+  matrix test. The existing pixel-oracle now covers both depths. Round 2 review
+  approved with no findings; the reviewer confirmed the address formulas and
+  test geometry but could not rerun Cargo tests in that environment. The local
+  focused 9/9 and fresh-target full gate passed.
+- `cargo fmt --check`, `git diff --check`, the focused `display_layers` target
+  (9/9), and a fresh-target `./scripts/full.sh` pass. The full gate includes
+  source-size/Ratchet fast checks, Clippy, debug/release workspace tests, demo,
+  synthetic AOT proof and Ratchet slow checks.
+- This is a bounded static snapshot change, not hardware validation or full
+  issue #3 completion. Double-size affine OBJ and scanline/render timing remain
+  unsupported; #3 stays open.

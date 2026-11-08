@@ -806,7 +806,15 @@ scanline PPU, frame renderer or timing claim.
   documented character/screen bases; size selects 128, 256, 512 or 1024 pixels
   per axis; bit 13 enables wrapping. `BG2PA`..`BG2PD` and `BG2X`/`BG2Y` are
   8.8 fixed point and sample the map for the current static state.
-- OBJ supports normal and affine sprites with 1D tile mapping, 4/8bpp tiles,
+- OBJ supports normal and affine sprites with DISPCNT-selected 1D/2D character
+  mapping and 4/8bpp tiles. 1D uses
+  `tile_base + tile_step * ((source_y / 8) * (obj_width / 8) + source_x / 8)`;
+  2D uses `tile_base + (source_y / 8) * 32 + tile_step * (source_x / 8)`.
+  `tile_step` is 1 for 4bpp and 2 for 8bpp, while attr2 tile numbers remain in
+  32-byte units. The 2D row stride is 32 such units (16 physical 8bpp tiles).
+  The source is GBATEK `lcd-obj---vram-character-tile-mapping`, retrieved
+  2026-11-08 from <https://problemkaputt.de/gbatek.htm>; this is bounded static
+  snapshot behavior, not hardware validation. OBJ supports
   horizontal/vertical flips (normal sprites), affine matrix groups and
   per-sprite priority/transparency. OAM Attr0 bit 12 enables OBJ mosaic;
   MOSAIC bits 8..15 provide independent horizontal/vertical sizes (field plus
@@ -817,7 +825,7 @@ scanline PPU, frame renderer or timing claim.
   remains transparent; the snapshot does not search for a later opaque texel.
   This bounded sampling policy is static snapshot behavior, not scanline timing
   or hardware validation.
-  2D tile mapping and double-size affine sprites are explicit errors. OBJ mode 2
+  Double-size affine sprites are explicit errors. OBJ mode 2
   sprites form the OBJ-window mask and are not displayed, as documented.
 - Window 0 uses `WIN0H`/`WIN0V` with the documented garbage-clamping rules and
   selects BG/OBJ visibility from `WININ`; outside pixels use `WINOUT`. The OBJ
@@ -839,7 +847,7 @@ scanline PPU, frame renderer or timing claim.
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
   In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
-- 2D OBJ tile mapping, OBJ double-size affine sprites, window 1, nonidentity
+- OBJ double-size affine sprites, window 1, nonidentity
   bitmap/affine combinations and scanline effects remain absent. Unsupported
   registers or layers fail explicitly rather than being treated as no-ops.
 
