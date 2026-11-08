@@ -1,11 +1,11 @@
-//! Timer registers `0x04000100..0x0400010F`: instruction-budget-driven counters.
+//! Timer registers `0x04000100..0x0400010F`: nominal-cycle-driven counters.
 //!
 //! **Design choice, not a timing claim.** GBATEK `#gba-timers` describes four
 //! incrementing 16-bit timers, a selectable prescaler (`F/1`, `F/64`, `F/256`,
 //! `F/1024`), count-up cascading from the previous timer, overflow reload and an
 //! optional overflow IRQ. This model advances every enabled timer from the same
-//! nominal clock as the instruction-count frame model: one retired guest
-//! instruction contributes [`INSTRUCTION_CYCLES`] cycles. A normal timer
+//! supplied cycle count as the LCD model; the compatibility instruction adapter
+//! contributes [`INSTRUCTION_CYCLES`] cycles. A normal timer
 //! increments once every selected number of those cycles; a cascaded timer
 //! ignores its prescaler and increments once per previous-timer overflow.
 //!
@@ -17,10 +17,10 @@
 //! composed low halfword first, so a simultaneously written reload is the value
 //! used by the start edge.
 //!
-//! **Explicit limits.** This is not cycle or prescaler-accurate hardware timing:
+//! **Explicit limits.** This is not whole-machine cycle-accurate timing:
 //! one guest instruction is not three hardware cycles, instruction lengths,
 //! waitstates and bus arbitration are absent, and a counter read observes only
-//! completed instruction ticks. Timer overflow can latch the matching `IF` bit
+//! the cycles supplied through the bus scheduler. Timer overflow can latch the matching `IF` bit
 //! (bits 3..6) for the existing IME/IE dispatcher. The timer model does not
 //! consume Sound FIFO samples or start Sound DMA itself; the host audio engine
 //! reads [`TimerState::sound_rate`] to clock Direct Sound FIFO consumption and
@@ -31,7 +31,7 @@
 //! stored as zero. Reset through RegisterRamReset group 7 returns all four
 //! timers to their stopped, zeroed default state.
 
-use super::{Bus, INSTRUCTION_CYCLES};
+use super::Bus;
 
 pub(super) const TIMER_BASE: u32 = 0x0400_0100;
 pub(super) const TIMER_LEN: usize = 16;
@@ -220,12 +220,5 @@ impl Bus {
 
     pub(super) fn timer_write16(&mut self, addr: u32, value: u16) -> Option<()> {
         self.io.timer_mut().write16(addr, value)
-    }
-
-    /// Advance all timers by one retired instruction's nominal cycles and latch
-    /// any overflow request in `IF`.
-    pub(super) fn tick_timers(&mut self) {
-        let requests = self.io.timer_mut().advance_cycles(INSTRUCTION_CYCLES);
-        self.io.irq_mut().latch_requests(requests);
     }
 }

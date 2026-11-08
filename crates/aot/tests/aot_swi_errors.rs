@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, FLAG_F, FLAG_I, Mode};
 use gba_native::ir::PSR_FIELD_C;
@@ -122,7 +122,11 @@ fn assert_unchanged_native_error(
         error.contains(expected_error),
         "unexpected native error: {error}"
     );
-    let expected_bus = Bus::new(cart.clone());
+    let mut expected_bus = Bus::new(cart.clone());
+    // `budget` includes the failing SWI instruction. Earlier instructions have
+    // retired and advanced the nominal LCD/timer clock; the failing SWI has not.
+    let completed = budget.checked_sub(1).expect("nonzero error budget");
+    expected_bus.tick_cycles((completed as u32) * INSTRUCTION_CYCLES);
     for (field, digest) in [
         ("swi_before_cpu", sha256::hex(&expected_cpu.state_digest())),
         ("swi_after_cpu", sha256::hex(&expected_cpu.state_digest())),
@@ -153,7 +157,8 @@ fn conditional_false_unknown_swi_succeeds_without_svc_or_fallback() {
 
     let mut expected_cpu = prepared_cpu();
     expected_cpu.set_pc(ENTRY + 4);
-    let expected_bus = Bus::new(cart);
+    let mut expected_bus = Bus::new(cart);
+    expected_bus.tick_cycles(INSTRUCTION_CYCLES);
     assert_eq!(report.pc, ENTRY + 4);
     assert_eq!(report.cpsr, 0xDF);
     assert_eq!(report.budget_used, 1);

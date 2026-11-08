@@ -1,24 +1,16 @@
-//! Interrupt controller, DISPSTAT/VCOUNT and the host-driven frame boundary.
+//! Interrupt controller, DISPSTAT/VCOUNT and cycle-driven LCD line boundaries.
 //!
-//! **Design choice, not a timing claim.** This prototype has no cycle counter,
-//! no waitstates and no prefetch. A frame is a fixed guest-instruction budget
-//! (`FRAME_INSTRUCTIONS`, derived from the documented 280896 cycles per frame
-//! divided by a nominal three cycles per instruction) spread over the
-//! documented 228 scanlines. Each line owns [`line_instructions`] guest
-//! instructions and the 228 line budgets add up to exactly
-//! `FRAME_INSTRUCTIONS`, so no remainder is dropped.
-//!
-//! `VCOUNT` therefore reports an instruction-count line in `0..=227` and walks
-//! every documented line before wrapping from 227 to 0. It remains an
-//! approximation: one guest instruction is not three hardware cycles, the line
-//! slices model neither drawing nor HBlank periods, and no instruction observes
-//! a mid-line split. The DISPSTAT VBlank flag covers lines `160..=226` and line
+//! **Bounded design, not cycle-accurate timing.** LCD counters advance by
+//! supplied nominal cycles using 1232 cycles per documented line. Compatibility
+//! instruction helpers map each instruction to three nominal cycles. CPU
+//! instruction lengths, waitstates, drawing/HBlank phases and arbitration are
+//! not modelled. The DISPSTAT VBlank flag covers lines `160..=226` and line
 //! 227 clears it, per GBATEK `#lcd-io-interrupts-and-status` ("set in line
 //! 160..226; not 227"). The VBlank IRQ request latches once when line 160 is
 //! entered. `DISPSTAT` bits 8..15 are the writable V-Count setting, bit 2 is
 //! the read-only match flag for `LYC == VCOUNT`, and bit 5 gates the documented
 //! V-Counter request (`IF` bit 2) on every matching line transition. HBlank,
-//! scanline/cycle timing and BIOS execution remain absent.
+//! HBlank/drawing timing and BIOS execution remain absent.
 
 use super::Bus;
 
@@ -28,11 +20,14 @@ pub(super) const IE_ADDR: u32 = 0x0400_0200;
 pub(super) const IF_ADDR: u32 = 0x0400_0202;
 pub(super) const IME_ADDR: u32 = 0x0400_0208;
 
-/// 280896 cycles per frame at a nominal three cycles per instruction.
-///
-/// The total is retained unchanged by the per-line model; only its
-/// distribution over the documented 228 lines is new.
-pub const FRAME_INSTRUCTIONS: u64 = 280_896 / 3;
+/// Nominal cycles in one documented scanline.
+pub const CYCLES_PER_LINE: u32 = 1232;
+/// Nominal cycles in one documented 228-line frame.
+pub const FRAME_CYCLES: u32 = 280_896;
+
+/// Nominal three-cycle instruction count in one documented frame; compatibility
+/// adapter only.
+pub const FRAME_INSTRUCTIONS: u64 = FRAME_CYCLES as u64 / crate::bus::INSTRUCTION_CYCLES as u64;
 
 /// Documented scanlines per frame (`VCOUNT` range `0..=227`).
 pub const FRAME_LINES: u8 = 228;
@@ -43,14 +38,8 @@ pub const VBLANK_FIRST_LINE: u8 = 160;
 /// Last line with the DISPSTAT VBlank flag set; hidden line 227 clears it.
 pub const VBLANK_LAST_LINE: u8 = 226;
 
-/// Guest instructions a frame assigns to one documented line.
-///
-/// Every line owns `FRAME_INSTRUCTIONS / FRAME_LINES` instructions plus one for
-/// each of the `FRAME_INSTRUCTIONS % FRAME_LINES` remainder instructions. The
-/// extra instructions are spread evenly by remainder accumulation, so the
-/// per-line values differ by at most one and their sum is exactly
-/// [`FRAME_INSTRUCTIONS`]. This is an instruction-count slice, not scanline or
-/// cycle timing.
+/// Compatibility instruction-count delta between the rounded absolute cycle
+/// boundaries for `line` and the following line. The LCD itself is cycle-driven.
 ///
 /// # Panics
 ///
@@ -58,16 +47,10 @@ pub const VBLANK_LAST_LINE: u8 = 226;
 /// a budget.
 pub const fn line_instructions(line: u8) -> u64 {
     assert!(line < FRAME_LINES, "line must be inside the frame");
-    let lines = FRAME_LINES as u64;
-    let base = FRAME_INSTRUCTIONS / lines;
-    let remainder = FRAME_INSTRUCTIONS % lines;
-    let line = line as u64;
-    // `(line + 1) * remainder / lines - line * remainder / lines` is 0 or 1 and
-    // places the remainder instructions evenly across the frame.
-    base + (line + 1) * remainder / lines - line * remainder / lines
+    instructions_until_line(line + 1) - instructions_until_line(line)
 }
 
-/// Guest instructions from the start of a frame until `line` is entered.
+/// Nominal three-cycle instructions from frame start to enter `line`, rounded up.
 ///
 /// `instructions_until_line(0)` is `0` and `instructions_until_line(228)` is
 /// [`FRAME_INSTRUCTIONS`].
@@ -80,10 +63,8 @@ pub const fn instructions_until_line(line: u8) -> u64 {
         line <= FRAME_LINES,
         "line must not pass the end of the frame"
     );
-    let lines = FRAME_LINES as u64;
-    let base = FRAME_INSTRUCTIONS / lines;
-    let remainder = FRAME_INSTRUCTIONS % lines;
-    line as u64 * base + line as u64 * remainder / lines
+    let cycles = line as u64 * CYCLES_PER_LINE as u64;
+    cycles.div_ceil(crate::bus::INSTRUCTION_CYCLES as u64)
 }
 
 const DISPSTAT_VBLANK_FLAG: u16 = 1 << 0;
@@ -96,7 +77,7 @@ const IF_VCOUNT: u16 = 1 << 2;
 const IE_MASK: u16 = 0x3FFF;
 const IME_ENABLE: u16 = 1;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct IrqState {
     ie: u16,
     pending: u16,
@@ -105,23 +86,8 @@ pub(super) struct IrqState {
     dispstat: u16,
     /// Current modelled `VCOUNT` line in `0..FRAME_LINES`.
     line: u8,
-    /// Guest instructions left on the current line; model-internal.
-    line_remaining: u64,
-}
-
-impl Default for IrqState {
-    fn default() -> Self {
-        Self {
-            ie: 0,
-            pending: 0,
-            ime: 0,
-            dispstat: 0,
-            // A fresh bus starts on the first active line, not on a boundary,
-            // with that line's full instruction budget still ahead.
-            line: 0,
-            line_remaining: line_instructions(0),
-        }
-    }
+    /// Nominal cycle phase within current line.
+    line_phase: u32,
 }
 
 impl IrqState {
@@ -204,22 +170,27 @@ impl IrqState {
         Some(())
     }
 
-    /// Advance one guest instruction and enter the next line when due.
-    pub(super) fn tick(&mut self) {
-        self.line_remaining -= 1;
-        if self.line_remaining > 0 {
-            return;
+    /// Advance by nominal cycles, processing every crossed line boundary.
+    pub(super) fn advance_cycles(&mut self, cycles: u32) {
+        let mut remaining = cycles;
+        while remaining > 0 {
+            let to_boundary = CYCLES_PER_LINE - self.line_phase;
+            if remaining < to_boundary {
+                self.line_phase += remaining;
+                break;
+            }
+            remaining -= to_boundary;
+            self.line_phase = 0;
+            self.line = if self.line + 1 == FRAME_LINES {
+                0
+            } else {
+                self.line + 1
+            };
+            if self.line == VBLANK_FIRST_LINE {
+                self.pending |= IF_VBLANK;
+            }
+            self.request_vcount_match();
         }
-        self.line = if self.line + 1 == FRAME_LINES {
-            0
-        } else {
-            self.line + 1
-        };
-        self.line_remaining = line_instructions(self.line);
-        if self.line == VBLANK_FIRST_LINE {
-            self.pending |= IF_VBLANK;
-        }
-        self.request_vcount_match();
     }
 
     /// Latch requests from another modelled source, e.g. timer overflow.
@@ -246,20 +217,28 @@ impl IrqState {
         bytes.extend_from_slice(&self.pending.to_le_bytes());
         bytes.extend_from_slice(&self.ime.to_le_bytes());
         bytes.extend_from_slice(&self.dispstat.to_le_bytes());
-        // The current line is guest-visible through VCOUNT/DISPSTAT and is
-        // hashed; the instruction counter that produces it is model-internal.
+        // The line is guest-visible through VCOUNT/DISPSTAT. Its phase is also
+        // hashed because it determines when the next line/IRQ transition occurs.
         bytes.push(self.line);
+        bytes.extend_from_slice(&self.line_phase.to_le_bytes());
     }
 }
 
 impl Bus {
-    /// Advance the frame and timer models by one guest instruction.
-    pub fn tick_frame(&mut self) {
-        self.io.irq_mut().tick();
-        self.tick_timers();
+    /// Advance LCD and timer models by supplied nominal cycles. LCD transitions
+    /// are processed first, then timers; timer IRQ requests are latched afterward.
+    pub fn tick_cycles(&mut self, cycles: u32) {
+        self.io.irq_mut().advance_cycles(cycles);
+        let requests = self.io.timer_mut().advance_cycles(cycles);
+        self.io.irq_mut().latch_requests(requests);
     }
 
-    /// Advance the frame and timer models by `count` guest instructions.
+    /// Advance by one retired instruction's nominal three cycles.
+    pub fn tick_frame(&mut self) {
+        self.tick_cycles(crate::bus::INSTRUCTION_CYCLES);
+    }
+
+    /// Compatibility adapter: advance `count` instructions at three nominal cycles each.
     pub fn tick_frames(&mut self, count: u64) {
         for _ in 0..count {
             self.tick_frame();

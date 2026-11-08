@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, EWRAM_BASE};
+use gba_native::bus::{Bus, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::interpret;
@@ -105,6 +105,7 @@ fn independent_final_bus(cart: &Cartridge) -> Bus {
         .expect("independent saved r12");
     bus.write32(SVC_FRAME + 12, ENTRY + 0x36)
         .expect("independent saved LR");
+    bus.tick_cycles((BUDGET_AFTER_BOTH_SWIS as u32) * INSTRUCTION_CYCLES);
     bus
 }
 

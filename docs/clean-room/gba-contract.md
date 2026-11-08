@@ -89,12 +89,11 @@ are governed by the policy below.
   self-modifying RAM code is decoded freshly by the interpreter on every
   execution, except for explicit trace-seeded sealed single-instruction blocks
   whose live encoding exactly matches the captured word (see "Hybrid AOT").
-- The CPU is instruction-budgeted. There is no scheduler, cycle count, HBlank
-  or drawing-period timing, or rendered-frame concept. The host-driven model
-  derives a read-only `VCOUNT` line from a fixed per-line instruction budget and
-  advances timer counters from the same nominal three-cycle instruction mapping
-  (below); those mappings are approximations, not hardware scanline or cycle
-  timing.
+- CPU execution remains instruction-budgeted. `Bus::tick_cycles` advances the
+  bounded LCD line and timer models by supplied nominal cycles; guest instruction
+  retirement still maps to three nominal cycles. This does not add per-instruction
+  timing, waitstates, bus arbitration, HBlank/drawing-period timing or a rendered-
+  frame concept, and is not a cycle-accurate bus.
 
 ## Synthetic BIOS data policy (Design)
 
@@ -250,7 +249,7 @@ bus failure after exception entry is terminal and is not rolled back.
 
 ### Bounded IRQ dispatcher and return (partial; Design)
 
-The host-driven instruction-count frame model raises the VBlank request once when
+The host-driven nominal-cycle LCD model raises the VBlank request once when
 line 160 of its 228-line `VCOUNT` progression is entered (see the `VCOUNT` model
 under Bus). Between guest instructions, the runner enters a handler only when
 IRQs are unmasked, IME and a matching IE/IF bit are set, and the nonzero handler
@@ -277,8 +276,8 @@ sources are generated: the VBlank request once per frame at the modelled
 line-160 transition, modelled timer overflow requests on `IF` bits 3..6, and the
 V-Counter match request on `IF` bit 2 (see the `VCOUNT` model below). The
 `0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
-HBlank IRQs, cycle timing and BIOS boot remain unsupported. Do not interpret
-this as general GBA interrupt compatibility.
+HBlank IRQs, hardware-accurate cycle timing and BIOS boot remain unsupported.
+Do not interpret this as general GBA interrupt compatibility.
 
 ## Bus
 
@@ -363,31 +362,28 @@ Implemented regions and widths:
   explicit `UnsupportedIoWrite` errors instead of fabricated transfers, and
   general-purpose/JOY-BUS mode treats `SIOCNT` as unused storage. No serial IRQ
   is delivered.
-- `VCOUNT` and the instruction-count line model: the host-driven frame model
+- `VCOUNT` and the cycle-driven LCD line model: the host-driven model
   exposes a read-only `VCOUNT` halfword at `0x04000006` with an 8-bit path for
   exactly that register: `0x04000006` returns its low byte and `0x04000007` its
   high byte. `VCOUNT` progresses through all 228 documented lines `0..=227` and
   wraps from 227 to 0 once per frame, so the high byte is always `0` and the
-  halfword value is unchanged by the byte path. The total frame budget stays
-  `FRAME_INSTRUCTIONS` = 93,632 guest instructions (280,896 documented cycles at
-  a nominal three cycles per instruction). GBATEK `#lcd-dimensions-and-timings`
-  gives 228 equally long lines of 1232 cycles, so the budget is spread evenly:
-  each line owns `93632 / 228 = 410` instructions, and the 152-instruction
-  remainder is distributed one instruction at a time across the frame
-  (`bus::line_instructions`, `bus::instructions_until_line`). The 228 line
-  budgets therefore sum to exactly 93,632 with no lost remainder. A fresh bus
-  starts on line 0 with that line's full budget ahead; `Bus::tick_frame`
-  advances one guest instruction and `Bus::tick_frames` produces exactly the
-  same sequence as repeated single ticks. The DISPSTAT VBlank flag (bit 0) is
+  halfword value is unchanged by the byte path. GBATEK `#lcd-dimensions-and-timings`
+  documents 228 equally long lines of 1232 cycles (280896 cycles per frame).
+  `Bus::tick_cycles` advances LCD line phase by supplied nominal cycles and
+  processes every crossed boundary; `Bus::tick_frame`/`tick_frames` remain
+  compatibility adapters at three nominal cycles per instruction. The public
+  `line_instructions`/`instructions_until_line` helpers round exact cycle
+  boundaries up to the corresponding nominal instruction count. The DISPSTAT
+  VBlank flag (bit 0) is
   set on lines `160..=226` and clear on line 227, matching GBATEK
   `#lcd-io-interrupts-and-status` ("set in line 160..226; not 227"); the VBlank
   IRQ request latches once when line 160 is entered. This replaces the earlier
   two-value `0`/`160` placeholder and its undocumented one-tenth VBlank phase.
-  **Design approximation, not a timing claim:** a line is an instruction-count
-  slice, not hardware timing. One guest instruction is not three cycles, lines
-  do not model drawing or HBlank periods, the 152 remainder instructions are
-  spread evenly instead of at their exact cycle positions, and no instruction
-  observes a mid-line split. The DISPSTAT V-Count setting (bits 8..15) is
+  **Bounded timing model, not hardware-accurate timing:** LCD line/VCOUNT,
+  VBlank and VCOUNT-match transitions follow the supplied nominal cycles.
+  Retired instructions are still approximated as three cycles; instruction
+  timings, waitstates, bus arbitration, drawing and HBlank phases are not
+  modelled. The DISPSTAT V-Count setting (bits 8..15) is
   writable and compared against the current line: GBATEK
   `#lcd-io-interrupts-and-status` says "when its value is identical to the
   content of the VCOUNT register then the V-Counter flag is set (Bit 2), and
@@ -400,7 +396,7 @@ Implemented regions and widths:
   write is evaluated, so this immediate evaluation is an implementation choice,
   not a quoted rule. All `LYC` values `0..=255` are accepted, but only the
   modelled lines `0..=227` can match. There is no HBlank, per-line interrupt
-  scheduling beyond this match, wait-state/cycle accounting or scanline
+  scheduling beyond this match, hardware wait-state/cycle accounting or scanline
   renderer. The
   pre-existing byte-addressed sound-register reads are unchanged, every other
   I/O address keeps the existing register-specific dispatch, and
@@ -413,8 +409,10 @@ Implemented regions and widths:
 ### Timers
 
 `TM0..TM3` expose the documented 16-bit counter/reload halfword and control
-halfword at `0x04000100 + 4*n`. Each retired guest instruction contributes
-`bus::INSTRUCTION_CYCLES` = 3 nominal cycles to every **enabled** timer. A normal
+halfword at `0x04000100 + 4*n`. `Bus::tick_cycles` advances every **enabled**
+timer by its supplied nominal cycles; guest instruction retirement currently
+contributes `bus::INSTRUCTION_CYCLES` = 3 cycles through the compatibility
+adapter. A normal
 timer increments whenever its selected prescaler (`F/1`, `F/64`, `F/256`,
 `F/1024`) accumulates that many cycles; a cascaded Timer 1..3 ignores its own
 prescaler and increments once for each previous-timer overflow. Cascades are
@@ -438,10 +436,11 @@ overflow latches the matching `IF` bit (3..6); the existing `IME`/`IE` gate and
 dispatcher decide delivery. Without that bit the overflow still reloads and
 still drives a cascade, but raises no request.
 
-**Design approximation, not a timing claim:** instruction lengths, waitstates,
-bus arbitration and mid-instruction reads are absent. A poll observes only
-completed instruction ticks. The timer model itself does not consume Sound FIFO
-samples, start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video
+**Design approximation, not a whole-machine timing claim:** instruction lengths,
+waitstates, bus arbitration and mid-instruction reads are absent.
+`Bus::tick_cycles` advances timers by the supplied cycle count; guest instruction
+retirement uses the nominal three-cycle adapter. The timer model itself does not
+consume Sound FIFO samples, start Sound DMA, request FIFO refills, drive `VCOUNT`, HBlank, video
 capture or any other peripheral. The host audio engine reads only timer 0/1's
 nominal overflow rate as the Direct Sound sample clock and then consumes FIFO
 bytes and requests sound-timed DMA refills through the explicit bus APIs.

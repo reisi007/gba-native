@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, OAM_BASE, VRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, INSTRUCTION_CYCLES, OAM_BASE, VRAM_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::interpret;
@@ -138,6 +138,7 @@ fn native_video_memory_aliases_match_independent_expectations() {
     independent_bus
         .write32(OAM_BASE, 0x1122_3344)
         .expect("OAM store");
+    independent_bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     assert_eq!(independent_bus.read32(VRAM_BASE + 0x20000), Ok(0x1122_3344));
     assert_eq!(independent_bus.read32(VRAM_BASE + 0x18000), Ok(0x1122_3344));
     assert_eq!(independent_bus.read32(OAM_BASE + 0x400), Ok(0x1122_3344));

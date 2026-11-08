@@ -1,4 +1,4 @@
-//! Instruction-budget timer model boundary tests.
+//! Nominal-cycle timer model boundary tests.
 //!
 //! Every fixture is synthetic. Cycle expectations use the documented nominal
 //! mapping of three cycles per retired guest instruction; they are not hardware
@@ -68,6 +68,19 @@ fn reload_write_is_latched_without_changing_the_stopped_counter() {
 
     write(&mut bus, TM0_H, 0x0080);
     assert_eq!(read(&bus, TM0_L), 0x0200, "re-enable reloads the new value");
+}
+
+#[test]
+fn timers_advance_by_the_exact_cycles_supplied() {
+    let mut bus = bus();
+    write(&mut bus, TM0_H, 0x0081); // F/64
+    bus.tick_cycles(63);
+    assert_eq!(read(&bus, TM0_L), 0);
+    bus.tick_cycles(1);
+    assert_eq!(read(&bus, TM0_L), 1);
+    assert_eq!(INSTRUCTION_CYCLES, 3);
+    bus.tick_frame();
+    assert_eq!(read(&bus, TM0_L), 1, "three cycles do not reach next F/64");
 }
 
 #[test]

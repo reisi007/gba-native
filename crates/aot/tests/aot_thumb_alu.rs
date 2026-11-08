@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR};
+use gba_native::bus::{Bus, DISPCNT_ADDR, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::display;
@@ -175,6 +175,7 @@ fn native_thumb_alu_shift_and_bl_halves_match_hand_expected_state() {
     expected_bus
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("expected DISPCNT write");
+    expected_bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     assert_eq!(report.bus_sha256, sha256::hex(&expected_bus.state_digest()));
     assert_eq!(report.vram_sha256, sha256::hex(&expected_bus.vram_digest()));
     let image = display::snapshot(&expected_bus).expect("expected image");

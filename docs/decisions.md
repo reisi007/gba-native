@@ -1117,3 +1117,21 @@ precise current trust boundary, integrity meaning, and non-claims live in
 [`aot-artifact-integrity.md`](aot-artifact-integrity.md). No signing, sandbox,
 provenance system, or reproducible-build guarantee is introduced by this
 decision.
+
+## D51 — Cycle-driven LCD line progression with nominal instruction adapters
+
+Implemented 2026-11-08 as a bounded issue #4 slice. The LCD line phase advances
+from supplied nominal cycles at 1232 cycles per line and wraps after 228 lines
+(280896 cycles). VCOUNT, the VBlank flag/request and VCOUNT-match transitions
+are processed at those line boundaries. `Bus::tick_cycles` also advances timers
+by the same supplied cycle count; `tick_frame` and `tick_frames` remain
+compatibility adapters that attribute three nominal cycles per retired
+instruction. Instruction-to-line helpers use the ceiling of exact cycle
+boundaries, and the partial line phase participates in `Bus::state_digest`.
+
+This supersedes D28's even distribution of instruction counts across lines and
+D29's instruction-only timer clock source, while retaining their bounded LCD,
+VCOUNT/VBlank and timer-register behavior. The change does not add per-instruction
+timing, waitstates, bus arbitration, HBlank/drawing phases, DMA event scheduling
+or cycle-accurate hardware behavior. Issue #4 remains open for those broader
+scheduler and device requirements.

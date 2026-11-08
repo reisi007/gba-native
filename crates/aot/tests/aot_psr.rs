@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR};
+use gba_native::bus::{Bus, DISPCNT_ADDR, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::interpret;
@@ -141,13 +141,8 @@ fn reference(cart: &Cartridge, budget: u64) -> (Cpu, Bus, u64) {
     cpu.set_pc(ENTRY);
     cpu.set_thumb(false);
     let mut bus = Bus::new(cart.clone());
-    let mut used = 0;
-    while used < budget {
-        if let Err(error) = interpret::step(&mut cpu, &mut bus) {
-            panic!("reference failed at pc=0x{:08X}: {error}", cpu.pc());
-        }
-        used += 1;
-    }
+    let used = interpret::run_budget(&mut cpu, &mut bus, budget)
+        .unwrap_or_else(|error| panic!("reference failed at pc=0x{:08X}: {error}", cpu.pc()));
     (cpu, bus, used)
 }
 
@@ -223,6 +218,7 @@ fn native_psr_banking_fixture_matches_hand_expected_state() {
     expected_bus
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("expected DISPCNT write");
+    expected_bus.tick_cycles((used as u32) * INSTRUCTION_CYCLES);
     assert_eq!(report.bus_sha256, sha256::hex(&expected_bus.state_digest()));
     assert_eq!(report.vram_sha256, sha256::hex(&expected_bus.vram_digest()));
 

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::demo;
@@ -227,6 +227,7 @@ fn native_ram_self_modification_falls_back_four_times_and_sees_the_patch() {
     expected_state
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("DISPCNT");
+    expected_state.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     assert_eq!(
         report.bus_sha256,
         sha256::hex(&expected_state.state_digest())

@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::display::{HEIGHT, Image, WIDTH};
@@ -273,6 +273,7 @@ fn native_arm_ldm_stm_fixture_matches_hand_expected_state() {
     bus.write32(EWRAM_BASE + 0x204, 0x22).expect("store 2");
     bus.write32(EWRAM_BASE + 0x208, 0x33).expect("store 3");
     bus.write16(DISPCNT_ADDR, 0x0403).expect("DISPCNT");
+    bus.tick_cycles((budget as u32) * INSTRUCTION_CYCLES);
     assert_eq!(report.bus_sha256, sha256::hex(&bus.state_digest()));
 }
 
@@ -345,6 +346,7 @@ fn native_thumb_stack_and_block_fixture_matches_hand_expected_state() {
     bus.write32(EWRAM_BASE + 0x300, 0x44).expect("stm 1");
     bus.write32(EWRAM_BASE + 0x304, 0x55).expect("stm 2");
     bus.write16(DISPCNT_ADDR, 0x0403).expect("DISPCNT");
+    bus.tick_cycles((budget as u32) * INSTRUCTION_CYCLES);
     assert_eq!(report.bus_sha256, sha256::hex(&bus.state_digest()));
 
     let expected_image =

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, EWRAM_BASE};
+use gba_native::bus::{Bus, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::interpret;
@@ -157,6 +157,7 @@ fn native_swap_fixture_matches_independent_memory_and_register_expectations() {
     independent_bus
         .write32(RAM, 0xAABB_DDDD)
         .expect("independent expected swap result");
+    independent_bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
 
     let temp = TempDir::new();
     let rom_path = temp.path().join("fixture.gba");

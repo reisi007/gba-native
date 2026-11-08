@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, FLAG_F, FLAG_I, IRQ_STACK, Mode, SVC_STACK, USER_STACK};
 use gba_native::interpret;
@@ -197,6 +197,7 @@ fn expected_bus(cart: &Cartridge) -> Bus {
         .expect("independent saved SVC LR");
     bus.write16(DISPCNT_ADDR, 0x0080)
         .expect("RegisterRamReset always forces blank");
+    bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     bus
 }
 

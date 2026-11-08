@@ -20,8 +20,10 @@ fn vblank_request(bus: &Bus) -> u16 {
 }
 
 #[test]
-fn line_budgets_cover_the_frame_budget_exactly() {
-    // Total frame budget is retained, not re-derived from the line count.
+fn nominal_instruction_helpers_round_cycle_boundaries_across_frame() {
+    // Compatibility instruction count is derived from the documented cycle total.
+    assert_eq!(FRAME_CYCLES, 280_896);
+    assert_eq!(CYCLES_PER_LINE * u32::from(FRAME_LINES), FRAME_CYCLES);
     assert_eq!(FRAME_INSTRUCTIONS, 93_632);
     assert_eq!(FRAME_LINES, 228);
     assert_eq!(VBLANK_FIRST_LINE, 160);
@@ -44,7 +46,7 @@ fn line_budgets_cover_the_frame_budget_exactly() {
         if count == base + 1 {
             larger += 1;
         }
-        // The closed-form cumulative mapping agrees with each line budget.
+        // The rounded cumulative mapping agrees with each per-line delta.
         assert_eq!(
             instructions_until_line(line + 1) - instructions_until_line(line),
             count,
@@ -176,6 +178,88 @@ fn batch_and_single_instruction_ticks_stay_equivalent() {
             );
         }
     }
+}
+
+#[test]
+fn cycle_scheduler_uses_exact_boundaries_carries_overrun_and_wraps_frame() {
+    let mut scheduled = bus();
+    assert_eq!((CYCLES_PER_LINE, FRAME_CYCLES), (1232, 280_896));
+    scheduled.tick_cycles(CYCLES_PER_LINE - 1);
+    assert_eq!(vcount(&scheduled), 0);
+    scheduled.tick_cycles(1);
+    assert_eq!(vcount(&scheduled), 1);
+
+    // Phase is zero on line 1; 1231 cycles plus one three-cycle instruction
+    // crosses the next edge with two cycles carried into line 2.
+    scheduled.tick_cycles(CYCLES_PER_LINE - 1);
+    scheduled.tick_cycles(3);
+    assert_eq!(vcount(&scheduled), 2);
+    // Two overrun cycles are already in line 2: only 1230 more reach line 3.
+    scheduled.tick_cycles(CYCLES_PER_LINE - 3);
+    assert_eq!(vcount(&scheduled), 2);
+    scheduled.tick_cycles(1);
+    assert_eq!(vcount(&scheduled), 3);
+
+    let mut exact = bus();
+    exact.tick_cycles(FRAME_CYCLES - 1);
+    assert_eq!(vcount(&exact), u16::from(FRAME_LINES - 1));
+    exact.tick_cycles(1);
+    assert_eq!(vcount(&exact), 0);
+    assert_eq!(exact.read16(IF_ADDR), Ok(IF_VBLANK));
+}
+
+#[test]
+fn arbitrary_cycle_batches_equal_single_cycle_advancement() {
+    let mut batched = bus();
+    let mut single = bus();
+    batched.tick_cycles(8_765);
+    for _ in 0..8_765 {
+        single.tick_cycles(1);
+    }
+    assert_eq!(batched.state_digest(), single.state_digest());
+    assert_eq!(vcount(&batched), vcount(&single));
+
+    let mut phase_one = bus();
+    phase_one.tick_cycles(1);
+    let mut phase_two = bus();
+    phase_two.tick_cycles(2);
+    assert_eq!(vcount(&phase_one), vcount(&phase_two));
+    assert_ne!(
+        phase_one.state_digest(),
+        phase_two.state_digest(),
+        "different LCD phases must remain distinguishable"
+    );
+}
+
+#[test]
+fn coincident_lcd_and_timer_events_latch_all_irq_requests() {
+    let mut bus = bus();
+    bus.tick_cycles(u32::from(VBLANK_FIRST_LINE - 1) * CYCLES_PER_LINE + CYCLES_PER_LINE - 1);
+    assert_eq!(vcount(&bus), u16::from(VBLANK_FIRST_LINE - 1));
+    bus.write16(DISPSTAT_ADDR, 0xA020)
+        .expect("enable VCOUNT IRQ for line 160");
+    assert_eq!(bus.read16(IF_ADDR), Ok(0));
+
+    // Timer 0 starts at 0xFFFF with F/1 and its IRQ enabled, so its first
+    // supplied cycle overflows on the same cycle that enters VBlank.
+    bus.write16(0x0400_0100, u16::MAX).expect("TM0 reload");
+    bus.write16(0x0400_0102, 0x00C0)
+        .expect("TM0 start with IRQ");
+    assert_eq!(bus.read16(0x0400_0100), Ok(u16::MAX));
+    assert_eq!(bus.read16(0x0400_0102), Ok(0x00C0));
+    bus.tick_cycles(1);
+
+    assert_eq!(vcount(&bus), u16::from(VBLANK_FIRST_LINE));
+    assert_eq!(
+        bus.read16(DISPSTAT_ADDR).expect("DISPSTAT") & 0x0005,
+        0x0005,
+        "VBlank and matching VCOUNT flags become visible together"
+    );
+    assert_eq!(
+        bus.read16(IF_ADDR),
+        Ok(IF_VBLANK | IF_VCOUNT | (1 << 3)),
+        "VBlank, VCOUNT and timer requests are all retained"
+    );
 }
 
 #[test]

@@ -62,8 +62,8 @@ implementations have only dated historical evidence below.
   including wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-  --locked`. It pins the current core, AOT and root targets (602 selected
-  package tests) and the full default `cargo test -- --list` inventory (609
+  --locked`. It pins the current core, AOT and root targets (617 selected
+  package tests) and the full default `cargo test -- --list` inventory (624
   tests). The browser-tool bootstrap self-test is included in the root
   integration targets. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
@@ -154,23 +154,22 @@ implementations have only dated historical evidence below.
   internal source-cursor advancement with visible latches preserved, invalid
   configurations before source access, bounded FIFO wrap/capacity, reset bits,
   and group-7 DMA disarming.
-- `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the instruction-count
-  frame model raises VBlank/IF once when its 228-line `VCOUNT` progression enters
-  line 160, IRQ gating requires IME/IE/pending, and timers follow the
-  instruction-budget counter model. Sound FIFO state is bounded; plain bus
-  stepping consumes nothing. The host audio engine reads timer 0/1's overflow
+- `crates/core/src/bus/irq.rs`, `sound.rs` and `timer.rs`: the nominal-cycle LCD
+  model raises VBlank/IF once when its 228-line `VCOUNT` progression enters
+  line 160, IRQ gating requires IME/IE/pending, and timers advance by supplied
+  cycles (guest instruction retirement uses the nominal three-cycle adapter).
+  Sound FIFO state is bounded; plain bus stepping consumes nothing. The host
+  audio engine reads timer 0/1's overflow
   rate and issues the explicit FIFO pop and sound-DMA refill calls described in
   the Direct Sound round below.
   `VCOUNT` is readable as its modelled halfword and, since the byte-lane round,
   through exactly the two byte lanes at `0x04000006`/`0x04000007`. The halfword
-  walks all documented lines `0..=227` and wraps to 0; the retained 93632
-  instruction frame budget is split into 410 instructions per line plus one for
-  each of the 152 spread remainder instructions, so the line budgets still sum
-  to the frame budget. The DISPSTAT VBlank flag covers lines `160..=226` and is
-  clear on line 227. This is an instruction-count approximation, not hardware
-  scanline or cycle timing; the byte path handles only `VCOUNT`: the
-  pre-existing byte-addressed sound-register reads are unchanged, every other
-  address keeps the existing register-specific I/O dispatch, and
+  walks all documented lines `0..=227` and wraps to 0 at 1232 supplied cycles
+  per line (280896 per frame). The DISPSTAT VBlank flag covers lines `160..=226`
+  and is clear on line 227. This remains a nominal-cycle model, not actual
+  instruction timing or cycle-accurate hardware; the byte path handles only
+  `VCOUNT`: pre-existing byte-addressed sound-register reads are unchanged, every
+  other address keeps the existing register-specific I/O dispatch, and
   otherwise-unmodelled reads remain explicit unsupported-width errors, including
   the neighbouring `DISPSTAT` lanes and the byte above `VCOUNT`.
 - Register banking: all seven modes, shared r0-r7, FIQ-only r8-r12, per-mode
@@ -997,8 +996,9 @@ playability claim; BIOS execution remains blocked and Issue #10 stays open.
 - `./scripts/full.sh` completed with `==> full gate passed`: hard size gate,
   Ratchet fast, format, Clippy, debug and release test suites, demo, synthetic
   native proof (`native_vs_reference=match`, `proof=ok`) and Ratchet slow tier.
-- Limits: line boundaries are instruction-count slices, not hardware scanlines or
-  cycles. One instruction is not three cycles, drawing/HBlank periods are not
+- Limits at the time of this 2026-10-29 round (superseded by D51): line
+  boundaries were instruction-count slices, not hardware scanlines or cycles.
+  The three-cycle retirement mapping had not yet been made explicit. Drawing/HBlank periods were not
   modelled, the 152 remainder instructions are spread evenly, no instruction
   observes a mid-line split, and HBlank, VCOUNT-match IRQs, per-line interrupt
   scheduling, DMA synchronization, BIOS execution and BIOS boot remain
@@ -1047,8 +1047,10 @@ playability claim; BIOS execution remains blocked and Issue #10 stays open.
   - `./scripts/full.sh` completed with `==> full gate passed`: hard size gate,
     Ratchet fast, format, Clippy, debug and release suites, demo, synthetic
     native proof (`native_vs_reference=match`, `proof=ok`) and Ratchet slow tier.
-- Limits: timers are driven by instruction counts, not hardware cycles. Reads
-  observe only completed instruction ticks; instruction lengths, waitstates,
+- Limits at the time of this 2026-10-29 round (superseded by D51): timers
+  advanced only from instruction counts. The later cycle-scheduler slice exposes
+  supplied nominal-cycle advancement while retaining the three-cycle instruction
+  approximation. Instruction lengths, waitstates,
   bus arbitration and mid-instruction reads are absent. Timers do not consume
   Sound FIFO samples, select or start Sound DMA, request FIFO refills, drive
   `VCOUNT`, HBlank or video capture, and `SOUNDCNT_H` timer-select bits remain
@@ -1951,3 +1953,30 @@ same commit, the four CI workflows are green on `4d8d09e`:
 The Android parity claim is therefore CI-verified for compilation, host unit
 tests (including `features_are_the_shared_contract`) and signed packaging; only
 on-device MediaPlayer playback remains outside CI.
+
+## Round: nominal-cycle LCD scheduler slice (2026-11-08)
+
+- `Bus::tick_cycles` advances the bounded LCD line phase and timer counters from
+  supplied nominal cycles. LCD transitions process every crossed 1232-cycle
+  boundary; VCOUNT, VBlank/VCOUNT-match state and IRQ requests update there.
+  Instruction retirement still uses the explicit three-cycle approximation,
+  and `tick_frame`/`tick_frames` remain compatibility adapters.
+- IRQ tests cover exact boundaries, carried cycle overrun, frame wrap, split
+  versus batched advancement, digest distinction for partial line phase, and
+  simultaneous VBlank/VCOUNT/timer requests. Timer-model tests cover exact
+  supplied prescaler cycles. Independent AOT bus oracles and reference helpers
+  now include the same nominal clock progression as emitted instructions.
+- `cargo test -p gba-native-core --lib bus::irq::tests`: 13 passed.
+  `cargo test -p gba-native-core --test timer_model`: 17 passed.
+  `cargo test -p gba-native-aot --test aot_swi`: 2 passed after correcting its
+  independent bus oracle to include the nominal instruction cycles.
+- A fresh-target `./scripts/full.sh` completed with `==> full gate passed`:
+  hard 500-line limit, Ratchet fast and slow tiers, format, Clippy, debug and
+  release workspace tests, demo and synthetic native proof. The proof reports
+  4 discovered blocks / 17 translated instructions, 230,411 guest instructions,
+  zero fallbacks and `native_vs_reference=match`. The pinned inventory is 617
+  selected package tests / 624 total workspace tests.
+- Evidence is limited to generated synthetic fixtures; no retail ROM, BIOS boot,
+  hardware line timing, waitstates, HBlank/drawing phases, DMA-event scheduling
+  or general game compatibility is claimed. This is a partial issue #4 slice;
+  the issue remains open.

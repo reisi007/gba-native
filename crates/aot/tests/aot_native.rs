@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR};
+use gba_native::bus::{Bus, DISPCNT_ADDR, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::Cpu;
 use gba_native::demo;
@@ -263,6 +263,7 @@ fn native_immediate_family_matches_isa_expected_state_and_only_explicit_store() 
     expected_bus
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("expected DISPCNT write");
+    expected_bus.tick_cycles((budget as u32) * INSTRUCTION_CYCLES);
     assert_eq!(
         report.bus_sha256,
         sha256::hex(&expected_bus.state_digest()),

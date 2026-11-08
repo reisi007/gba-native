@@ -104,15 +104,19 @@ retail cartridges**.
 
 - No BIOS boot or retail-game playability claim. Rune's host-side synthetic save
   slots and test-tone controls are UI demonstrations, not guest-save or retail
-  audio compatibility. The core accepts host-injected KEYINPUT state, but has no
-  frame scheduler, sampling guarantee or timing claim.
-- No cycle/frame-accurate timing, DMA arbitration, automatic HBlank/VBlank or
-  timer-driven sound request, or DMA-driven IRQ. Timer counters advance only from
-  the nominal three-cycle instruction mapping; that is not hardware timing.
+  audio compatibility. The core accepts host-injected KEYINPUT state, but does
+  not schedule input sampling against the modeled LCD boundaries or make a
+  sampling guarantee.
+- No cycle/frame-accurate timing, DMA arbitration, HBlank events, timer-driven
+  sound request, or DMA-driven IRQ. The bounded LCD model advances VCOUNT and
+  latches the modeled VBlank request at nominal-cycle line boundaries. Timers
+  advance by supplied nominal cycles; guest instruction retirement currently
+  supplies three cycles per instruction. This is not hardware timing.
   Immediate DMA and the bounded host-triggered Sound FIFO subset are implemented;
-  this does not establish general DMA coverage. A bounded static Mode 0 BG0 text-background snapshot
-  subset exists alongside bitmap modes; it is not a scanline/frame renderer,
-  and other BG layers and OBJ/sprite rendering remain unsupported.
+  this does not establish general DMA coverage. Static snapshots cover bitmap
+  modes 3..5, Mode 0/1 text BGs, Mode 1 affine BG2, and bounded OBJ, window-0 and
+  blending subsets described in `gba-contract.md`; this is not a scanline/frame
+  renderer.
 - No GPU vendor SDK, FSR, DLSS, ML model or custom upscaling shader/integration.
 - No successful REA analysis or native Evidence record.
 - No general static recovery of arbitrary ROM code. Discovery is bounded and

@@ -2,7 +2,7 @@
 //!
 //! Implements mirrored EWRAM/IWRAM, palette, VRAM, OAM, three ROM windows,
 //! selected I/O register blocks, bounded DMA/Sound FIFO behavior, and a
-//! host-driven instruction-count line/frame/IRQ model (`VCOUNT` `0..=227`).
+//! host-driven nominal-cycle LCD line/IRQ model (`VCOUNT` `0..=227`).
 //! Unmodelled I/O reads and open-bus behavior remain explicit errors; unused
 //! I/O writes are ignored and recorded. This is not a cycle-accurate bus.
 
@@ -24,8 +24,8 @@ pub use io::{
     KEY_UP,
 };
 pub use irq::{
-    FRAME_INSTRUCTIONS, FRAME_LINES, VBLANK_FIRST_LINE, VBLANK_LAST_LINE, instructions_until_line,
-    line_instructions,
+    CYCLES_PER_LINE, FRAME_CYCLES, FRAME_INSTRUCTIONS, FRAME_LINES, VBLANK_FIRST_LINE,
+    VBLANK_LAST_LINE, instructions_until_line, line_instructions,
 };
 pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
@@ -95,7 +95,7 @@ pub const RCNT_ADDR: u32 = 0x0400_0134;
 
 /// Nominal hardware cycles attributed to one retired guest instruction.
 ///
-/// The instruction-count frame and timer models share this mapping. It is a
+/// Compatibility helpers and instruction retirement use this mapping. It is a
 /// deterministic approximation, not measured CPU timing: instruction lengths,
 /// waitstates and bus arbitration are not modelled.
 pub const INSTRUCTION_CYCLES: u32 = 3;

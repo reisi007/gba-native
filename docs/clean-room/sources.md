@@ -126,33 +126,42 @@ Relevant anchors actually consulted for this milestone:
   8/16/32-bit I/O access widths, `VCOUNT` at `0x04000006` as a readable 16-bit
   register with the current scanline in bits 0..7 and zeros in bits 8..15, the
   LCD status/interrupt field layout, and the document's notes on register-width
-  and byte-lane behavior. Only the `VCOUNT` byte lanes at `0x04000006`/
-  `0x04000007` are added from this group; the bounded synthetic line
-  progression remains an instruction-count model, not hardware line timing.
+  and byte-lane behavior. For the register-width note, only the `VCOUNT` byte
+  lanes at `0x04000006`/`0x04000007` are added; LCD line progression from these
+  sections is described below and uses the nominal cycle scheduler. CPU
+  retirement still uses a three-cycle approximation, not instruction timing or
+  hardware-accurate line timing.
   The pre-existing byte-addressed sound-register reads are unchanged, every
   other I/O address keeps the existing register-specific dispatch, and
   otherwise-unmodelled reads remain explicit unsupported-width errors. These
   anchors were consulted on 2026-10-28 in the upstream GBATEK document at
   <https://problemkaputt.de/gbatek.htm>, which is the same reference text as S1;
   that retrieval was not separately retained or hashed.
-- `#lcd-io-interrupts-and-status` and `#lcd-dimensions-and-timings`: `VCOUNT`
-  (`0x04000006`) as the current scanline in `0..=227`, the DISPSTAT VBlank flag
+- `#lcd-io-interrupts-and-status` and `#lcd-dimensions-and-timings`: implemented
+  subset now advances LCD line/VCOUNT, VBlank and VCOUNT-match transitions from
+  supplied nominal cycles (1232 cycles per line; 228 lines). This is not
+  instruction-timing, waitstate, HBlank/drawing-phase, arbitration or
+  cycle-accurate hardware support; CPU retirement still maps nominally to three
+  cycles per instruction. The cited source also specifies `VCOUNT` (`0x04000006`)
+  as the current scanline in `0..=227`, the DISPSTAT VBlank flag
   wording ("set in line 160..226; not 227"), the 160 drawing lines plus 68
   hidden VBlank lines, and the 228-line/280896-cycle frame at 1232 cycles per
-  line. Only a deterministic instruction-count approximation is implemented:
-  the retained 93632-instruction budget is spread over the 228 lines and the
-  VBlank request follows the modelled line-160 transition. The same section
-  documents the V-Count setting in DISPSTAT bits 8..15 (`LYC`), the read-only
+  line. `Bus::tick_cycles` advances the modeled LCD line phase at the documented
+  cycle boundaries; `tick_frame`/`tick_frames` remain three-cycle-per-instruction
+  compatibility adapters. The same section documents the V-Count setting in
+  DISPSTAT bits 8..15 (`LYC`), the read-only
   match flag in bit 2, the enable in bit 5 and the V-Counter request in `IF`
   bit 2 ("when its value is identical to the content of the VCOUNT register
   then the V-Counter flag is set (Bit 2), and (if enabled in Bit 5) an
   interrupt is requested"); that flag/request condition is implemented on top
-  of the instruction-count line model, with `LYC` values `0..=255` accepted and
+  of the nominal-cycle line model, with `LYC` values `0..=255` accepted and
   only `0..=227` reachable. The same section does not state when a *write* that
   creates a match is evaluated; the model raises it immediately and labels
-  that choice as an implementation decision, not a quoted rule. No HBlank or cycle timing is taken
-  from these sections. These anchors were consulted on 2026-10-29 in the same
-  upstream GBATEK text at <https://problemkaputt.de/gbatek.htm>, which is the
+  that choice as an implementation decision, not a quoted rule. No HBlank/drawing
+  phase model or hardware-accurate cycle timing is claimed. Instruction timing,
+  waitstates and arbitration remain absent. These anchors were consulted on
+  2026-10-29 in the same upstream GBATEK text at
+  <https://problemkaputt.de/gbatek.htm>, which is the
   same reference text as S1; that retrieval was not separately retained or
   hashed.
 - `#gba-memory-map` and `#gba-cart-backup-sramfram`: the backup window entry

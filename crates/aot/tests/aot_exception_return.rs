@@ -108,13 +108,8 @@ fn reference(cart: &Cartridge, budget: u64) -> (Cpu, Bus, u64) {
     cpu.set_pc(ENTRY);
     cpu.set_thumb(false);
     let mut bus = Bus::new(cart.clone());
-    let mut used = 0;
-    while used < budget {
-        if let Err(error) = interpret::step(&mut cpu, &mut bus) {
-            panic!("reference failed at pc=0x{:08X}: {error}", cpu.pc());
-        }
-        used += 1;
-    }
+    let used = interpret::run_budget(&mut cpu, &mut bus, budget)
+        .unwrap_or_else(|error| panic!("reference failed at pc=0x{:08X}: {error}", cpu.pc()));
     (cpu, bus, used)
 }
 

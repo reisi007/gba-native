@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, PALETTE_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES, PALETTE_BASE};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::display::{HEIGHT, Image, WIDTH};
@@ -349,6 +349,7 @@ fn native_memory_fixture_uses_direct_widths_and_matches_hand_expected_state() {
     bus.write16(RAM + 8, 0x8001).expect("half store");
     bus.write32(RAM + 12, TARGET).expect("target store");
     bus.write16(DISPCNT_ADDR, 0x0403).expect("DISPCNT");
+    bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     assert_eq!(report.bus_sha256, sha256::hex(&bus.state_digest()));
     assert_eq!(report.vram_sha256, sha256::hex(&bus.vram_digest()));
     assert_eq!(report.rom_sha256, cart.sha256_hex());
@@ -406,6 +407,7 @@ fn native_palette_mirror_fixture_matches_independent_alias_expectations() {
     independent_bus
         .write32(PALETTE_BASE + 0x10, 0xAABB_CCDD)
         .expect("independent palette store");
+    independent_bus.tick_cycles((budget as u32) * INSTRUCTION_CYCLES);
     assert_eq!(
         independent_bus.read32(PALETTE_BASE + 0x410),
         Ok(0xAABB_CCDD)

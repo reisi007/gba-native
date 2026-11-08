@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE};
+use gba_native::bus::{Bus, DISPCNT_ADDR, EWRAM_BASE, INSTRUCTION_CYCLES};
 use gba_native::cart::Cartridge;
 use gba_native::cpu::{Cpu, USER_STACK};
 use gba_native::interpret;
@@ -191,6 +191,7 @@ fn negative_strh_is_translated_directly_and_matches_hand_expected_bus() {
     expected_bus
         .write16(DISPCNT_ADDR, 0x0403)
         .expect("expected DISPCNT store");
+    expected_bus.tick_cycles((BUDGET as u32) * INSTRUCTION_CYCLES);
     assert_eq!(expected_bus.read16(RAM_BASE + 0x20), Ok(0));
     assert_eq!(report.bus_sha256, sha256::hex(&expected_bus.state_digest()));
     assert_eq!(report.vram_sha256, sha256::hex(&expected_bus.vram_digest()));
