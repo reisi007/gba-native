@@ -19,6 +19,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Retry transient release-host responses without changing the pinned
+      # Ratchet action's version or checksum verification.
+      - name: Configure bounded retries for Ratchet release downloads
+        run: |
+          mkdir -p "$RUNNER_TEMP/ratchet-curl-home"
+          cat >"$RUNNER_TEMP/ratchet-curl-home/.curlrc" <<'CURLRC'
+          retry = 5
+          retry-delay = 2
+          retry-max-time = 60
+          CURLRC
+          echo "CURL_HOME=$RUNNER_TEMP/ratchet-curl-home" >> "$GITHUB_ENV"
+
       # The official action installs the pinned Ratchet binary and verifies its
       # release checksum. The repository-level gates themselves run through the
       # same short/full scripts that a developer runs locally.
