@@ -117,6 +117,7 @@ pub(super) fn execute_block(
     pre_index: bool,
     add: bool,
     writeback: bool,
+    user_bank: bool,
 ) -> Result<()> {
     let base = cpu.reg(rn);
     let transfer = addr::aligned_block_base(base);
@@ -128,6 +129,9 @@ pub(super) fn execute_block(
 
     if load {
         let mut pc_value = None;
+        if user_bank && regs & (1 << 15) != 0 {
+            cpu.validate_exception_return()?;
+        }
         for reg in 0..16u8 {
             if regs & (1 << reg) == 0 {
                 continue;
@@ -137,19 +141,29 @@ pub(super) fn execute_block(
             if reg == 15 {
                 pc_value = Some(value);
             } else {
-                cpu.set_reg(reg, value);
+                if user_bank && regs & (1 << 15) == 0 {
+                    cpu.set_user_reg(reg, value);
+                } else {
+                    cpu.set_reg(reg, value);
+                }
             }
             index += 1;
         }
-        if let Some(value) = pc_value {
-            // ARMv4 LDM PC keeps ARM state and force-aligns.
-            cpu.set_pc(value & !3);
-        } else {
-            cpu.set_pc(instr.next_addr());
-        }
-        // ARMv4: a loaded base wins; there is no additional writeback.
+        // Apply writeback in the original exception mode before any LDM^ PC
+        // return switches banks.
         if writeback && regs & (1 << rn) == 0 {
             cpu.set_reg(rn, new_base);
+        }
+        if let Some(value) = pc_value {
+            if user_bank {
+                cpu.return_from_exception(value)?;
+            }
+            // ARMv4 LDM PC keeps ARM state and force-aligns.
+            else {
+                cpu.set_pc(value & !3);
+            }
+        } else {
+            cpu.set_pc(instr.next_addr());
         }
     } else {
         for reg in 0..16u8 {
@@ -164,7 +178,11 @@ pub(super) fn execute_block(
                 // base when it is the first entry, otherwise the new base.
                 new_base
             } else {
-                cpu.reg(reg)
+                if user_bank {
+                    cpu.user_reg(reg)
+                } else {
+                    cpu.reg(reg)
+                }
             };
             bus.write32(address, value)?;
             index += 1;

@@ -75,7 +75,8 @@ Relevant anchors actually consulted for this milestone:
   immediate/register offsets, `1SH1` opcode space, ARMv5 LDRD/STRD boundary.
 - `#arm-opcodes-memory-block-data-transfer-ldm-stm`: IA/IB/DA/DB, ascending
   register/memory order, ARMv4 base-in-list and empty-list quirks, `S=1`
-  boundary, PC entries.
+  User-bank transfers versus `LDM` with PC restoring the current SPSR, the
+  user-transfer writeback restriction, and PC entries.
 - `#arm-cpu-memory-alignments`: forced-aligned stores/block transfers, rotated
   word reads, odd LDRH rotation, and ARM7 odd LDRSH = LDRSB at the odd address.
 - `#thumb-instruction-summary`.

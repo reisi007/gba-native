@@ -221,9 +221,8 @@ fn empty_arm_list_is_one_pc_transfer_with_sixteen_word_writeback() {
 }
 
 #[test]
-fn s_user_bank_and_pc_base_are_rejected() {
+fn s_empty_list_and_pc_base_are_rejected() {
     for raw in [
-        block(0xE, 0, 1, 1, 0, 1, 0, 0b0010),  // S=1
         block(0xE, 0, 1, 1, 0, 1, 0, 0),       // empty LDM with S=1
         block(0xE, 0, 1, 0, 0, 1, 15, 0b0010), // Rn=PC
         block(0xE, 0, 1, 0, 0, 1, 15, 0),      // empty list with Rn=PC
@@ -349,6 +348,7 @@ fn block_ir_is_typed_and_flags_are_never_changed() {
             pre_index: true,
             add: false,
             writeback: true,
+            user_bank: false,
         }
     );
     assert!(!instruction.is_control_flow());

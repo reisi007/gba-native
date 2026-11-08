@@ -1,8 +1,9 @@
 # Source layout
 
 - `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `cpu.rs`,
-  `cpu/exception.rs`: header, explicit memory map, SRAM/flash device policies,
-  state, documented stack initialization and framed SWI exception entry/return.
+  `cpu/registers.rs`, `cpu/exception.rs`: header, explicit memory map,
+  SRAM/flash device policies, CPU register banks, documented stack
+  initialization and framed SWI/ARM exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure

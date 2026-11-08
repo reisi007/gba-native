@@ -104,8 +104,7 @@ fn rejects_arm_multiply_and_block_space() {
         }
     ));
     assert!(decode_arm(0, 0xE040_0091).is_err());
-    // A plain STMDB sp!,{lr} is now implemented; the still-unsupported S=1
-    // user-bank form stays an explicit error; empty list is marked distinctly.
+    // S=0 STMDB and S=1 user-bank writeback rejection.
     assert!(matches!(
         decode_arm(0, 0xE92D_4000).expect("STMDB sp!,{lr}").op,
         Op::BlockTransfer {
@@ -116,9 +115,15 @@ fn rejects_arm_multiply_and_block_space() {
             pre_index: true,
             add: false,
             writeback: true,
+            user_bank: false,
         }
     ));
-    assert!(decode_arm(0, 0xE96D_4000).is_err());
+    assert!(decode_arm(0, 0xE96D_4000).is_err()); // LDM^ with W, no PC
+    assert!(decode_arm(0, 0xE8C0_0100).is_ok()); // STMIA r0,{r8}^
+    assert!(decode_arm(0, 0xE8ED_0000).is_err()); // S=1 empty list
+    let return_pc = decode_arm(0, 0xE8F0_8000).expect("LDMIA r0!,{pc}^");
+    assert!(return_pc.op.restores_spsr());
+    assert!(return_pc.is_control_flow());
     assert!(matches!(
         decode_arm(0, 0xE92D_0000).expect("empty STM").op,
         Op::BlockTransfer {

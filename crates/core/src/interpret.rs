@@ -371,8 +371,9 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, instr: IrInstr) -> Result<()> {
             pre_index,
             add,
             writeback,
+            user_bank,
         } => memory::execute_block(
-            cpu, bus, instr, load, rn, regs, empty_list, pre_index, add, writeback,
+            cpu, bus, instr, load, rn, regs, empty_list, pre_index, add, writeback, user_bank,
         )?,
         Op::Push { regs, lr } => memory::execute_push(cpu, bus, instr, regs, lr)?,
         Op::Pop { regs, pc } => memory::execute_pop(cpu, bus, instr, regs, pc)?,

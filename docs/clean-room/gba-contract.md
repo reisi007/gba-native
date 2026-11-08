@@ -544,7 +544,7 @@ nesting are explicit errors.
 | Branch | conditional/unconditional `B`; `BL` (LR = address+4); `BX` register, including the documented ARM7 `BX PC` behavior | `BLX` register/immediate, `BXJ` |
 | Word/byte load/store | `LDR`/`STR`/`LDRB`/`STRB` with immediate-12 or shifted-register offset, pre/post indexing, add/subtract, pre-index writeback, post-index `T` on the flat bus, documented PC base/source offsets and word `LDR pc` alignment | PC base with writeback, load `Rd=Rn` with writeback, byte load into PC, offset register PC or reserved bit 4 set |
 | Halfword/signed | `LDRH`/`STRH`/`LDRSB`/`LDRSH` with immediate or unshifted register offset, pre/post indexing and writeback; ARM7 odd-address rules | `LDRD`/`STRD` (ARMv5), narrow loads into PC, PC base with writeback, load alias with writeback, register-form reserved bits 11-8 nonzero |
-| Block | `LDM`/`STM` IA/IB/DA/DB, optional writeback, ARMv4 base-in-list specials and PC entries; ARM empty list acts as one PC transfer with 16-word (`0x40`) writeback when W=1 | `S=1` user-bank/SPSR transfer, PC base |
+| Block | `LDM`/`STM` IA/IB/DA/DB, optional writeback, ARMv4 base-in-list specials and PC entries; `S=1` transfers user-bank registers or returns from exception for `LDM` including PC | S-bit empty list, PC base, S=1 user-bank transfer with W=1 |
 | PSR transfer | `MRS` CPSR/SPSR; `MSR` CPSR/SPSR with documented field bytes, register or rotated imm8 source | non-SWI exception entry/vectoring, MSR control writes that change T or use an invalid mode, PC destination |
 | Software interrupt | ARM and Thumb SWI with typed comment metadata; framed SVC entry, six default-service HLE dispatch (plus the explicit decompression and affine opt-ins) and full `MOVS PC,LR` return | unsupported service numbers, nested SVC-origin SWIs |
 | Multiply | `MUL`/`MLA` register form, `S` honored, low 32 bits of the product; `UMULL`/`UMLAL`/`SMULL`/`SMLAL` with a 64-bit result/accumulator and `S`-driven 64-bit N/Z; unpredictable `MUL`/`MLA Rd=Rm` uses the explicit D21 design policy | R15 operands, `RdHi=RdLo`, halfword multiplies |
@@ -627,7 +627,13 @@ this prototype is willing to generalize:
   list quirk. The implementation places the sole PC transfer using the selected
   IA/IB/DA/DB one-word address calculation; W=1 changes the base by `+/-0x40`,
   unlike explicit `{PC}` (`+/-4`).
-  `S=1` and PC as base remain explicit errors. Registers always move
+  `S=1` transfers other than `LDM^` with PC access the User bank (R0-R7 remain
+  shared; R8-R14 use the User bank). `LDM^` with PC loads its other entries
+  through the current bank, then restores CPSR from SPSR after validating it
+  before execution. S=1 empty-list remains rejected because its interaction is
+  not covered by this bounded implementation. User-bank writeback is rejected;
+  exception-return writeback is retained. PC as base remains an explicit error.
+  Registers always move
   in ascending address order. With writeback and the base in the list, STM
   stores the old base when it is the first (lowest) entry and the new base
   otherwise; LDM has no additional writeback and the loaded base value wins

@@ -128,7 +128,9 @@ pub enum Op {
     },
     /// ARM `LDM`/`STM` with IA/IB/DA/DB addressing. Empty encoded lists are
     /// represented by `regs = {PC}` and `empty_list = true` to preserve their
-    /// ARMv4 16-word writeback quirk. `S=1` transfers are rejected before IR.
+    /// ARMv4 16-word writeback quirk. `user_bank` carries ARM's S bit: STM and
+    /// LDM without PC select User registers; `LDM^` with PC loads the current
+    /// bank and restores SPSR.
     BlockTransfer {
         load: bool,
         rn: u8,
@@ -137,6 +139,7 @@ pub enum Op {
         pre_index: bool,
         add: bool,
         writeback: bool,
+        user_bank: bool,
     },
     /// Thumb `PUSH {Rlist}{,LR}` (full descending, SP base).
     Push {
@@ -214,18 +217,21 @@ impl Op {
         }
     }
 
-    /// `S=1` with `Rd=R15` in ARM data processing (`MOVS PC,Rn`,
-    /// `SUBS PC,LR,#4`, ...). It is the documented exception return: the whole
-    /// CPSR is restored from the current mode's SPSR instead of receiving the
-    /// arithmetic N/Z/C/V result, and the computed value becomes the PC in the
-    /// restored ARM/Thumb state. Thumb high-register ADD/MOV never set flags,
-    /// so this is an ARM-only form.
+    /// ARM data processing with `S=1,Rd=R15` or ARM `LDM^` including PC performs
+    /// the documented exception return: CPSR is restored from the current
+    /// mode's SPSR, and the computed or loaded PC is aligned for restored state.
     pub fn restores_spsr(self) -> bool {
         match self {
             Op::Mov { rd, set_flags, .. }
             | Op::Add { rd, set_flags, .. }
             | Op::Sub { rd, set_flags, .. } => rd == 15 && set_flags,
             Op::Alu { rd, set_flags, .. } => rd == Some(15) && set_flags,
+            Op::BlockTransfer {
+                load: true,
+                user_bank: true,
+                regs,
+                ..
+            } => regs & (1 << 15) != 0,
             _ => false,
         }
     }

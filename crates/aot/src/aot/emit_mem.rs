@@ -38,6 +38,7 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             pre_index,
             add,
             writeback,
+            user_bank,
         } => block_body(
             instruction,
             load,
@@ -47,6 +48,7 @@ pub(super) fn instruction_body(instruction: &IrInstr) -> String {
             pre_index,
             add,
             writeback,
+            user_bank,
         ),
         Op::Push { regs, lr } => push_body(instruction, regs, lr),
         Op::Pop { regs, pc } => pop_body(instruction, regs, pc),
@@ -166,9 +168,13 @@ fn block_body(
     pre_index: bool,
     add: bool,
     writeback: bool,
+    user_bank: bool,
 ) -> String {
     let mut out = String::new();
     let count = regs.count_ones();
+    if user_bank && load && regs & (1 << 15) != 0 {
+        writeln!(out, "    cpu.validate_exception_return()?;").unwrap();
+    }
     let first = regs.trailing_zeros() as u8;
     writeln!(out, "    let base = cpu.reg({rn});").unwrap();
     writeln!(
@@ -207,16 +213,23 @@ fn block_body(
                     "    let value_{reg} = bus.read32(start.wrapping_add(0x{offset:X}u32))?;"
                 )
                 .unwrap();
-                writeln!(out, "    cpu.set_reg({reg}, value_{reg});").unwrap();
+                if user_bank && regs & (1 << 15) == 0 {
+                    writeln!(out, "    cpu.set_user_reg({reg}, value_{reg});").unwrap();
+                } else {
+                    writeln!(out, "    cpu.set_reg({reg}, value_{reg});").unwrap();
+                }
             }
             index += 1;
         }
-        if regs & (1 << 15) != 0 {
-            // ARMv4 LDM PC force-aligns and keeps ARM state.
-            writeln!(out, "    cpu.set_reg(15, pc_value & !3);").unwrap();
-        }
         if writeback && regs & (1 << rn) == 0 {
             writeln!(out, "    cpu.set_reg({rn}, new_base);").unwrap();
+        }
+        if regs & (1 << 15) != 0 {
+            if user_bank {
+                writeln!(out, "    cpu.return_from_exception(pc_value)?;").unwrap();
+            } else {
+                writeln!(out, "    cpu.set_reg(15, pc_value & !3);").unwrap();
+            }
         }
     } else {
         for reg in 0..16u8 {
@@ -229,7 +242,11 @@ fn block_body(
             } else if reg == rn && writeback && rn != first {
                 "new_base".to_string()
             } else {
-                format!("cpu.reg({reg})")
+                if user_bank {
+                    format!("cpu.user_reg({reg})")
+                } else {
+                    format!("cpu.reg({reg})")
+                }
             };
             writeln!(
                 out,
