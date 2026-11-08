@@ -16,13 +16,16 @@ cargo run --quiet --offline --manifest-path Cargo.toml --bin quality-counter -- 
   oversized --root "$ROOT" --max 500 --format items --hard
 
 info "Rune app cargo fmt --check"
-cargo fmt --manifest-path apps/rune/Cargo.toml --check
+cargo fmt --manifest-path apps/rune/Cargo.toml --all --check
 
 info "Rune app Clippy (all targets, warnings denied)"
 cargo clippy --locked --manifest-path apps/rune/Cargo.toml --all-targets -- -D warnings
 
 info "Rune app unit tests"
 cargo test --locked --manifest-path apps/rune/Cargo.toml
+
+info "Rune isolated iOS adapter bounded-staging tests"
+cargo test --locked --manifest-path apps/rune/ios-platform/Cargo.toml
 
 info "Rune app native host build"
 cargo build --locked --manifest-path apps/rune/Cargo.toml

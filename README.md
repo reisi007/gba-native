@@ -4,9 +4,10 @@
 not a playable emulator. It does not boot a BIOS; with the explicit synthetic
 device/HLE opt-ins it can reach an observed retail title screen, but it makes no
 general retail-game or gameplay compatibility claim and has no
-vendor upscaling integration. Optional, separate desktop and browser packages
-present the static synthetic bitmap through Pixels/WGPU and WASM/WebGPU/WebGL2;
-neither is a playable or per-ROM frontend. There is no successful REA
+vendor upscaling integration. The canonical synthetic desktop, browser and iOS
+frontend is the shared Rune application in `apps/rune`; the former Pixels/WGPU
+desktop and WebGPU/WebGL2 browser packages remain explicit behavioral references.
+Neither frontend is playable or per-ROM. There is no successful REA
 native-analysis evidence.
 It is **not** a certified separate-team legal clean-room project.
 
@@ -28,10 +29,11 @@ gba-native (root)        CLI, safe output/ writes, compatibility facade, quality
 
 The root facade re-exports the core modules and `gba_native_aot::aot`, so the
 historical `gba_native::{bus, cpu, ..., aot}` paths keep working. The AOT crate
-depends on the core package under the `gba_native` alias; the optional
-`apps/desktop` and `apps/web` packages each depend directly on the core and
-remain outside this workspace. The browser package has a separate pinned
-toolchain and dependency lock. The default third-party dependency set is empty —
+depends on the core package under the `gba_native` alias; the canonical
+`apps/rune` package, Android app and retained `apps/desktop`/`apps/web`
+references each depend directly on the core and remain outside this workspace.
+Rune and browser references have separate pinned tooling and dependency locks.
+The default third-party dependency set is empty —
 the root workspace lockfile contains only these three internal path packages.
 
 ## Status
@@ -61,18 +63,19 @@ the root workspace lockfile contains only these three internal path packages.
 | Performance statistics | Wall time, guest instructions/second and a real-time factor against the documented 16.777216 MHz clock; one retired instruction is not one hardware cycle |
 | Audio | Dependency-free PSG mixer plus timer-clocked Direct Sound FIFO A/B; stateful `AudioEngine` advanced once per guest instruction, so a register write changes the next sample; volume/mute, WAV sink; `run --audio-out [--play]` (installed system player, fail-closed) and AOT harness `--audio`; wasm `run_rom_audio` PCM; browser WebAudio test tone and PCM playback helper; full PSG sweep/envelope timing tracked in #29 |
 | Synthetic input-tester ROM | Committed 4 KiB Mode 3 fixture with ten KEYINPUT bands, committed input script and expected PPM; native AOT + Playwright visual gate (`scripts/input-tester.sh`) |
-| Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; shared saves page in the desktop (`F2`) and Android (settings) apps over the synthetic digest, and the same slot library in the browser panel; CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`; browser saves panel with import/export/use and localStorage; AOT harness `--save`; synthetic save-tester ROM and Linux CI gate |
-| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; MSVC/iOS are not claimed |
+| Savegames (host library) | Multiple named slots per ROM SHA-256 with a default slot; Rune desktop/iOS/browser saves pages over the synthetic digest, Android settings page, CLI `run --save-dir/--save-slot` and `save list/import/export/use/default/delete`, browser localStorage, AOT harness `--save`, and synthetic save-tester ROM/Linux CI gate |
+| Cross-target builds | `scripts/cross.sh` builds the synthetic artifact for macOS arm64/x86_64, Linux x86_64 (zig), Windows x86_64 GNU (mingw-w64) and wasm32; it does not claim MSVC or iOS support (Rune iOS uses its separate Apple-target gate) |
 | Android native compilation | `scripts/android.sh` cross-builds the default three-package workspace for `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android` with an installed NDK and verifies each artifact's ELF machine and `/system/bin/linker*` interpreter |
 | Android app (`apps/android`) | Signed debug APK with a framework `NativeActivity` and no Java code; the Rust library composes the shared shell, fullscreen frame and settings page and saves page, routes touch controls, persists settings, manages named save slots including import/export and writes the shared tone artifact, and plays it through `android.media.MediaPlayer`; arm64-v8a, armeabi-v7a and x86_64; host unit tests and `scripts/android-app.sh` run in CI; synthetic only, no ROM/BIOS payload |
-| Shared frontend model (`crates/core/src/frontend`) | Validated RGBA pipeline, synthetic demo snapshot, integer letterbox viewport, shell/fullscreen/settings screens, settings persistence and tone artifact shared by the desktop and Android apps, so those targets cannot drift |
-| Optional synthetic GPU window (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 package; windowed GBA shell, fullscreen, touch/pointer buttons, F1 settings page and persisted bindings; static synthetic bitmap only, no ROM/audio/save |
-| Optional synthetic browser GPU foundation (`apps/web`) | Separate WASM package with WebGPU and WebGL2; windowed GBA shell, touch buttons, key bindings, Fullscreen API, localStorage settings, a synthetic save-image library (import/export/use/default) and a `playPcm` WebAudio helper for the AOT module's PCM; static synthetic demo only; no ROM/AOT/guest-ROM execution |
-| Cross-target feature parity | `crates/core/src/frontend/features.rs` is the canonical feature contract; the desktop and Android tests and the browser Node test fail if a target omits a feature. All three expose the same set: demo frame, touch controls, fullscreen, persisted settings, audio artifact (WAV), audio playback (platform player on desktop, MediaPlayer on Android, WebAudio in the browser), named save slots with a default and import/export. Rendering, viewport, screens, settings, saves and tone are the same core code for the two native apps |
+| Shared frontend model (`crates/core/src/frontend`) | Validated RGBA pipeline, synthetic demo snapshot, integer letterbox viewport, shell/fullscreen/settings screens, settings persistence and tone artifact shared by Rune and Android |
+| Canonical Rune frontend (`apps/rune`) | Shared Rune UI for Linux, macOS, Windows, browser/WASM and iOS; synthetic snapshot, controls, settings, host-side save slots and test-tone adapters. No ROM/gameplay or guest audio/save path. See `apps/rune/README.md` for verification limits. |
+| Legacy desktop reference (`apps/desktop`) | Separate Pixels 0.17/Winit 0.30/WGPU 29 implementation retained with its tests and `scripts/frontend-reference.sh` gate for behavioral regression checks; not the canonical app. |
+| Legacy browser reference (`apps/web`) | Separate WASM WebGPU/WebGL2 implementation retained with its tests and `scripts/web-reference.sh` gate; WebGL2 belongs to this reference only and is not enabled in Rune. |
+| Cross-target feature parity | `crates/core/src/frontend/features.rs` remains the shared contract. Rune host/browser targets expose its supported features and iOS exposes its tested subset; Android keeps its existing native adapter. The legacy desktop/browser tests remain behavioral references. |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
 | REA Evidence | **None obtained** |
-| Android/iOS packaging | Later work |
+| Platform verification | Rune UI covers Rune-supported desktop, browser/WASM and iOS; Android remains on its existing native UI. The iOS simulator workflow and independent cutover review/CI remain open gates; no physical iOS-device or GPU claim is made. |
 
 ## Commands
 
@@ -90,9 +93,9 @@ cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>
 cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
 
-`./scripts/save-tester.sh` is also part of the Linux CI job; the browser save
-panel is covered by `apps/web/tests/js/saves.test.mjs` and the Playwright E2E
-suite.
+`./scripts/save-tester.sh` is also part of the Linux CI job. Rune save behavior
+is covered by its host/browser tests and Playwright checks; the legacy browser
+reference has separate coverage in `apps/web/tests/js/saves.test.mjs`.
 
 - `run --input FILE` replays `at:KEYS:hold` instruction-indexed input events
   (for example `0:A+B+Start:20000000`). The `run` report always includes
@@ -222,32 +225,46 @@ suite.
 - Scaling is integer nearest-neighbor only, with exact 3:2 centering and black
   letterboxing. Vendor backends are rejected with a clear error.
 
-The optional desktop frontend is a separate package (`apps/desktop/`, its own
-Cargo workspace and lockfile). It depends directly on `crates/core`
-(`gba-native-core`, aliased to the `gba_native` source namespace), never on the
-host-side AOT crate or the root facade, and is not part of the default std-only
-core graph:
+The canonical desktop, browser and iOS UI is the shared Rune package
+(`apps/rune/`, its own Cargo workspace and lockfile). It depends directly on
+`crates/core` (`gba-native-core`), not on the host-side AOT crate or root facade,
+and remains outside the default std-only core graph. The previous desktop and
+browser packages are retained as behavioral references with separate gates:
 
 ```text
-./scripts/frontend.sh   # optional: hard line gate, fmt, clippy, unit tests, build, --help
+./scripts/frontend.sh             # canonical Rune host gate (headless)
+./scripts/frontend-reference.sh   # retained Pixels/Winit desktop reference gate
 ```
 
-The gate never opens a GPU window. GUI smoke and the exact artifact rules are in
+Launch the native Rune UI with:
+
+```text
+CARGO_TARGET_DIR=target/rune cargo run --locked --manifest-path apps/rune/Cargo.toml
+```
+
+The gate never opens a GPU window. Rune's Linux software
+render and iOS simulator launch gates are in `.github/workflows/rune.yml`; see
+[`apps/rune/README.md`](apps/rune/README.md) for evidence limits. The legacy
+desktop implementation and its exact artifact rules are in
 [`docs/gpu-frontend.md`](docs/gpu-frontend.md).
 
-The browser foundation is a separate package and gate:
+Rune is also the canonical browser application. Provision tools/Chromium and
+run its browser gate; the former `apps/web` package remains available as a
+separate reference gate:
 
 ```text
-./scripts/bootstrap-web-tools.sh  # pinned Node/wasm-bindgen/npm tooling in target/
-./scripts/web.sh                  # full browser gate (requires wasm32 and Chromium)
-./scripts/web.sh --build-only     # partial build checks without browser E2E
-./scripts/web-screenshots.sh      # optional UI-review captures; not a gate
+./scripts/web-browsers-install.sh   # pinned browser tools and Chromium
+./scripts/rune-web-serve.sh          # build and serve the canonical Rune browser app
+./scripts/web.sh --ci               # canonical Rune WASM + Chromium interaction gate
+./scripts/web.sh --build-only       # partial Rune build/adapter checks; skips runtime E2E
+./scripts/web-reference.sh --ci     # retained apps/web WebGPU/WebGL2 reference gate
 ```
 
-It runs the synthetic demo through the std-only core and presents one static
-image using WebGPU or WebGL2. It is not a per-ROM browser application. Build
-details, observed browser results, explicit gaps and the pending visual review
-are in [`docs/web-frontend.md`](docs/web-frontend.md).
+Rune runs the synthetic demo through the std-only core. Its default browser
+backend is WebGPU; Rune WebGL is not enabled. The legacy `apps/web` reference
+still exercises its separate WebGPU/WebGL2 implementation. Neither is a per-ROM
+browser application. See [`docs/web-frontend.md`](docs/web-frontend.md) for the
+legacy reference's architecture and recorded behavior.
 
 The separate `aot build --target wasm32-unknown-unknown` path produces a
 ROM-bound WASM *execution module* and JS glue for a caller that already has a
@@ -261,8 +278,10 @@ wasm-bindgen CLI from `./scripts/bootstrap-web-tools.sh` and the installed
 ```text
 ./scripts/short.sh     # fast: hard 500-line gate, Ratchet fast, fmt, clippy, fast tests
 ./scripts/full.sh      # short + debug/release tests, demo, native proof, Ratchet slow
-./scripts/frontend.sh  # optional desktop package: no Ratchet, no live GPU window
-./scripts/web.sh --ci  # optional browser package and fail-closed Chromium E2E
+./scripts/frontend.sh  # canonical Rune host gate: no live GPU window
+./scripts/web.sh --ci  # canonical Rune browser gate and Chromium interactions
+./scripts/frontend-reference.sh  # legacy desktop behavioral reference
+./scripts/web-reference.sh --ci # legacy browser WebGPU/WebGL2 reference
 ./scripts/save-tester.sh  # native save persistence (fresh/loaded, CLI slots)
 ./scripts/play-tester.sh  # native playback through a fake player on PATH
 ./scripts/android.sh   # Android NDK cross-build for all three ABIs
@@ -297,7 +316,8 @@ The underlying gates are `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test` and
 `cargo test --release`. The root workspace lists the root package,
 `crates/core` and `crates/aot` in `default-members`, so those bare commands
-select all three; `apps/desktop` and `apps/web` are explicitly excluded. Ratchet is pinned to
+select all three; `apps/rune`, `apps/desktop` and `apps/web` are separate
+packages outside that workspace. Ratchet is pinned to
 release `v0.6.3` of `all-the-rest/ratchet-cli` (the tag is lightweight and
 points at commit `4cace52ac7731985130292ead6ae81d44b4d72d6`); CI installs it with the official
 action pinned to the commit. Locally the scripts use `RATCHET_BIN` or
@@ -314,21 +334,21 @@ any working directory. The pinned source can be built from the `v0.6.3` tag of
 
 Every maintained Rust source/test file is limited to 500 physical lines
 (blank and comment lines included, a trailing newline adds no phantom line).
-That population includes `apps/desktop/src`, `apps/web/src` and frontend tests. The
-root-level `target/`, `output/` and `.git` directories hold generated
+That population includes `apps/rune/src`, both legacy frontend source trees and
+their tests. The root-level `target/`, `output/` and `.git` directories hold generated
 build/runtime or version-control artifacts and are not part of the maintained
 source population. The exemption is positional: a nested directory with one of
 those names, such as `src/output/` or `apps/desktop/target/`, is scanned like
-any other source directory. `scripts/short.sh`, `scripts/frontend.sh`,
-`scripts/web.sh` and CI run the hard limit directly, so the zero-debt Ratchet baseline cannot be edited to
-dilute it.
+any other source directory. `scripts/short.sh`, `scripts/frontend.sh`, the
+explicit legacy reference gates and CI run the hard limit directly, so the
+zero-debt Ratchet baseline cannot be edited to dilute it.
 
 The frontend gates override `CARGO_TARGET_DIR` to root-level ignored locations
-before frontend Cargo commands. The desktop gate uses `target/frontend`; the web
-gate uses `target/web` and keeps Node/npm/wasm-bindgen tools under `target/tools`
-and `target/web-tools`. Do not run frontend Cargo directly inside either app
-without a root-level target: nested generated files are scanned as maintained
-sources. `apps/web/node_modules` is not created.
+before Cargo commands. Rune uses `target/rune`; legacy desktop and browser
+reference gates use `target/frontend` and `target/web`, respectively. Pinned
+Node/npm/wasm-bindgen tools stay under `target/tools` and `target/web-tools`.
+Do not run Cargo inside an app without a root-level target: nested generated
+files are scanned as maintained sources. `apps/web/node_modules` is not created.
 
 The native integration test requires only the installed Cargo/rustc. It creates
 a fresh generated crate in an owned temporary directory, uses `--offline` and a
@@ -359,7 +379,9 @@ honest gaps by area:
   [#3](https://github.com/reisi007/gba-native/issues/3),
   [#7](https://github.com/reisi007/gba-native/issues/7),
   [#8](https://github.com/reisi007/gba-native/issues/8)
-- Desktop/browser frontend, standalone builds, Android/iOS —
+- Rune frontend cutover/platform verification —
+  [#30](https://github.com/reisi007/gba-native/issues/30)
+- Native GPU frontend, standalone builds, Android/iOS packaging and per-ROM WebAssembly —
   [#9](https://github.com/reisi007/gba-native/issues/9),
   [#10](https://github.com/reisi007/gba-native/issues/10),
   [#11](https://github.com/reisi007/gba-native/issues/11),

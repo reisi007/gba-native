@@ -23,9 +23,9 @@ and CI pass, with the issue reference in the change. Lasting decisions live in
 The workspace has three internal packages: the root `gba-native` CLI plus
 compatibility facade, `crates/core` (`gba-native-core`, std-only runtime) and
 `crates/aot` (`gba-native-aot`, host-side AOT tooling). The root
-`[workspace]` lists all three in `default-members`; `apps/desktop` and `apps/web`
-are excluded. A bare `cargo test` therefore runs core, AOT and root tests, while a bare
-`cargo run` uses the root package's `default-run = "gba-native"` binary.
+`[workspace]` lists all three in `default-members`; `apps/android`, `apps/rune`,
+`apps/desktop` and `apps/web` are excluded. Bare `cargo test` runs core, AOT and
+root tests; `cargo run` uses the root package's `default-run = "gba-native"` binary.
 Per-package loops are `cargo test -p gba-native-core`, `cargo test -p
 gba-native-aot` and `cargo test -p gba-native`; the workspace lockfile is shared.
 
@@ -36,31 +36,31 @@ The documented entry points are:
 ./scripts/full.sh    # short + debug/release tests, demo, native proof, Ratchet slow
 ```
 
-The optional synthetic desktop GPU frontend is a separate package and gate:
+Rune is the canonical synthetic UI for desktop, browser and iOS; Android retains its existing frontend. Canonical gates are:
 
 ```text
-./scripts/frontend.sh
+./scripts/frontend.sh            # Rune native host gate; headless, no live GPU claim
+./scripts/web.sh --ci            # Rune browser/WASM and Chromium interactions
+./scripts/rune-ios-simulator.sh  # macOS-only package/install/launch smoke
 ```
 
-It is not part of `short.sh`/`full.sh`, does not require Ratchet and never opens
-a GPU window. It overrides `CARGO_TARGET_DIR` to the root-level ignored
-`target/frontend` before any frontend Cargo command. Never run frontend Cargo
-from inside `apps/desktop/` without a root-level target: generated
-`apps/desktop/target/*.rs` files would enter the maintained-source scan.
+Rune is outside `short.sh`/`full.sh`, needs no Ratchet, and its host gate never
+opens a GPU window. It overrides `CARGO_TARGET_DIR` to root-level `target/rune`.
+The former desktop/browser packages remain behavioral references checked by
+`scripts/frontend-reference.sh` and `scripts/web-reference.sh`; do not run Cargo
+inside those apps without a root-level target because generated `target/*.rs`
+files are scanned.
 
-The synthetic browser GPU foundation is also a separate package and gate:
+The browser gate uses pinned tools/Chromium from `scripts/web-browsers-install.sh`; `--build-only` is partial evidence:
 
 ```text
-./scripts/web.sh          # full browser gate, including WASM and functional E2E
-./scripts/web.sh --ci     # same fail-closed browser checks with CI GPU flags
-./scripts/web.sh --build-only  # partial gate, skips browser E2E
+./scripts/web.sh --build-only  # Rune build/adapter checks; skips Chromium runtime checks
 ```
 
-`apps/web` has its own Cargo/npm locks, depends directly on `crates/core`, and is
-not a ROM, input, audio or save surface. The gate uses repository-owned pinned
-tools under root `target/`; do not install global tools or run Cargo inside
-`apps/web/` without a root-level `CARGO_TARGET_DIR`. It is independent of
-`short.sh`/`full.sh` and the default three-package workspace.
+The legacy `apps/web` reference keeps its Cargo/npm locks and WebGPU/WebGL2
+implementation. Rune/reference gates use pinned tools under root `target/`; do
+not install global tools. These gates are independent of the default workspace
+and `short.sh`/`full.sh`.
 
 CI runs the same two scripts. A separate `macos-arm-native-aot` job on
 `macos-latest` asserts an `aarch64-apple-darwin` host and runs the synthetic
@@ -71,9 +71,9 @@ CI uses repository-generated synthetic fixtures; the separately documented
 hardware-test ROMs under `tests/roms/gba-tests/` are local-only, read-only test
 inputs and must never be fetched or executed by CI, or included in CI jobs or
 artifacts. Their optional local manual use is documented with the ROMs.
-The optional desktop and browser workflows run
-`scripts/frontend.sh` and `scripts/web.sh --ci` separately. The underlying root
-gates remain:
+The Rune workflow runs `scripts/frontend.sh`, `scripts/web.sh` and the iOS
+simulator smoke; legacy workflows run `scripts/frontend-reference.sh` and
+`scripts/web-reference.sh --ci`. Root gates remain:
 
 ```text
 cargo fmt --check
@@ -181,10 +181,10 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   access, commercial ROMs, BIOS files or external crates. The MIT-licensed
   hardware-test ROMs in `tests/roms/gba-tests/` are optional local black-box
   tests, not part of `cargo test` or CI. A budget stop is not a ROM pass: only
-  the ROM's own visible PASS result counts. The optional `apps/desktop` and
-  `apps/web` packages have their own locks and are excluded from the default
-  graph; browser registry dependencies and Node/npm tools stay outside the root
-  lock and root build.
+  the ROM's own visible PASS result counts. Canonical `apps/rune` and the
+  retained `apps/desktop`/`apps/web` references have separate locks and are
+  excluded from the default graph; browser registry dependencies and Node/npm
+  tools stay outside the root lock and root build.
 - Static AOT discovery is restricted to immutable ROM bytes. The explicit
   trace-seeded mode (`aot build --trace`) may emit sealed one-instruction
   work-RAM blocks only when the generated dispatcher re-reads the live encoding

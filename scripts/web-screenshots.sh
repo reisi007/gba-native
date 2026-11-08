@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# UI-review screenshot capture for the browser foundation.
+# UI-review screenshot capture for the legacy apps/web reference.
 #
 # Capture only: this is NOT a functional gate and never runs in CI. It builds
 # the current bundle, serves it on loopback, writes PNGs/JSON into a uniquely
@@ -19,7 +19,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 require_cargo
 cd "$ROOT"
 info "build current browser bundle (build-only gate)"
-"$ROOT/scripts/web.sh" --build-only
+"$ROOT/scripts/web-reference.sh" --build-only
 
 DIST="$ROOT/output/web-dist"
 NPM="$ROOT/target/web-tools/npm"
@@ -28,7 +28,7 @@ NODE_BIN="$ROOT/target/tools/node-pinned/bin/node"
 mkdir -p "$ROOT/output"
 OUT=$(mktemp -d "$ROOT/output/web-review-$(date +%Y%m%d-%H%M%S)-XXXXXX")
 
-[ -x "$SERVER" ] || fail "the static server binary is missing; rerun scripts/web.sh --build-only"
+[ -x "$SERVER" ] || fail "the static server binary is missing; rerun scripts/web-reference.sh --build-only"
 [ -x "$NODE_BIN" ] || fail "the pinned Node runtime is missing; run ./scripts/bootstrap-web-tools.sh"
 TMP=$(mktemp -d "$ROOT/output/web-review-server.XXXXXX")
 SERVER_PID=""

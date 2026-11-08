@@ -16,10 +16,12 @@ native 240x160 image. PPM output needs no platform graphics dependency. This
 establishes a tested baseline only: **it is neither FSR nor DLSS nor AI
 upscaling**.
 
-The optional, separate `apps/desktop` package adds a Winit/Pixels/WGPU window
-for the same static synthetic snapshot, with pixel-perfect integer scaling and
-a black letterbox. It is not integrated into the std-only core, accepts no
-cartridge and is not a vendor backend. See `docs/gpu-frontend.md`.
+The canonical `apps/rune` UI presents the same static synthetic snapshot on
+Rune-supported desktop, browser/WASM and iOS targets. The former, separate
+`apps/desktop` Winit/Pixels/WGPU package remains a behavioral reference with
+pixel-perfect integer scaling and a black letterbox. Neither is integrated into
+the std-only core, accepts a cartridge or implements a vendor backend. See
+`apps/rune/README.md` and `docs/gpu-frontend.md`.
 
 | Backend name | CLI value | Status |
 | --- | --- | --- |
@@ -32,8 +34,8 @@ cartridge and is not a vendor backend. See `docs/gpu-frontend.md`.
 Selecting any unimplemented vendor backend returns `UnsupportedBackend`. It is
 never silently replaced by nearest-neighbor. No GPU detection claim is made.
 The default core build has no graphics device, shader, model, weights or vendor
-SDK. The optional desktop package creates a Pixels/WGPU surface only to present
-the synthetic bitmap; it integrates no vendor backend.
+SDK. Rune and the retained desktop reference present the synthetic bitmap only;
+neither integrates a vendor backend.
 
 ## Intended separation
 

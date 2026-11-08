@@ -73,10 +73,20 @@ if [ "$STATE" != Booted ]; then
 fi
 xcrun simctl bootstatus "$UDID" -b
 xcrun simctl install "$UDID" "$APP"
-xcrun simctl launch "$UDID" org.gbanative.rune
+if ! LAUNCH_OUTPUT=$(xcrun simctl launch "$UDID" org.gbanative.rune 2>&1); then
+  fail "simulator failed to launch Rune: $LAUNCH_OUTPUT"
+fi
+printf '%s\n' "$LAUNCH_OUTPUT"
+APP_PID=$(printf '%s\n' "$LAUNCH_OUTPUT" | sed -nE 's/.*: ([0-9]+)$/\1/p' | tail -n 1)
+[ -n "$APP_PID" ] || fail "simctl launch did not report Rune's process ID"
 sleep 5
+if ! PROCESS_INFO=$(xcrun simctl spawn "$UDID" launchctl procinfo "$APP_PID" 2>&1); then
+  fail "Rune simulator process $APP_PID exited before screenshot: $PROCESS_INFO"
+fi
+[ -n "$PROCESS_INFO" ] || fail "simulator returned no process information for Rune PID $APP_PID"
+info "confirmed Rune simulator process $APP_PID is still alive"
 xcrun simctl io "$UDID" screenshot "$OUT/launch.png"
 [ -s "$OUT/launch.png" ] || fail "simulator launch screenshot is missing or empty"
 
 info "iOS simulator app launched; screenshot: ${OUT#"$ROOT"/}"
-info "this smoke gate does not verify physical-device signing, audible output, document picking or screen-reader parity"
+info "this smoke gate does not verify physical-device signing, audible output, document-picker interaction or screen-reader parity"

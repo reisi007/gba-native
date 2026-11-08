@@ -31,13 +31,14 @@ not a roadmap promise and not a retail-game compatibility statement.
   entry, a saved handler frame, SYSTEM-mode service execution and architectural
   SWI return. Other exception classes, halfword-multiply instructions and BIOS
   boot remain absent.
-- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. Separate optional
-  `apps/desktop` and `apps/web` packages present the same static synthetic
-  snapshot through native Winit/Pixels/WGPU and browser WebGPU/WebGL2. They each
-  depend directly on the std-only `gba-native-core` package, accept no cartridge
-  or retail save data, are not playable/per-ROM frontends, and stay outside the
-  default CLI and its headless PPM output. The browser panel manages synthetic
-  raw save images locally; it does not execute guest saves.
+- No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. `apps/rune` is the
+  canonical shared synthetic UI for desktop, browser/WASM and iOS; Android stays
+  on its existing adapter. The former `apps/desktop` and `apps/web` packages are
+  retained behavioral references for native Winit/Pixels/WGPU and browser
+  WebGPU/WebGL2. All are separate from the default CLI, depend directly on the
+  std-only `gba-native-core`, accept no cartridge and are not playable/per-ROM
+  frontends. Host-side synthetic save images are UI demonstrations, not guest
+  save emulation or retail save compatibility. Rune WebGL is disabled.
 - `aot build` compiles a headless release executable for a locally supported
   Cargo target from an externally bound ROM. It is an experimental artifact, not
   a playable game, GUI frontend, save-aware application, final app or browser
@@ -331,11 +332,13 @@ Implemented regions and widths:
   sampling guarantee or timing claim. The std-only `input` module adds the host
   button/key-binding model, an 800x600 landscape and a portrait normalised touch
   layout, the persisted settings document and instruction-indexed input
-  scripts. The synthetic desktop and browser frontends use that model for
-  keyboard/touch buttons, fullscreen and a settings page; they do not accept a
-  cartridge, retail save data or guest audio stream. The browser panel manages
-  synthetic raw save images locally, and the frontend input path is not a
-  retail-game or playability claim. BG0 scroll reads are
+   scripts. Rune and Android use that model for keyboard/touch buttons,
+   fullscreen and settings; the retained desktop/browser references keep their
+   earlier implementations. These are synthetic-only UIs: they do not accept a
+   cartridge, retail save data or guest audio stream. Rune accepts only its
+   documented synthetic save fixture on import; the legacy browser panel manages
+   synthetic raw images locally. None is a retail-game or playability claim.
+   BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
   A 32-bit I/O access is composed from two halfword accesses, as on hardware.
@@ -828,15 +831,14 @@ scanline PPU, frame renderer or timing claim.
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output
 dimensions 1..=4096 and at least 240x160. FSR1, temporal FSR, ML-FSR and DLSS
-names return `UnsupportedBackend`. The optional, separate `apps/desktop` package
-presents the same static synthetic snapshot through Pixels/WGPU with
-pixel-perfect integer scaling and a black letterbox; it is not part of the
-std-only core or this PPM backend and is not a vendor upscaler. Its exact
-boundary is in `docs/gpu-frontend.md`. The optional, separate `apps/web` package
-executes the synthetic demo through WASM and presents its static snapshot through
-browser WebGPU or WebGL2; it is not per-ROM execution, not part of the root
-dependency graph, and not a vendor upscaler (`docs/web-frontend.md`). A separate
-`aot build --target wasm32-unknown-unknown` branch produces a ROM-bound WASM
+names return `UnsupportedBackend`. Canonical `apps/rune` presents the same
+  static synthetic snapshot on desktop, browser/WASM and iOS; Rune WebGL is not
+  enabled. The former `apps/desktop` and `apps/web` packages remain behavioral
+  references for Pixels/WGPU and browser WebGPU/WebGL2, respectively. These
+  packages are outside the root graph and are not vendor upscalers or per-ROM
+  execution (`apps/rune/README.md`, `docs/gpu-frontend.md`,
+  `docs/web-frontend.md`). A separate `aot build --target wasm32-unknown-unknown`
+branch produces a ROM-bound WASM
 execution module callable from a browser, but it ships no HTML/JS application,
 renderer, input or persistence and is not part of `apps/web`.
 

@@ -1,9 +1,9 @@
 #![cfg(unix)]
-//! Contracts of the optional `scripts/frontend.sh` gate.
+//! Contracts of the retained `scripts/frontend-reference.sh` gate.
 //!
 //! These tests use a fake `cargo`/`rustc` and a fake Ratchet path so the root
 //! test suite never fetches or builds the GPU frontend dependencies. The real
-//! Cargo commands are exercised by running `scripts/frontend.sh` itself; this
+//! Cargo commands are exercised by running `scripts/frontend-reference.sh` itself; this
 //! file pins the failure propagation, root resolution and target-directory
 //! contract that a fake toolchain can prove without touching a GPU.
 
@@ -134,7 +134,7 @@ fn frontend_gate_resolves_root_and_owns_its_target_from_any_cwd() {
     fs::create_dir_all(&elsewhere).expect("create unrelated cwd");
 
     let output = Command::new(host_program("bash"))
-        .arg(repo_root().join("scripts/frontend.sh"))
+        .arg(repo_root().join("scripts/frontend-reference.sh"))
         .current_dir(&elsewhere)
         // An inherited target directory must never win: a plain cargo run in
         // apps/desktop would generate *.rs below apps/desktop/target, which the
@@ -176,7 +176,7 @@ fn frontend_gate_resolves_root_and_owns_its_target_from_any_cwd() {
     ] {
         assert!(recorded.contains(step), "missing {step} in {recorded}");
     }
-    assert!(stderr(&output).contains("optional frontend gate passed"));
+    assert!(stderr(&output).contains("legacy desktop reference gate passed"));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn a_failing_frontend_test_command_stops_the_gate() {
     let log_path = temp.path().join("cargo.log");
 
     let output = Command::new(host_program("bash"))
-        .arg(repo_root().join("scripts/frontend.sh"))
+        .arg(repo_root().join("scripts/frontend-reference.sh"))
         .current_dir(repo_root())
         .env("PATH", interesting_path(&bin))
         .env("FRONTEND_TEST_LOG", &log_path)
@@ -238,7 +238,7 @@ fn frontend_gate_fails_closed_without_cargo() {
     );
 
     let output = Command::new(host_program("bash"))
-        .arg(repo_root().join("scripts/frontend.sh"))
+        .arg(repo_root().join("scripts/frontend-reference.sh"))
         .current_dir(temp.path())
         .env("PATH", &bin)
         .env("HOME", temp.path())
@@ -266,7 +266,7 @@ fn frontend_gate_fails_closed_without_cargo() {
 
 #[test]
 fn frontend_gate_script_is_present_and_executable() {
-    let path = repo_root().join("scripts/frontend.sh");
+    let path = repo_root().join("scripts/frontend-reference.sh");
     let metadata = fs::metadata(&path).expect("frontend gate exists");
     assert!(metadata.is_file());
     assert_ne!(

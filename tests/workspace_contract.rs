@@ -128,12 +128,20 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "root package ID is not a default member: {root_id}"
     );
     assert!(
+        !defaults.contains("apps/android"),
+        "the default workspace must exclude apps/android"
+    );
+    assert!(
         !defaults.contains("apps/desktop"),
         "the default workspace must exclude apps/desktop"
     );
     assert!(
         !defaults.contains("apps/web"),
         "the default workspace must exclude apps/web"
+    );
+    assert!(
+        !defaults.contains("apps/rune"),
+        "the default workspace must exclude apps/rune"
     );
 
     let lock = std::fs::read_to_string(root.join("Cargo.lock")).expect("root lockfile");
@@ -171,8 +179,10 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "wgpu",
         "wasm-bindgen",
         "web-sys",
+        "apps/android",
         "apps/desktop",
         "apps/web",
+        "apps/rune",
     ] {
         assert!(
             !tree.contains(frontend),
@@ -189,7 +199,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 605, "full workspace test inventory changed");
+    assert_eq!(total, 606, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -277,7 +287,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 174);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 175);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 31);
     baseline += assert_target_count(
         &root,
@@ -288,7 +298,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         9,
     );
-    assert_eq!(baseline, 597, "selected package test inventory changed");
+    assert_eq!(baseline, 598, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,
@@ -459,42 +469,4 @@ fn assert_target_count(
         "test family {selector} {name} changed from {expected} to {count}"
     );
     count
-}
-#[test]
-fn frontend_manifests_and_locks_are_isolated_from_root_graph() {
-    let root = repo_root();
-    let manifest =
-        std::fs::read_to_string(root.join("apps/desktop/Cargo.toml")).expect("desktop manifest");
-    assert!(
-        manifest.contains(
-            "gba-native = { package = \"gba-native-core\", path = \"../../crates/core\" }"
-        )
-    );
-    assert!(!manifest.contains("gba-native-aot"));
-
-    let lock = std::fs::read_to_string(root.join("apps/desktop/Cargo.lock")).expect("desktop lock");
-    assert!(lock.contains("name = \"gba-native-core\""));
-    assert!(!lock.contains("name = \"gba-native-aot\""));
-    assert!(
-        !lock.contains("name = \"gba-native\"\n"),
-        "the frontend must not depend on the root compatibility facade"
-    );
-    assert!(lock.contains("name = \"pixels\"\nversion = \"0.17.2\""));
-    assert!(lock.contains("name = \"winit\"\nversion = \"0.30.13\""));
-    assert!(lock.contains("name = \"wgpu\"\nversion = \"29.0.4\""));
-    let web_manifest =
-        std::fs::read_to_string(root.join("apps/web/Cargo.toml")).expect("browser manifest");
-    assert!(web_manifest.contains("name = \"gba-native-web\""));
-    assert!(
-        web_manifest.contains(
-            "gba-native = { package = \"gba-native-core\", path = \"../../crates/core\" }"
-        )
-    );
-    assert!(!web_manifest.contains("gba-native-aot"));
-    assert!(!web_manifest.contains("package = \"gba-native\""));
-    let web_lock = std::fs::read_to_string(root.join("apps/web/Cargo.lock")).expect("browser lock");
-    assert!(web_lock.contains("name = \"gba-native-core\""));
-    assert!(web_lock.contains("name = \"gba-native-web\""));
-    assert!(!web_lock.contains("name = \"gba-native-aot\"\n"));
-    assert!(!web_lock.contains("name = \"gba-native\"\n"));
 }

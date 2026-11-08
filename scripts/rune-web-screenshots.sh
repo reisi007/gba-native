@@ -36,7 +36,7 @@ DIST=$(sed -n 's/^Rune browser bundle: //p' "$TMP/build.log" | tail -n 1)
   exit 1
 }
 
-"$NODE" "$ROOT/apps/rune/tests/serve-static.mjs" "$DIST" >"$TMP/server.log" 2>&1 &
+"$NODE" "$ROOT/apps/rune/tools/serve-static.mjs" "$DIST" >"$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 100); do
   grep -q '^listening on ' "$TMP/server.log" && break

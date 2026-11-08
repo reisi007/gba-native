@@ -47,16 +47,18 @@ packages: the root `gba-native` CLI/compatibility facade, `crates/core`
 (`gba-native-core`) and `crates/aot` (`gba-native-aot`). The root package remains
 a package (not a virtual workspace) because `CARGO_BIN_EXE_*`, manifest
 resolution and `default-run` depend on it. All three are in `default-members`;
-`apps/desktop` and `apps/web` are excluded and keep their own workspaces and
-lockfiles.
+`apps/android`, `apps/rune`, `apps/desktop` and `apps/web` are excluded and keep
+their own workspaces and lockfiles. Rune is the canonical UI for its supported
+desktop, browser/WASM and iOS targets; Android keeps its existing UI. The other
+desktop/browser packages remain behavioral references.
 
 - `tests/workspace_contract.rs` exercises the actual workspace, not manifest
   text. It imports every legacy facade module, performs a real discover/emit,
   and proves that core `Error` and the AOT/root error spellings are one identity.
   It runs `cargo metadata --offline --no-deps` and checks the three
-  `default-members` and both frontend exclusions; it checks the root lockfile has
+  `default-members` and all frontend exclusions; it checks the root lockfile has
   exactly the three internal packages and no registry `source`/`checksum`; it
-  runs a default `cargo tree` and rejects desktop/browser dependencies,
+  runs a default `cargo tree` and rejects Rune/desktop/browser dependencies,
   including Pixels/Winit/WGPU and wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
@@ -78,16 +80,19 @@ lockfiles.
   namespace via a package rename and still binds SHA-256+length, requires an
   external `--rom PATH` and uses no `ROM_BYTES` array.
 - `tests/frontend_tree_contract.rs` uses a fake Cargo to prove that
-  `scripts/frontend.sh` fails closed when the resolved tree is missing
+  `scripts/frontend-reference.sh` fails closed when the resolved tree is missing
   `gba-native-core` or contains the AOT crate/root facade. The static desktop
   manifest/lock contract is in `tests/workspace_contract.rs`; the real frontend
-  gate performs the locked offline tree check against the actual registry
+  reference gate performs the locked offline tree check against the actual registry
   resolution.
-- The web frontend is isolated in `apps/web`, with its own Cargo/npm lockfiles
-  and direct core dependency. `scripts/web.sh` runs the hard source-size check,
-  core wasm32 check, host tests/Clippy, wasm build and dependency-tree checks,
-  pinned local bundle tooling, and functional browser E2E. It is separate from
-  the default gates and does not change the root three-package dependency graph.
+- The Rune app is isolated in `apps/rune`, with its own Cargo workspace/lockfile
+  and direct core dependency. `scripts/frontend.sh` checks the shared native UI
+  headlessly; `scripts/web.sh --ci` checks the WASM app, adapters and Chromium
+  interactions. The iOS adapter/device and simulator targets plus simulator
+  launch are gated in `.github/workflows/rune.yml`. The retained `apps/web`
+  reference has separate Cargo/npm locks and a direct core dependency;
+  `scripts/web-reference.sh` checks its WASM build, dependency tree, bundle and
+  functional browser E2E. None changes the root three-package dependency graph.
 
 ### Cartridge
 
@@ -718,8 +723,8 @@ observations, not a generated inventory:
   271/271 passing tests in debug and release. This round's full logs are retained
   under `output/fixround-swi-aot-e40418c-run5/` (`short.log`, `full.log`,
   `frontend.log`, `fresh-debug.log` and `fresh-release.log`).
-- The optional `apps/desktop` package is not part of that count: its separate
-  `scripts/frontend.sh` gate ran 15 frontend unit tests plus locked fmt, Clippy,
+- The retained `apps/desktop` reference package is not part of that count: its
+  separate `scripts/frontend-reference.sh` gate ran 15 frontend unit tests plus locked fmt, Clippy,
   build, a locked offline dependency-tree check and a headless `--help`, and all
   passed. The tree contains `gba-native-core` and not `gba-native-aot` or the
   root facade. None of its dependencies enter the root default graph.
@@ -842,18 +847,22 @@ and documented CPU-only ALU SPSR return have synthetic-test coverage. IRQ
 nesting, FIQ, other interrupt sources, other exception entry/vectoring, save
 persistence, hardware audio output or live speaker playback, input interaction,
 DMA arbitration and automatic event timing, cycle timing, other BG modes/layers,
-OBJ/sprite rendering or a playable frontend are not verified. The static Mode 0 BG0 snapshot is
-only a synthetic, documentation-driven capability slice; it is not evidence
-that a supplied ROM configures BG0 or reaches a recognizable/booted screen. The
-optional synthetic `apps/desktop` frontend presents
-one static bitmap and has build/unit-test evidence plus one local macOS Metal
-smoke observation. The separate `apps/web` foundation presents that synthetic
-fixture through browser WebGPU/WebGL2 and has local build/functional-E2E evidence;
-visual approval remains pending. The separate ROM-bound WASM module from
+OBJ/sprite rendering or a playable frontend are not verified. The static Mode 0
+BG0 snapshot is only a synthetic, documentation-driven capability slice; it is
+not evidence that a supplied ROM configures BG0 or reaches a recognizable/booted
+screen. Canonical `apps/rune` covers Rune-supported desktop, browser/WASM and iOS
+UI targets; Android remains on its existing frontend. The local Linux Rune host
+gate, browser/WASM Playwright interaction/capture gate, and Rust checks for both
+iOS device/simulator targets pass. They do not prove live native GPU presentation,
+screen-reader behavior, or iOS runtime behavior. The macOS/Windows CI host matrix
+and iOS simulator packaging/launch workflow remain remote gates.
+The former `apps/desktop` and `apps/web` implementations are retained behavioral
+references; their prior build/test evidence does not establish Rune parity. The
+separate ROM-bound WASM module from
 `aot build --target wasm32-unknown-unknown` has synthetic-module and pinned-Node
 evidence only; no browser hosting, GPU presentation, input, saves or per-ROM
-application around it is verified. Neither frontend is a per-ROM playable/input
-loop. No Windows/Linux physical-GPU run, cross-platform presentation claim or
+application around it is verified. Neither app is a per-ROM playable/input loop.
+No Windows/Linux physical-GPU run, cross-platform presentation claim or
 visible-frame counter is verified. PSR-transfer and banking evidence is
 limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE
 services have synthetic-test evidence only; BIOS execution and hardware
@@ -1434,9 +1443,9 @@ Evidence:
 
 The generated AOT harness accepts `--audio PATH`, `--volume 0..100` and
 `--mute` and writes WAV from the run's sound-register state; this is the
-cross-target guest-audio artifact path. The browser frontend persists the same
-volume/mute fields and can play a fixed 440 Hz WebAudio test tone, but it does
-not yet stream guest PCM; that sink remains outstanding in issue #29. The
+cross-target guest-audio artifact path. Rune and the retained browser reference
+persist the same volume/mute fields and can play a fixed 440 Hz WebAudio test
+tone, but neither app streams guest PCM; that sink remains outstanding in issue #29. The
 persisted settings document now carries `master_volume` and `muted`.
 
 The committed input-tester guest now programs a 440 Hz square at boot. A
@@ -1486,12 +1495,14 @@ native AOT harness, verifies the fresh and loaded frames against the same raw
 `--save` image, checks a second independent image, and repeats the multi-slot,
 default and import/export flow through the CLI. The Linux CI job runs it.
 
-The browser save panel uses `apps/web/www/saves.mjs`: base64 raw images in
-`localStorage`, named slots, default selection, import/export and delete.
-`apps/web/tests/js/saves.test.mjs` covers the storage model; the Playwright test
-imports two synthetic 32 KiB images, selects the default, downloads the default
-image, reloads the page and checks persistence. The panel is host-side
-management of synthetic raw images; the page does not execute guest saves.
+The retained browser reference save panel uses `apps/web/www/saves.mjs`: base64
+raw images in `localStorage`, named slots, default selection, import/export and
+delete. `apps/web/tests/js/saves.test.mjs` covers that storage model; the
+reference Playwright test imports two synthetic 32 KiB images, selects the
+default, downloads the default image, reloads the page and checks persistence.
+Rune's distinct browser save adapter accepts only its exact generated 512-byte
+fixture on import; its local browser gate checks the export/import round trip.
+These are host-side save managers; neither page executes guest saves.
 
 Local retail proof: `crates/core/tests/local_emerald_save.rs` is ignored and
 environment-gated (`GBA_NATIVE_LOCAL_ROM`), reads the retail ROM read-only, drives
@@ -1601,8 +1612,8 @@ Playback evidence:
 - The browser E2E suite (22 Playwright tests) exercises
   `__gbaNative.audio.playPcm(Int16Array, 32768)`, which schedules mono signed
   16-bit PCM of the same shape returned by the wasm `run_rom_audio` export.
-  Browser *guest* playback is explicitly out of scope for the app: `apps/web`
-  does not load the AOT module or execute ROMs. The module returns PCM and
+  Browser *guest* playback is explicitly out of scope for both apps: Rune and
+  the retained `apps/web` reference do not load the AOT module or execute ROMs. The module returns PCM and
   `playPcm` accepts it; wiring a module instance and its pacing into a page is
   a caller integration, documented rather than claimed.
 
@@ -1812,7 +1823,7 @@ hand-written list, and every served file is content-hashed:
 $ node --test apps/web/tests/js/bundle.test.mjs
 pass 6 / fail 0
 
-$ ./scripts/web.sh --build-only
+$ ./scripts/web-reference.sh --build-only
 asset=app.9f40db6592ef.css
 ==> bundle contracts: expected WASM exports, no remote runtime assets
 ==> build-only gate passed

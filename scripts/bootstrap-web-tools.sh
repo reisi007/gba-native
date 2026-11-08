@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Provision the pinned browser-build tools for apps/web.
+# Provision the pinned browser-build tools shared by Rune and the legacy apps/web reference.
 #
 # Everything is installed into the repository-ignored target/ tree; nothing is
 # installed globally and no user configuration is changed:

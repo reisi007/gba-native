@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The optional frontend gate must verify the resolved dependency tree, not
+//! The legacy desktop reference gate must verify the resolved dependency tree, not
 //! only the manifest text. These tests use a fake Cargo that emits controlled
 //! trees, so the contract stays hermetic and never fetches GPU dependencies.
 
@@ -92,7 +92,7 @@ fn frontend_gate_checks_the_resolved_dependency_tree() {
     ];
     let run_gate = |tree| {
         Command::new("bash")
-            .arg(repo_root().join("scripts/frontend.sh"))
+            .arg(repo_root().join("scripts/frontend-reference.sh"))
             .current_dir(repo_root())
             .env("PATH", &path)
             .env("FRONTEND_TEST_TREE", tree)
@@ -122,7 +122,7 @@ fn frontend_gate_checks_the_resolved_dependency_tree() {
         stderr(&output)
     );
     assert!(
-        stderr(&output).contains("optional frontend gate passed"),
+        stderr(&output).contains("legacy desktop reference gate passed"),
         "large valid tree must complete the frontend gate\n{}",
         stderr(&output)
     );

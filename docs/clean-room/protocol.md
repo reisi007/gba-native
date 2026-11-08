@@ -59,12 +59,15 @@ standalone emulator and not a game packager.
 
 No JIT or executable writable memory is required. iOS JIT constraints therefore
 do not block the current portable-core design. Standalone per-game packaging,
-Android/iOS packaging, GPU vendor upscaling and retail-game compatibility are
-later work and are not claimed. Isolated optional `apps/desktop` and `apps/web`
-frontends present the same synthetic snapshot through native Winit/Pixels/WGPU
-and browser WebGPU/WebGL2 respectively. They remain outside the std-only core,
-accept no cartridge and are not playable or vendor-upscaled frontends
-(`docs/gpu-frontend.md`, `docs/web-frontend.md`).
+GPU vendor upscaling and retail-game compatibility are not claimed. `apps/rune`
+is the canonical synthetic UI for Linux, macOS, Windows, browser/WASM and iOS;
+Android remains on its existing adapter. The former `apps/desktop` and `apps/web`
+implementations are retained as behavioral references (native Winit/Pixels/WGPU
+and browser WebGPU/WebGL2, respectively). All these packages remain outside the
+std-only core and accept no cartridge; none is playable or vendor-upscaled.
+Rune WebGL is disabled, and physical iOS/device and GPU runtime evidence is
+tracked separately (`apps/rune/README.md`, `docs/gpu-frontend.md`,
+`docs/web-frontend.md`).
 
 ## Artifacts
 
@@ -72,9 +75,11 @@ accept no cartridge and are not playable or vendor-upscaled frontends
 - `gba-contract.md`: actual implemented behavior, AOT rules and explicit limits.
 - `upscaling.md`: presentation baseline and future vendor options; not GBA
   hardware behavior.
-- `gpu-frontend.md`: optional synthetic Winit/Pixels/WGPU window boundary,
+- `apps/rune/README.md`: canonical Rune app entrypoints, platform adapters,
+  gates, and current verification limits.
+- `gpu-frontend.md`: retained legacy Winit/Pixels/WGPU desktop reference,
   dependency pins, gate/artifact rules and observed limits.
-- `web-frontend.md`: isolated synthetic WASM/browser presentation boundary,
+- `web-frontend.md`: retained legacy synthetic WASM/browser reference,
   pinned-tool bootstrap, gates/artifacts and observed limits.
 - `rea-status.md`: actual tool observations, including blockers. No Evidence ID
   exists for this investigation.
@@ -104,9 +109,10 @@ retail cartridges**.
 
 ## Non-claims
 
-- No BIOS boot, no retail-game playability, no save/audio or game-level input
-  interaction. The core accepts host-injected KEYINPUT state, but has no frame
-  scheduler, sampling guarantee or timing claim.
+- No BIOS boot or retail-game playability claim. Rune's host-side synthetic save
+  slots and test-tone controls are UI demonstrations, not guest-save or retail
+  audio compatibility. The core accepts host-injected KEYINPUT state, but has no
+  frame scheduler, sampling guarantee or timing claim.
 - No cycle/frame-accurate timing, DMA arbitration, automatic HBlank/VBlank or
   timer-driven sound request, or DMA-driven IRQ. Timer counters advance only from
   the nominal three-cycle instruction mapping; that is not hardware timing.
@@ -126,7 +132,6 @@ retail cartridges**.
   WASM module has no HTML/JS UI, renderer, input or persistence. Building one
   target triple with the installed toolchain does not establish cross-platform
   support.
-- The optional `apps/desktop` Winit/Pixels window and `apps/web` WebGPU/WebGL2
-  page present only the static synthetic bitmap. Neither is a playable/retail
-  frontend, per-ROM application or vendor upscaler; neither establishes
-  frame/cycle timing.
+- Rune and the retained desktop/browser references present only the static
+  synthetic bitmap. None is a playable/retail frontend, per-ROM application or
+  vendor upscaler; none establishes frame/cycle timing.

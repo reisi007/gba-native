@@ -1,7 +1,7 @@
 // Unit tests for the portable browser input/settings model.
 //
 // The same model is used by app.js; these tests run under the pinned Node
-// runtime in scripts/web.sh without a browser or a cartridge.
+// runtime in scripts/web-reference.sh without a browser or a cartridge.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';

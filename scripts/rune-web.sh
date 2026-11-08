@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build an isolated experimental Rune browser bundle; this is not the web gate.
+# Build the Rune browser bundle; the canonical web gate also runs Chromium checks.
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)

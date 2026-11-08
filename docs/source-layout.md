@@ -43,13 +43,13 @@
   `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands
   (including the experimental `aot build` native and wasm32 branches) and safe
   `output/` writes.
-- `apps/desktop/`: optional, separately excluded synthetic Winit/Pixels/WGPU
+- `apps/desktop/`: retained, separately excluded synthetic Winit/Pixels/WGPU
   package with its own workspace/lockfile. It depends directly on
   `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
   crate or the root facade, and has no ROM surface. `ui.rs` composes the
   windowed GBA shell, fullscreen frame and persisted settings page; `settings.rs`
   owns the per-user file; `app/input.rs` handles keyboard, pointer and touch.
-- `apps/web/`: optional, separately excluded synthetic WASM/WebGPU/WebGL2
+- `apps/web/`: retained legacy, separately excluded synthetic WASM/WebGPU/WebGL2
   package with its own Cargo/npm locks. It depends directly on `crates/core`,
   not the AOT crate or root facade; it accepts no ROM or guest audio and its
   save panel manages synthetic raw images only. Its
@@ -60,8 +60,8 @@
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
-  failure paths, optional frontend gate contracts, web-tool bootstrap regression
-  and workspace compatibility contracts.
+  failure paths, Rune/legacy frontend reference gate contracts, web-tool
+  bootstrap regression and workspace compatibility contracts.
 - `tests/roms/gba-tests/`: optional MIT-licensed local black-box ROM tests;
   immutable inputs, not part of `cargo test` or CI. See the directory README for
   cross-target execution instructions and visible-pass criteria.
@@ -82,7 +82,7 @@
   desktop, Android and Rune apps (`image`, `viewport`, `ui` including
   `ui/shell.rs`, `settings`, `saves`, `tone`, `player`, `features`). It is the
   canonical feature contract.
-- `apps/rune/`: isolated, additive Rune migration app pinned to one upstream
+- `apps/rune/`: canonical shared Rune UI app pinned to one upstream
   revision with its own lock. A shared Rune model/view targets Linux, macOS,
   Windows, browser/WASM and iOS; `www/` and `scripts/rune-web.sh` build its
   WebGPU browser shell, while `scripts/rune-web-screenshots.sh` checks the
@@ -91,14 +91,15 @@
   input, native/browser file operations and test-tone output. Mobile layouts
   wrap, stack and scroll. `scripts/rune-ios-simulator.sh` links device and
   simulator executables, packages and launches a simulator app, and captures
-  its screen in macOS CI; physical-device signing and execution plus native
-  audio/document-picker adapters remain open. iOS save slots and WAV artifacts
+  its screen in macOS CI; physical-device signing/execution and interactive
+  audible playback/document-picker behavior remain unverified. iOS save slots and WAV artifacts
   use the Files-shared Documents folder, with import from `saves/import.sav`.
   WebGL is not buildable with the pinned revision. `scripts/rune-native-snapshot.sh` exercises the native
   offscreen renderer; Linux CI provisions Mesa software Vulkan, not a physical
-  GPU. Android remains outside this migration. Existing desktop and web targets
-  stay until parity is independently verified; issue #30 is the migration
-  record.
+  GPU. Android remains outside this migration. The old desktop/browser packages
+  are behavioral references with separate gates (`scripts/frontend-reference.sh`
+  and `scripts/web-reference.sh`); issue #30 records remaining verification.
+  `scripts/rune-web-serve.sh` builds and serves the browser app on loopback.
 - `apps/android/`: separate NativeActivity package; `model.rs` is the
   host-tested shell (composition, touch, settings, saves, tone artifact) and
   `app.rs` the Android-only window and event loop.
@@ -130,8 +131,12 @@
   Linux and Windows CI; no real audio device is required.
 - `crates/core/tests/local_name_entry.rs`: ignored, environment-gated local
   retail name-entry regression (`GBA_NATIVE_LOCAL_ROM`); never part of CI.
-- `scripts/web.sh`, `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
-  `scripts/bootstrap-web-tools.sh`: isolated browser build/E2E/review flow and
-  pinned repository-owned tooling.
+- `scripts/frontend.sh`, `scripts/web.sh`: canonical Rune host/browser gates;
+  `scripts/rune-web.sh` builds the WASM bundle and
+  `scripts/rune-web-screenshots.sh` exercises the browser UI.
+- `scripts/frontend-reference.sh`, `scripts/web-reference.sh`,
+  `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
+  `scripts/bootstrap-web-tools.sh`: retained legacy frontend reference checks,
+  browser review and pinned repository-owned tooling.
 - `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality
   rules and baseline.

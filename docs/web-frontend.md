@@ -1,10 +1,12 @@
 # Browser GPU foundation (synthetic demo)
 
-Status: implementation and locally observed evidence for the static synthetic
-demo only. Not a playable emulator, not a retail-game compatibility claim, not
-frame/cycle timing, not FSR/DLSS/AI upscaling, and not the per-ROM WebAssembly
-application described by the end goal. This document does not declare the
-foundation visually approved; the owner/reviewer judges the screenshot set.
+Status: retained legacy browser behavioral reference for the static synthetic
+demo; Rune in `apps/rune` is the canonical browser frontend. The `apps/web`
+package, its tests and its separate reference gates remain to protect the former
+WebGPU/WebGL2 behavior. Not a playable emulator, not a retail-game compatibility
+claim, not frame/cycle timing, not FSR/DLSS/AI upscaling, and not the per-ROM
+WebAssembly application described by the end goal. This document does not
+declare the legacy foundation visually approved.
 
 Decision context: `docs/decisions.md` D10 (separate runtime/AOT/application
 crates), D11 (Web as a first-class target with WebGPU plus an explicit WebGL2
@@ -25,7 +27,8 @@ actually implemented.
 - no changes to core/AOT behavior, the default root dependency graph, the root
   lockfile, the desktop frontend, or Ratchet baselines. Root tests and project
   documentation include integration contracts/status for this package;
-- the root manifest excludes both `apps/desktop` and `apps/web`. The root
+- the root manifest excludes `apps/android`, `apps/rune`, `apps/desktop` and
+  `apps/web`. The root
   `Cargo.lock` still contains exactly the three internal packages.
 
 The browser crate is `#![forbid(unsafe_code)]`. It accepts no cartridge path,
@@ -67,9 +70,9 @@ dependency licenses, not a license choice for the repository or the app.
 
 ```text
 ./scripts/bootstrap-web-tools.sh    # pinned Node/wasm-bindgen/npm tooling in target/
-./scripts/web.sh                    # gate: counter, core WASM check, tests, bundle, E2E
-./scripts/web.sh --build-only       # same build checks without browser E2E (partial)
-./scripts/web.sh --ci               # same gate with the CI/software-GPU browser mode
+./scripts/web-reference.sh                    # legacy apps/web build, tests, bundle, E2E
+./scripts/web-reference.sh --build-only       # same build checks without browser E2E (partial)
+./scripts/web-reference.sh --ci               # legacy gate with CI/software-GPU browser mode
 ./scripts/web-e2e.sh [local|ci]     # functional browser E2E only (bundle must exist)
 ./scripts/web-browsers-install.sh   # provision Playwright Chromium (CI and fresh hosts)
 ./scripts/web-screenshots.sh        # UI-review capture only; never a CI gate
@@ -103,7 +106,7 @@ the legacy `target/tools/node` path. An install without its manifest is treated
 as absent and reinstalled from the verified archive. Unsupported platforms and
 mismatched cached archives fail closed.
 
-`scripts/web.sh` checks:
+`scripts/web-reference.sh` checks:
 
 1. the root hard 500-physical-line counter (includes `apps/web`);
 2. the root lockfile still has exactly `gba-native`, `gba-native-core`,
@@ -276,7 +279,7 @@ the gate fails with a diagnostic before any browser probe is launched; the
 browser checks are never skipped, timed out as passed or replaced by a software
 frame. The screenshot runner (`scripts/web-screenshots.sh`) is not wrapped: it
 invokes Playwright directly and is not a CI gate, so its capture behaviour on a
-host without a display is unchanged. `scripts/web.sh --build-only` exits before
+host without a display is unchanged. `scripts/web-reference.sh --build-only` exits before
 `scripts/web-e2e.sh` and therefore never reaches the wrapper.
 
 `summary.txt` records `xvfb-run-wrapper=1` when that re-execution happened. The
@@ -562,7 +565,7 @@ not a claim about physical-pixel sampling on a real high-DPI device.
 `.github/workflows/web.yml` runs on pushes and pull requests with
 `contents: read`, a bounded timeout, the verified `actions/checkout` v7.0.1
 commit, Rust 1.98.0 with `wasm32-unknown-unknown`, and the same
-`scripts/web.sh --ci` entry point used locally. Browser provisioning is explicit:
+`scripts/web-reference.sh --ci` entry point used locally. Browser provisioning is explicit:
 `scripts/web-browsers-install.sh` bootstraps the owned toolchain and installs the
 Playwright Chromium revision plus its Linux dependencies. There are no secrets,
 paid resources, artifact/ROM uploads or changes to the existing CI/frontend
@@ -571,7 +574,7 @@ workflows. Screenshots are not a CI gate.
 The Linux CI functional E2E additionally re-executes itself under the runner
 image's `xvfb-run` wrapper when `DISPLAY` is unset, but only in `ci` mode with
 `CI=true` (candidate configuration under test, see above). Local `local`-mode runs,
-runs without `CI=true`, screenshot capture and `scripts/web.sh --build-only` are
+runs without `CI=true`, screenshot capture and `scripts/web-reference.sh --build-only` are
 not wrapped.
 
 ## UI-review capture set

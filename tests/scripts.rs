@@ -364,19 +364,27 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
 
     let workflow =
         std::fs::read_to_string(root.join(".github/workflows/web.yml")).expect("browser workflow");
-    let foundation_step = workflow
-        .split("- name: Browser foundation gate")
+    let reference_step = workflow
+        .split("- name: Legacy browser reference gate")
         .nth(1)
-        .expect("browser foundation gate step")
+        .expect("legacy browser reference step")
         .split("\n      - name:")
         .next()
-        .expect("browser foundation gate step body");
+        .expect("legacy browser reference step body");
     assert!(
-        foundation_step.contains("WEB_LINUX_AB_DIAGNOSTICS: \"1\""),
-        "only the Web foundation step opts into Linux A/B diagnostics"
+        reference_step.contains("WEB_LINUX_AB_DIAGNOSTICS: \"1\""),
+        "only the legacy reference step opts into Linux A/B diagnostics"
     );
+    let rune_workflow =
+        std::fs::read_to_string(root.join(".github/workflows/rune.yml")).expect("Rune workflow");
+    assert!(rune_workflow.contains("Canonical Rune browser gate"));
+    assert!(rune_workflow.contains("run: bash scripts/web.sh --ci"));
     assert!(workflow.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"));
-    assert!(workflow.contains("name: web-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"));
+    assert!(
+        workflow.contains(
+            "name: web-reference-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"
+        )
+    );
     assert!(workflow.contains("path: output/web-linux-ab-*/"));
     linux_ab_diagnostics::assert_contract();
     linux_webgpu_smoke::assert_display_contract(&root);

@@ -1,14 +1,16 @@
 # Isolated GPU frontend foundation
 
-Status: design and implementation foundation for the synthetic fixture only.
-This is not a playable emulator, not frame/cycle timing, not a retail-content
-claim and not evidence of FSR, DLSS, AI reconstruction or vendor upscaling.
+Status: retained legacy desktop behavioral reference for the synthetic fixture;
+Rune in `apps/rune` is the canonical frontend. This package remains buildable and
+its tests/gate protect prior behavior. It is not a playable emulator, not
+frame/cycle timing, not a retail-content claim and not evidence of FSR, DLSS, AI
+reconstruction or vendor upscaling.
 
 Decision context: `docs/decisions.md` D9 selects an isolated GPU frontend and a
 std-only default core. D11 makes Web a first-class target with WebGPU/WebGL2
-presentation. The separate `apps/web` package now presents the synthetic demo
-only; it does not implement per-ROM browser execution. Existing core non-claims
-still apply.
+presentation. The separate `apps/web` reference presents the synthetic demo
+only; it does not implement per-ROM browser execution. Rune is the canonical
+browser UI, with WebGL disabled. Existing core non-claims still apply.
 
 ## Boundary
 
@@ -23,8 +25,8 @@ still apply.
   workspace or the root dependency graph;
 - no changes to the core/AOT crates, the root CLI, the core `scripts/short.sh` /
   `scripts/full.sh` gates, existing CI or baselines. The optional
-  `scripts/frontend.sh` gate, `.github/workflows/frontend.yml` and this document
-  are separate and are never required by the std-only core.
+  `scripts/frontend-reference.sh` gate and `.github/workflows/frontend.yml`
+  exercise this retained reference; neither is the canonical Rune app gate.
 
 The core remains `#![forbid(unsafe_code)]` and std-only. The frontend also uses
 `#![forbid(unsafe_code)]` for its own code; external crates contain their own
@@ -125,10 +127,10 @@ ROM mode or make the frontend playable.
 
 ## Gate and artifacts
 
-The documented entry point is the optional frontend gate:
+The retained reference gate is:
 
 ```text
-./scripts/frontend.sh
+./scripts/frontend-reference.sh
 ```
 
 It resolves the repository root from any working directory, requires Cargo and
@@ -192,12 +194,12 @@ cross-platform GPU claim. No live GPU smoke has been run on Windows or Linux,
 and no physical-GPU cross-platform claim is made. The separate synthetic browser
 WASM/WebGPU/WebGL2 build and functional E2E have local evidence; see
 `docs/web-frontend.md`. A headless host without a window server cannot provide
-native live-GPU evidence; `scripts/frontend.sh` deliberately does not attempt
+native live-GPU evidence; `scripts/frontend-reference.sh` deliberately does not attempt
 one.
 
 ## Continuous integration
 
-`.github/workflows/frontend.yml` runs the same `scripts/frontend.sh` under bash
+`.github/workflows/frontend.yml` runs the same `scripts/frontend-reference.sh` under bash
 on `ubuntu-latest`, `windows-latest` and `macos-latest` with Rust 1.98.0,
 rustfmt and Clippy. The job has `contents: read`, no secrets, no artifact upload
 and no cache action, and it neither simulates nor claims a visible GPU frame:

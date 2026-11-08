@@ -1052,10 +1052,26 @@ from the code:
   rewritten to the hashed names.
 - `bundle-manifest.json` records the served path and SHA-256 of every module and
   asset, so the bundle can be audited and cached by immutable name.
-- `scripts/web.sh` checks the hashed glue/wasm and that the bundle has no remote
+- `scripts/web-reference.sh` checks the hashed glue/wasm and that the bundle has no remote
   references, and `web-e2e.sh`/the browser tests accept the hashed CSS name.
 
 Limits: this is still not an application bundler (no tree shaking, no
 minification, no code splitting); it only makes module closure and cache-safe
 names deterministic and fail-closed. A Vite/Webpack migration remains possible
 but would add another pinned toolchain to the browser gate.
+
+## D48 — Rune is the canonical supported-platform UI
+
+Decided 2026-11-08. Use the shared `apps/rune` application as the canonical UI
+for Rune-supported Linux, macOS, Windows, browser/WASM and iOS targets. Keep
+Android on its existing frontend; Rune WebGL remains disabled because the pinned
+Rune revision cannot build it. Retain `apps/desktop` and `apps/web` as behavioral
+references with separate `scripts/frontend-reference.sh` and
+`scripts/web-reference.sh` gates, rather than alternate product entrypoints.
+
+The canonical developer/CI entrypoints are `scripts/frontend.sh` and
+`scripts/web.sh`; the latter requires separately provisioned pinned browser
+tools and Chromium, and its `--build-only` mode is partial evidence. This
+cutover does not itself establish physical-GPU, screen-reader, physical-iOS or
+interactive iOS picker behavior. Keep issue #30 open until independent review,
+remote CI and the documented runtime/platform evidence pass.
