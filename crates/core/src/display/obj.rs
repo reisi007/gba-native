@@ -1,9 +1,9 @@
 //! Static Mode 0 OBJ (sprite) layer for the supported OAM forms.
 //!
 //! Supports normal and affine sprites, 1D tile mapping, 4/8bpp tiles, flips and
-//! per-pixel priority. 2D tile mapping, semi-transparent OBJ mode, mosaic and
-//! double-size affine sprites are explicit errors rather than approximated
-//! layers.
+//! per-pixel priority and per-OBJ mosaic. 2D tile mapping, semi-transparent OBJ
+//! mode and double-size affine sprites are explicit errors rather than
+//! approximated layers.
 
 use super::layer::{LayerPixel, choose};
 use super::{HEIGHT, WIDTH};
@@ -20,22 +20,71 @@ pub(super) struct ObjLayer {
     pub window: Vec<bool>,
 }
 
+struct AffineMosaicSampler {
+    width: usize,
+    height: usize,
+    origin_x: i32,
+    origin_y: i32,
+    mosaic_width: i32,
+    mosaic_height: i32,
+    matrix: [i16; 4],
+}
+
+impl AffineMosaicSampler {
+    fn source_sample(&self, group_x: i32, group_y: i32) -> Option<(i32, i32)> {
+        let left = group_x.max(self.origin_x).max(0);
+        let top = group_y.max(self.origin_y).max(0);
+        let right = (group_x + self.mosaic_width)
+            .min(self.origin_x + self.width as i32)
+            .min(WIDTH as i32);
+        let bottom = (group_y + self.mosaic_height)
+            .min(self.origin_y + self.height as i32)
+            .min(HEIGHT as i32);
+        for screen_y in top..bottom {
+            for screen_x in left..right {
+                if let Some(source) = source_pixel(
+                    self.width,
+                    self.height,
+                    screen_x - self.origin_x,
+                    screen_y - self.origin_y,
+                    false,
+                    false,
+                    Some(self.matrix),
+                ) {
+                    return Some(source);
+                }
+            }
+        }
+        None
+    }
+}
+
 pub(super) fn render(bus: &Bus, dispcnt: u16) -> Result<ObjLayer> {
     if dispcnt & 0x0040 == 0 {
         return Err(Error::UnsupportedPpuFeature { dispcnt });
     }
+    let mosaic = bus.mosaic();
+    let mosaic_width = i32::from((mosaic >> 8) & 0xF) + 1;
+    let mosaic_height = i32::from((mosaic >> 12) & 0xF) + 1;
     let area = (WIDTH * HEIGHT) as usize;
     let mut layer = ObjLayer {
         pixels: vec![None; area],
         window: vec![false; area],
     };
     for entry in 0..128u32 {
-        render_entry(bus, dispcnt, entry, &mut layer)?;
+        render_entry(bus, dispcnt, entry, mosaic_width, mosaic_height, &mut layer)?;
     }
     Ok(layer)
 }
 
-fn render_entry(bus: &Bus, dispcnt: u16, entry: u32, layer: &mut ObjLayer) -> Result<()> {
+fn render_entry(
+    bus: &Bus,
+    dispcnt: u16,
+    entry: u32,
+    mosaic_width: i32,
+    mosaic_height: i32,
+    layer: &mut ObjLayer,
+) -> Result<()> {
     let base = entry * 8;
     let attr0 = read_oam16(bus, base)?;
     let attr1 = read_oam16(bus, base + 2)?;
@@ -53,9 +102,7 @@ fn render_entry(bus: &Bus, dispcnt: u16, entry: u32, layer: &mut ObjLayer) -> Re
     if mode == 1 || mode == 3 {
         return Err(Error::UnsupportedPpuFeature { dispcnt });
     }
-    if attr0 & 0x1000 != 0 {
-        return Err(Error::UnsupportedPpuFeature { dispcnt });
-    }
+    let mosaic_enabled = attr0 & 0x1000 != 0;
     let color_8bpp = attr0 & 0x2000 != 0;
     let shape = ((attr0 >> 14) & 0x3) as usize;
     if shape == 3 {
@@ -83,6 +130,36 @@ fn render_entry(bus: &Bus, dispcnt: u16, entry: u32, layer: &mut ObjLayer) -> Re
     } else {
         (None, attr1 & 0x1000 != 0, attr1 & 0x2000 != 0)
     };
+    let mut affine_mosaic_samples = if mosaic_enabled {
+        matrix.map(|matrix| {
+            let first_group_x = origin_x.div_euclid(mosaic_width) * mosaic_width;
+            let first_group_y = origin_y.div_euclid(mosaic_height) * mosaic_height;
+            let last_group_x =
+                (origin_x + width as i32 - 1).div_euclid(mosaic_width) * mosaic_width;
+            let last_group_y =
+                (origin_y + height as i32 - 1).div_euclid(mosaic_height) * mosaic_height;
+            let columns = ((last_group_x - first_group_x) / mosaic_width + 1) as usize;
+            let rows = ((last_group_y - first_group_y) / mosaic_height + 1) as usize;
+            let sampler = AffineMosaicSampler {
+                width,
+                height,
+                origin_x,
+                origin_y,
+                mosaic_width,
+                mosaic_height,
+                matrix,
+            };
+            (
+                first_group_x,
+                first_group_y,
+                columns,
+                sampler,
+                vec![None; columns * rows],
+            )
+        })
+    } else {
+        None
+    };
     for dy in 0..height as i32 {
         let screen_y = origin_y + dy;
         if !(0..HEIGHT as i32).contains(&screen_y) {
@@ -93,9 +170,36 @@ fn render_entry(bus: &Bus, dispcnt: u16, entry: u32, layer: &mut ObjLayer) -> Re
             if !(0..WIDTH as i32).contains(&screen_x) {
                 continue;
             }
-            let Some((source_x, source_y)) =
+            let source = if !mosaic_enabled {
                 source_pixel(width, height, dx, dy, flip_x, flip_y, matrix)
-            else {
+            } else if let Some((first_group_x, first_group_y, columns, sampler, samples)) =
+                &mut affine_mosaic_samples
+            {
+                let group_x = screen_x - screen_x % mosaic_width;
+                let group_y = screen_y - screen_y % mosaic_height;
+                let column = ((group_x - *first_group_x) / mosaic_width) as usize;
+                let row = ((group_y - *first_group_y) / mosaic_height) as usize;
+                let sample_index = row * *columns + column;
+                if samples[sample_index].is_none() {
+                    samples[sample_index] = Some(sampler.source_sample(group_x, group_y));
+                }
+                samples[sample_index].unwrap_or(None)
+            } else {
+                // Groups align to the screen; partial top/left groups begin at
+                // the first coordinate covered by this normal OBJ.
+                let sample_x = (screen_x - screen_x % mosaic_width).max(origin_x);
+                let sample_y = (screen_y - screen_y % mosaic_height).max(origin_y);
+                source_pixel(
+                    width,
+                    height,
+                    sample_x - origin_x,
+                    sample_y - origin_y,
+                    flip_x,
+                    flip_y,
+                    matrix,
+                )
+            };
+            let Some((source_x, source_y)) = source else {
                 continue;
             };
             let tile_step = if color_8bpp { 2 } else { 1 };

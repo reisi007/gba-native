@@ -214,16 +214,18 @@ Relevant anchors actually consulted for this milestone:
   affine BG control/scroll, BG2/BG3 affine matrix/reference registers, OAM
   normal/affine attributes, 1D OBJ tile mapping, window ranges/masks and
   BLDCNT/BLDALPHA/BLDY blending modes. Only the static snapshot subset described
-  in `gba-contract.md` is implemented; 2D OBJ mapping, double-size affine OBJ,
-  OBJ mosaic and window 1 remain absent. These anchors were consulted on
-  2026-10-29 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>; that
-  retrieval was not separately retained or hashed.
+  in `gba-contract.md` is implemented; 2D OBJ mapping, double-size affine OBJ
+  and window 1 remain absent. These anchors were consulted on 2026-10-29 in the
+  S1 rendering at <https://mgba-emu.github.io/gbatek/>; that retrieval was not
+  separately retained or hashed.
 
 - `#lcd-io-mosaic-function`: MOSAIC BG horizontal/vertical sizes are encoded as
-  size minus one; BGxCNT bit 6 enables BG mosaic per background; each covered
-  screen-pixel group takes the color of its upper-left pixel. Consulted on
-  2026-11-08 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>; this
-  retrieval was not separately retained or hashed.
+  size minus one; bits 8..15 separately encode OBJ horizontal/vertical sizes;
+  BGxCNT bit 6 and OAM Attr0 bit 12 independently enable the effect for each
+  background or OBJ. Covered pixel groups use their upper-left covered pixel.
+  Consulted on 2026-11-08 in the S1 rendering at
+  <https://mgba-emu.github.io/gbatek/>; this retrieval was not separately
+  retained or hashed.
 
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.

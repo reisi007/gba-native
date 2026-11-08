@@ -1998,3 +1998,29 @@ on-device MediaPlayer playback remains outside CI.
   It is a partial issue #3 slice; native-resolution reference images, scanline
   effects and the remaining acceptance work are not established, so #3 remains
   open.
+
+## Round: OBJ mosaic snapshot slice (2026-11-08)
+
+- OAM Attr0 bit 12 now enables per-OBJ mosaic. The OBJ-specific MOSAIC H/V
+  fields determine screen-aligned group sizes independently from BG fields;
+  partial groups at the top/left OBJ bounds sample the first covered coordinate
+  before the existing normal/affine source mapping.
+- The existing `display_layers` pixel-oracle test covers normal and affine
+  OBJ mosaic paths. Its 3x2 normal-OBJ case uses a varied 8bpp tile and an OBJ
+  at screen coordinate (1,1) to check partial edge groups plus horizontal and
+  vertical origins. An identity affine OBJ checks 2x2 grouping, and a 2x
+  horizontal-scale affine OBJ checks that an out-of-source group origin selects
+  the next covered coordinate. All 9 tests pass.
+- Independent review round 1 found that an affine group's initial sample could
+  fall outside source coverage and hide a later covered pixel. Affine mosaic
+  groups now select the first covered transformed coordinate; the scaled-sprite
+  regression above covers that case. Round 2 review approved with no findings.
+  GBATEK's public wording does not settle whether transparent texels should be
+  skipped during sample selection; this snapshot preserves transparency when
+  the selected texel is index zero and does not search for a later opaque pixel.
+- `cargo fmt --check`, `git diff --check` and a fresh-target `./scripts/full.sh`
+  pass. The full gate includes the hard source-size gate, Ratchet fast/slow,
+  Clippy, debug/release workspace tests, demo and synthetic native AOT proof.
+- This remains static synthetic snapshot behavior, not a scanline/timing test
+  or hardware validation. 2D OBJ mapping, double-size affine sprites and the
+  rest of issue #3's acceptance work remain incomplete; #3 stays open.

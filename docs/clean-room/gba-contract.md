@@ -808,9 +808,17 @@ scanline PPU, frame renderer or timing claim.
   8.8 fixed point and sample the map for the current static state.
 - OBJ supports normal and affine sprites with 1D tile mapping, 4/8bpp tiles,
   horizontal/vertical flips (normal sprites), affine matrix groups and
-  per-sprite priority/transparency. 2D tile mapping, OBJ mosaic and double-size
-  affine sprites are explicit errors. OBJ mode 2 sprites form the OBJ-window
-  mask and are not displayed, as documented.
+  per-sprite priority/transparency. OAM Attr0 bit 12 enables OBJ mosaic;
+  MOSAIC bits 8..15 provide independent horizontal/vertical sizes (field plus
+  one, 1..=16). Groups are screen-aligned; a partial normal-OBJ group at its
+  top/left edge starts at the first coordinate inside the OBJ bounds. For
+  affine OBJ, the group samples its first coordinate whose transform lies
+  inside the source bounds. If the selected texel is transparent, the group
+  remains transparent; the snapshot does not search for a later opaque texel.
+  This bounded sampling policy is static snapshot behavior, not scanline timing
+  or hardware validation.
+  2D tile mapping and double-size affine sprites are explicit errors. OBJ mode 2
+  sprites form the OBJ-window mask and are not displayed, as documented.
 - Window 0 uses `WIN0H`/`WIN0V` with the documented garbage-clamping rules and
   selects BG/OBJ visibility from `WININ`; outside pixels use `WINOUT`. The OBJ
   window uses the upper `WINOUT` bits. Window 1 is not implemented and is an
@@ -831,10 +839,9 @@ scanline PPU, frame renderer or timing claim.
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
   In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
-- OBJ mosaic, 2D OBJ tile mapping, OBJ double-size affine sprites, window 1,
-  nonidentity bitmap/affine combinations and scanline effects remain absent.
-  Unsupported registers or layers fail explicitly rather than being treated as
-  no-ops.
+- 2D OBJ tile mapping, OBJ double-size affine sprites, window 1, nonidentity
+  bitmap/affine combinations and scanline effects remain absent. Unsupported
+  registers or layers fail explicitly rather than being treated as no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output

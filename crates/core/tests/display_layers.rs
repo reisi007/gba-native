@@ -144,7 +144,7 @@ fn mode1_text_and_affine_bg_mosaic_sample_screen_group_origins() {
 }
 
 #[test]
-fn mode0_normal_and_affine_obj_sample_the_tile_and_palette() {
+fn mode0_normal_affine_and_mosaic_obj_sample_tiles_and_palette() {
     let mut bus = bus();
     put_palette(&mut bus, 0, 0x7FFF);
     put_obj_palette(&mut bus, 3, 0x001F);
@@ -156,7 +156,37 @@ fn mode0_normal_and_affine_obj_sample_the_tile_and_palette() {
     let image = display::snapshot(&bus).expect("OBJ snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_0000);
 
+    for index in 1..=64 {
+        put_obj_palette(&mut bus, index, index as u16);
+    }
+    for y in 0..8 {
+        for x in (0..8).step_by(2) {
+            let low = (1 + y * 8 + x) as u8;
+            let high = low + 1;
+            bus.write16(
+                VRAM_BASE + 0x1_0000 + 32 + (y * 8 + x) as u32,
+                u16::from_le_bytes([low, high]),
+            )
+            .expect("mosaic OBJ tile pixels");
+        }
+    }
+    bus.write16(OAM_BASE, 0x3001)
+        .expect("8bpp mosaic OBJ at 1,1");
+    bus.write16(OAM_BASE + 2, 1).expect("OBJ origin");
+    bus.write16(OAM_BASE + 4, 1).expect("OBJ tile");
+    bus.write16(MOSAIC_ADDR, 0x1200).expect("3x2 OBJ mosaic");
+    let image = display::snapshot(&bus).expect("OBJ mosaic snapshot");
+    assert_eq!(image.pixel(1, 1), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(2, 1), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(3, 1), display::rgb555_to_rgb888(3));
+    assert_eq!(image.pixel(1, 2), display::rgb555_to_rgb888(9));
+    assert_eq!(image.pixel(2, 3), display::rgb555_to_rgb888(9));
+    assert_eq!(image.pixel(3, 3), display::rgb555_to_rgb888(11));
+
+    put_obj_palette(&mut bus, 3, 0x001F);
+    put_vram8(&mut bus, 0x1_0000 + 32, 0x33);
     bus.write16(OAM_BASE, 0x0100).expect("affine attr0");
+    bus.write16(OAM_BASE + 2, 0).expect("affine OBJ origin");
     for (addr, value) in [
         (OAM_BASE + 6, 0x0100),
         (OAM_BASE + 14, 0),
@@ -167,6 +197,23 @@ fn mode0_normal_and_affine_obj_sample_the_tile_and_palette() {
     }
     let image = display::snapshot(&bus).expect("affine OBJ snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_0000);
+
+    bus.write16(OAM_BASE, 0x3100).expect("affine mosaic OBJ");
+    bus.write16(MOSAIC_ADDR, 0x1101).expect("2x2 OBJ mosaic");
+    let image = display::snapshot(&bus).expect("affine OBJ mosaic snapshot");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(0x33));
+    assert_eq!(image.pixel(1, 0), display::rgb555_to_rgb888(0x33));
+    assert_eq!(image.pixel(2, 0), display::rgb555_to_rgb888(0x001F));
+    assert_eq!(image.pixel(0, 1), display::rgb555_to_rgb888(0x33));
+    assert_eq!(image.pixel(2, 2), display::rgb555_to_rgb888(19));
+
+    bus.write16(OAM_BASE + 6, 0x0200)
+        .expect("affine OBJ horizontal scale");
+    bus.write16(MOSAIC_ADDR, 0x0300).expect("4x1 OBJ mosaic");
+    let image = display::snapshot(&bus).expect("affine OBJ clipped mosaic group");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(0x33));
+    assert_eq!(image.pixel(3, 0), display::rgb555_to_rgb888(0x33));
+    assert_eq!(image.pixel(4, 0), display::rgb555_to_rgb888(5));
 }
 
 #[test]
@@ -248,12 +295,6 @@ fn obj_semi_transparent_and_double_size_are_explicit_errors() {
     bus.write16(OAM_BASE, 0x0400)
         .expect("semi-transparent mode");
     bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D).expect("OBJ");
-    assert!(matches!(
-        display::snapshot(&bus),
-        Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
-    ));
-
-    bus.write16(OAM_BASE, 0x1000).expect("OBJ mosaic");
     assert!(matches!(
         display::snapshot(&bus),
         Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
