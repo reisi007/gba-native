@@ -2,6 +2,8 @@ use super::*;
 use gba_native::frontend::ui as core_ui;
 use rune::{Env, Runtime};
 
+mod touch_tests;
+
 #[test]
 fn accent_foreground_meets_normal_text_contrast_on_rune_blue() {
     let accent = rune::tok::accent(0, true).luminance();

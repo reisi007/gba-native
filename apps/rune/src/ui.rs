@@ -124,6 +124,9 @@ impl AppState {
     }
 
     fn select_page(&mut self, page: Page) {
+        if self.model.page() != page {
+            input::release_pointer_button(self);
+        }
         self.model.set_page(page);
         self.refresh_composition();
     }

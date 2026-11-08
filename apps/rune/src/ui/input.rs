@@ -41,6 +41,10 @@ pub(super) fn touch_drag(state: &mut AppState, drag: &mut Drag, _tx: &mut Tx) {
     set_pointer_button(state, next);
 }
 
+pub(super) fn release_pointer_button(state: &mut AppState) {
+    set_pointer_button(state, None);
+}
+
 fn set_pointer_button(state: &mut AppState, next: Option<Button>) {
     if state.pointer_button == next {
         return;
