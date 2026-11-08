@@ -396,3 +396,71 @@ fn canonical_alias_resolving_inside_output_is_allowed() {
     );
     assert!(destination.join("demo.ppm").is_file());
 }
+
+#[cfg(unix)]
+#[test]
+fn cli_atomically_replaces_hard_link_without_modifying_external_sentinel() {
+    let temp = TempDir::new("hard-link");
+    let cwd = temp.path().join("cwd");
+    let output = cwd.join("output");
+    let outside_file = temp.path().join("shared.ppm");
+    let in_output = output.join("shared.ppm");
+    std::fs::create_dir_all(&output).expect("output dir");
+    std::fs::write(&outside_file, b"KEEP-OUTSIDE").expect("outside sentinel");
+    std::fs::hard_link(&outside_file, &in_output).expect("hard link");
+
+    let output = cli(&cwd, &["demo", "--out", "output/shared.ppm"]);
+    assert!(
+        output.status.success(),
+        "demo failed to atomically replace the output file\nstderr:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read(&outside_file).expect("outside link survives"),
+        b"KEEP-OUTSIDE"
+    );
+    let replaced = std::fs::read(in_output).expect("output file replaced");
+    assert!(replaced.starts_with(b"P6\n"));
+    assert_ne!(replaced, b"KEEP-OUTSIDE");
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_rejects_fifo_without_blocking() {
+    use std::time::{Duration, Instant};
+
+    let temp = TempDir::new("fifo");
+    let cwd = temp.path().join("cwd");
+    let output_dir = cwd.join("output");
+    std::fs::create_dir_all(&output_dir).expect("output dir");
+    let fifo = output_dir.join("blocked.ppm");
+    let created = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("run mkfifo");
+    assert!(created.success(), "mkfifo failed for {}", fifo.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gba-native"))
+        .current_dir(&cwd)
+        .args(["demo", "--out", "output/blocked.ppm"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn CLI");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if child.try_wait().expect("poll CLI").is_some() {
+            let output = child.wait_with_output().expect("collect CLI output");
+            let message = stderr(&output);
+            assert!(!output.status.success(), "FIFO replacement succeeded");
+            assert!(message.contains("non-regular file"), "{message}");
+            return;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("CLI blocked while attempting to replace a FIFO");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

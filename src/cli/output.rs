@@ -4,8 +4,10 @@
 //! `<cwd>/output/` after resolving `.` and `..`, including absolute paths.
 //! Symlink components spelled below `output/` are refused; an alias is accepted
 //! only when its canonical destination remains inside the root. Generated
-//! directories and files use `create_dir`/`create_new`, so pre-existing paths
-//! are refused instead of reused or followed. This is an ownership check, not a
+//! Fresh directories use `create_dir`; new files use `create_new`. Existing
+//! regular files are replaced by writing a sibling temporary file and renaming
+//! it over the target, so other hard links keep the old contents. Special files
+//! and symlinks are refused before opening. This is an ownership check, not a
 //! claim of race-freedom against an actively hostile concurrent process mutating
 //! the filesystem between checks.
 
@@ -74,22 +76,8 @@ fn write_safely_under(root: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
 
     match std::fs::symlink_metadata(&target) {
         Ok(metadata) => {
-            if metadata.file_type().is_symlink() {
-                return Err(redirect_error(&target));
-            }
-            if metadata.is_dir() {
-                return Err(Error::Io(format!(
-                    "refusing to replace directory {} with a file",
-                    target.display()
-                )));
-            }
-            // Existing regular files inside output/ may be replaced.
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&target)?;
-            file.write_all(bytes)?;
-            Ok(())
+            validate_replace_target(&target, &metadata)?;
+            replace_file_atomically(&target, bytes)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             match std::fs::OpenOptions::new()
@@ -104,17 +92,76 @@ fn write_safely_under(root: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     // Re-check without following a link that may have appeared.
                     let metadata = std::fs::symlink_metadata(&target)?;
-                    if metadata.file_type().is_symlink() || metadata.is_dir() {
-                        return Err(redirect_error(&target));
-                    }
-                    std::fs::write(&target, bytes)?;
-                    Ok(())
+                    validate_replace_target(&target, &metadata)?;
+                    replace_file_atomically(&target, bytes)
                 }
                 Err(error) => Err(error.into()),
             }
         }
         Err(error) => Err(error.into()),
     }
+}
+
+fn validate_replace_target(path: &Path, metadata: &std::fs::Metadata) -> Result<()> {
+    if metadata.file_type().is_symlink() {
+        return Err(redirect_error(path));
+    }
+    if metadata.is_dir() {
+        return Err(Error::Io(format!(
+            "refusing to replace directory {} with a file",
+            path.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(Error::Io(format!(
+            "refusing to replace non-regular file {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn replace_file_atomically(target: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| Error::Io(format!("{} has no parent", target.display())))?;
+    for attempt in 0..64 {
+        let sequence = NEXT_WORKSPACE.fetch_add(1, Ordering::SeqCst);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let temporary = parent.join(format!(
+            ".gba-native-write-{}-{nanos}-{sequence}-{attempt}",
+            std::process::id()
+        ));
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if let Err(error) = file.write_all(bytes) {
+            drop(file);
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.into());
+        }
+        drop(file);
+        match std::fs::rename(&temporary, target) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(error.into());
+            }
+        }
+    }
+    Err(Error::Io(format!(
+        "could not allocate a temporary file beside {}",
+        target.display()
+    )))
 }
 
 fn create_fresh_directory_under(root: &Path, path: &Path) -> Result<PathBuf> {
