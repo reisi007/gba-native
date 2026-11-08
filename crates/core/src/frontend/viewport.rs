@@ -119,6 +119,18 @@ mod tests {
                 clipped: false
             }
         );
+        // DCI 4K uses the same 13x guest image, centred in the wider output.
+        assert_eq!(
+            compute_viewport(240, 160, 4096, 2160),
+            Viewport {
+                x: 488,
+                y: 40,
+                width: 3120,
+                height: 2080,
+                scale: 13,
+                clipped: false
+            }
+        );
     }
 
     #[test]
