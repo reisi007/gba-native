@@ -29,14 +29,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Rune host gate (headless)
-        run: bash scripts/frontend.sh
-
-      - name: Install Mesa software Vulkan for native render check
+      - name: Install Linux host and software Vulkan dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libvulkan1 mesa-vulkan-drivers
+          sudo apt-get install --yes libxkbcommon-dev libvulkan1 mesa-vulkan-drivers
+
+      - name: Rune host gate (headless)
+        run: bash scripts/frontend.sh
 
       - name: Render Rune UI with native software Vulkan
         if: matrix.os == 'ubuntu-latest'
