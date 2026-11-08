@@ -1980,3 +1980,21 @@ on-device MediaPlayer playback remains outside CI.
   hardware line timing, waitstates, HBlank/drawing phases, DMA-event scheduling
   or general game compatibility is claimed. This is a partial issue #4 slice;
   the issue remains open.
+
+## Round: affine BG mosaic snapshot slice (2026-11-08)
+
+- Mode 1 affine BG mosaic now uses the existing BG horizontal/vertical MOSAIC
+  sizes and BGxCNT enable bit. Each screen-space group samples the affine
+  transform at the group's upper-left pixel; text BG mosaic behavior is
+  unchanged. OBJ mosaic and scanline/frame effects remain unsupported.
+- The `display_layers` target checks text BG horizontal mosaic and 3x2 affine
+  BG groups with an identity transform and varied 8bpp source pixels. It asserts
+  horizontal and vertical group origins plus distinct colors at the next group
+  boundaries. All 9 tests pass.
+- `cargo fmt --check` passes, and a fresh-target `./scripts/full.sh` ends with
+  `==> full gate passed` (hard source-size gate, Ratchet fast/slow, format,
+  Clippy, debug/release workspace tests, demo and synthetic native AOT proof).
+- This is a static synthetic snapshot check, not a timing or scanline PPU test.
+  It is a partial issue #3 slice; native-resolution reference images, scanline
+  effects and the remaining acceptance work are not established, so #3 remains
+  open.

@@ -83,9 +83,9 @@ fn mode1_bg2_affine_identity_samples_the_map() {
 }
 
 #[test]
-fn mode1_text_bg_mosaic_is_supported_but_affine_bg_mosaic_is_not() {
+fn mode1_text_and_affine_bg_mosaic_sample_screen_group_origins() {
     let mut bus = bus();
-    for index in 1..=8 {
+    for index in 1..=64 {
         put_palette(&mut bus, index, index as u16);
     }
     for x in 0..4 {
@@ -100,7 +100,7 @@ fn mode1_text_bg_mosaic_is_supported_but_affine_bg_mosaic_is_not() {
     bus.write16(VRAM_BASE, 1).expect("BG1 map");
     bus.write16(BG1CNT_ADDR, 0x00C0)
         .expect("8bpp BG1 with mosaic");
-    bus.write16(MOSAIC_ADDR, 2).expect("3x1 BG mosaic");
+    bus.write16(MOSAIC_ADDR, 0x0012).expect("3x2 BG mosaic");
     bus.write16(DISPCNT_ADDR, 0x0001 | BG1_ON)
         .expect("Mode 1 BG1");
 
@@ -109,15 +109,38 @@ fn mode1_text_bg_mosaic_is_supported_but_affine_bg_mosaic_is_not() {
     assert_eq!(image.pixel(2, 0), display::rgb555_to_rgb888(1));
     assert_eq!(image.pixel(3, 0), display::rgb555_to_rgb888(4));
 
+    for y in 0..8 {
+        for x in (0..8).step_by(2) {
+            let low = (1 + y * 8 + x) as u8;
+            let high = low + 1;
+            bus.write16(
+                VRAM_BASE + 64 + (y * 8 + x) as u32,
+                u16::from_le_bytes([low, high]),
+            )
+            .expect("affine BG tile pixels");
+        }
+    }
+    for (addr, value) in [
+        (BG2PA_ADDR, 0x0100),
+        (BG2PB_ADDR, 0),
+        (BG2PC_ADDR, 0),
+        (BG2PD_ADDR, 0x0100),
+    ] {
+        bus.write16(addr, value).expect("BG2 matrix");
+    }
+    bus.write32(BG2X_ADDR, 0).expect("BG2X");
+    bus.write32(BG2Y_ADDR, 0).expect("BG2Y");
     bus.write16(BG2CNT_ADDR, 0x00C0)
         .expect("8bpp affine BG2 with mosaic");
     bus.write16(DISPCNT_ADDR, 0x0001 | BG2_ON)
         .expect("Mode 1 affine BG2");
-    assert!(matches!(
-        display::snapshot(&bus),
-        Err(gba_native_core::error::Error::UnsupportedBgControl { reason, .. })
-            if reason.contains("mosaic")
-    ));
+    let image = display::snapshot(&bus).expect("Mode 1 affine BG mosaic");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(2, 0), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(3, 0), display::rgb555_to_rgb888(4));
+    assert_eq!(image.pixel(1, 1), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(2, 2), display::rgb555_to_rgb888(17));
+    assert_eq!(image.pixel(3, 2), display::rgb555_to_rgb888(20));
 }
 
 #[test]

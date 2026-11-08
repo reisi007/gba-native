@@ -13,6 +13,9 @@ pub(super) struct AffineBg<'a> {
     wrap: bool,
     priority: u8,
     order: u8,
+    mosaic_enabled: bool,
+    mosaic_width: usize,
+    mosaic_height: usize,
     matrix: [i16; 4],
     reference: [u32; 2],
 }
@@ -20,12 +23,6 @@ pub(super) struct AffineBg<'a> {
 impl<'a> AffineBg<'a> {
     pub(super) fn new(bus: &'a Bus, index: u8) -> Result<Self> {
         let bgcnt = bus.bgcnt(index);
-        if bgcnt & 0x0040 != 0 {
-            return Err(Error::UnsupportedBgControl {
-                bgcnt,
-                reason: "mosaic is not implemented",
-            });
-        }
         if bgcnt & 0x0030 != 0 || bgcnt & 0x0080 == 0 {
             return Err(Error::UnsupportedBgControl {
                 bgcnt,
@@ -38,6 +35,7 @@ impl<'a> AffineBg<'a> {
             2 => 512,
             _ => 1024,
         };
+        let mosaic = bus.mosaic();
         Ok(Self {
             bus,
             size,
@@ -46,19 +44,32 @@ impl<'a> AffineBg<'a> {
             wrap: bgcnt & 0x2000 != 0,
             priority: (bgcnt & 0x3) as u8,
             order: 1 + index,
+            mosaic_enabled: bgcnt & 0x0040 != 0,
+            mosaic_width: usize::from(mosaic & 0x000F) + 1,
+            mosaic_height: usize::from((mosaic >> 4) & 0x000F) + 1,
             matrix: bus.bg_affine(index - 2),
             reference: bus.bg_reference(index - 2),
         })
     }
 
     pub(super) fn pixel(&self, x: usize, y: usize) -> Result<Option<LayerPixel>> {
+        let sample_x = if self.mosaic_enabled {
+            x - x % self.mosaic_width
+        } else {
+            x
+        };
+        let sample_y = if self.mosaic_enabled {
+            y - y % self.mosaic_height
+        } else {
+            y
+        };
         let source_x = (i64::from(self.reference[0] as i32)
-            + i64::from(self.matrix[0]) * x as i64
-            + i64::from(self.matrix[1]) * y as i64)
+            + i64::from(self.matrix[0]) * sample_x as i64
+            + i64::from(self.matrix[1]) * sample_y as i64)
             >> 8;
         let source_y = (i64::from(self.reference[1] as i32)
-            + i64::from(self.matrix[2]) * x as i64
-            + i64::from(self.matrix[3]) * y as i64)
+            + i64::from(self.matrix[2]) * sample_x as i64
+            + i64::from(self.matrix[3]) * sample_y as i64)
             >> 8;
         let (source_x, source_y) = if self.wrap {
             (
