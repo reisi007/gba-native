@@ -1,4 +1,4 @@
-//! Static Mode 0 text backgrounds: BG0-BG3 tile maps and 4/8bpp tiles.
+//! Static Mode 0/1 text backgrounds: tile maps, 4/8bpp tiles and BG mosaic.
 //!
 //! The renderer reads the current VRAM/register state once. It never
 //! approximates a layer: unsupported BGxCNT bits are explicit errors.
@@ -18,16 +18,13 @@ pub(super) struct TextBg<'a> {
     priority: u8,
     scroll_x: u16,
     scroll_y: u16,
+    mosaic_enabled: bool,
+    mosaic_width: usize,
+    mosaic_height: usize,
     order: u8,
 }
 
 pub(super) fn validate_control(bgcnt: u16) -> Result<()> {
-    if bgcnt & 0x0040 != 0 {
-        return Err(Error::UnsupportedBgControl {
-            bgcnt,
-            reason: "mosaic is not implemented",
-        });
-    }
     if bgcnt & 0x2030 != 0 {
         return Err(Error::UnsupportedBgControl {
             bgcnt,
@@ -47,6 +44,7 @@ impl<'a> TextBg<'a> {
         let char_base = (((bgcnt >> 2) & 0x3) as usize) * 0x4000;
         let screen_base = (((bgcnt >> 8) & 0x1F) as usize) * 0x800;
         let (scroll_x, scroll_y) = bus.bg_scroll(index);
+        let mosaic = bus.mosaic();
         Ok(Self {
             bus,
             width,
@@ -57,13 +55,26 @@ impl<'a> TextBg<'a> {
             priority: (bgcnt & 0x3) as u8,
             scroll_x: scroll_x & 0x01FF,
             scroll_y: scroll_y & 0x01FF,
+            mosaic_enabled: bgcnt & 0x0040 != 0,
+            mosaic_width: usize::from(mosaic & 0x000F) + 1,
+            mosaic_height: usize::from((mosaic >> 4) & 0x000F) + 1,
             order: 1 + index,
         })
     }
 
     pub(super) fn pixel(&self, x: usize, y: usize) -> Result<Option<LayerPixel>> {
-        let source_x = (x + self.scroll_x as usize) % self.width;
-        let source_y = (y + self.scroll_y as usize) % self.height;
+        let sample_x = if self.mosaic_enabled {
+            x - x % self.mosaic_width
+        } else {
+            x
+        };
+        let sample_y = if self.mosaic_enabled {
+            y - y % self.mosaic_height
+        } else {
+            y
+        };
+        let source_x = (sample_x + self.scroll_x as usize) % self.width;
+        let source_y = (sample_y + self.scroll_y as usize) % self.height;
         let tile_x = source_x / 8;
         let tile_y = source_y / 8;
         let screen_quadrants_wide = self.width / 256;

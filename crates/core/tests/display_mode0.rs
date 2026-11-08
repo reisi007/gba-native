@@ -1,7 +1,8 @@
 //! Independent pixel oracles for the static Mode 0 BG0 text-background subset.
 
 use gba_native_core::bus::{
-    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, PALETTE_BASE, VRAM_BASE,
+    BG0CNT_ADDR, BG0HOFS_ADDR, BG0VOFS_ADDR, Bus, DISPCNT_ADDR, MOSAIC_ADDR, PALETTE_BASE,
+    VRAM_BASE,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::display;
@@ -153,6 +154,36 @@ fn mode0_scroll_uses_low_nine_bits_and_wraps_both_axes() {
 }
 
 #[test]
+fn mode0_text_bg_mosaic_samples_screen_aligned_upper_left_pixels() {
+    let mut bus = bus();
+    for index in 1..=64 {
+        put_palette(&mut bus, index, index as u16);
+    }
+    let mut tile = [0; 64];
+    for (index, pixel) in tile.iter_mut().enumerate() {
+        *pixel = (index + 1) as u8;
+    }
+    write_vram(&mut bus, 64, &tile);
+    put_map_entry(&mut bus, 0, 1);
+    bus.write16(MOSAIC_ADDR, 0x0012).expect("3x2 BG mosaic");
+    bus.write16(BG0HOFS_ADDR, 1).expect("horizontal scroll");
+    bus.write16(BG0VOFS_ADDR, 1).expect("vertical scroll");
+    set_mode0(&mut bus, 0x00C0);
+
+    let image = display::snapshot(&bus).expect("mosaic snapshot");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(10));
+    assert_eq!(image.pixel(2, 1), display::rgb555_to_rgb888(10));
+    assert_eq!(image.pixel(3, 1), display::rgb555_to_rgb888(13));
+    assert_eq!(image.pixel(5, 2), display::rgb555_to_rgb888(29));
+
+    // MOSAIC sizes alone do not enable the effect for this background.
+    bus.write16(BG0CNT_ADDR, 0x0080)
+        .expect("disable BG0 mosaic");
+    let image = display::snapshot(&bus).expect("non-mosaic snapshot");
+    assert_eq!(image.pixel(2, 1), display::rgb555_to_rgb888(20));
+}
+
+#[test]
 fn mode0_disabled_bg_uses_backdrop_and_forced_blank_is_white() {
     let mut bus = bus();
     put_palette(&mut bus, 0, 0x03E0);
@@ -170,7 +201,7 @@ fn mode0_disabled_bg_uses_backdrop_and_forced_blank_is_white() {
     let image = display::snapshot(&bus).expect("forced-blank snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_FFFF);
 
-    for bgcnt in [0x0040, 0x0010, 0x2000] {
+    for bgcnt in [0x0010, 0x2000] {
         bus.write16(BG0CNT_ADDR, bgcnt).expect("unsupported BG0CNT");
         assert!(matches!(
             display::snapshot(&bus),
@@ -180,13 +211,9 @@ fn mode0_disabled_bg_uses_backdrop_and_forced_blank_is_white() {
 }
 
 #[test]
-fn mode0_rejects_mosaic_reserved_bgcnt_and_unimplemented_layers() {
+fn mode0_rejects_reserved_bgcnt_and_unimplemented_layers() {
     let mut bus = bus();
-    for (bgcnt, reason) in [
-        (0x0040, "mosaic"),
-        (0x0010, "reserved"),
-        (0x2000, "reserved"),
-    ] {
+    for (bgcnt, reason) in [(0x0010, "reserved"), (0x2000, "reserved")] {
         set_mode0(&mut bus, bgcnt);
         assert!(matches!(
             display::snapshot(&bus),

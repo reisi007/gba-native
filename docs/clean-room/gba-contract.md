@@ -798,8 +798,10 @@ scanline PPU, frame renderer or timing claim.
   select SC0..SC3 in row-major order. Text scroll uses the low nine bits and
   wraps at the selected dimensions. Map entries select a tile, both flips and
   (4bpp) a palette bank. 4bpp tiles are 32 bytes, 8bpp tiles 64 bytes; palette
-  index 0 is transparent. Mosaic (bit 6), reserved bits and a 4bpp affine BG
-  fail explicitly.
+  index 0 is transparent. Text BG mosaic (BGxCNT bit 6) samples the upper-left
+  screen pixel of each MOSAIC BG H/V group (field value plus one, 1..=16) before
+  applying BG scroll; each BG enables it independently. Reserved bits and a
+  4bpp affine BG fail explicitly.
 - The BG2 affine layer is 8bpp only. Its 8-bit map and 8bpp tiles use the
   documented character/screen bases; size selects 128, 256, 512 or 1024 pixels
   per axis; bit 13 enables wrapping. `BG2PA`..`BG2PD` and `BG2X`/`BG2Y` are
@@ -829,10 +831,10 @@ scanline PPU, frame renderer or timing claim.
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
   In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
-- Mosaic, 2D OBJ tile mapping, OBJ double-size affine sprites, window 1,
-  nonidentity bitmap/affine combinations and scanline effects remain absent.
-  Unsupported registers or layers fail explicitly rather than being treated as
-  no-ops.
+- Affine-BG and OBJ mosaic, 2D OBJ tile mapping, OBJ double-size affine sprites,
+  window 1, nonidentity bitmap/affine combinations and scanline effects remain
+  absent. Unsupported registers or layers fail explicitly rather than being
+  treated as no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output

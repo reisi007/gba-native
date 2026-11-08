@@ -103,6 +103,10 @@ impl IoState {
         (self.bghofs[index as usize], self.bgvofs[index as usize])
     }
 
+    pub(super) fn mosaic(&self) -> u16 {
+        self.mosaic
+    }
+
     pub(super) fn bg_affine(&self, index: u8) -> [i16; 4] {
         let values = self.bg_affine[index as usize];
         [

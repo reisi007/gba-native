@@ -11,6 +11,10 @@ impl Bus {
         self.io.bg_scroll(index)
     }
 
+    pub(crate) fn mosaic(&self) -> u16 {
+        self.io.mosaic()
+    }
+
     /// BG2/BG3 affine matrix (`PA`, `PB`, `PC`, `PD`) as documented.
     pub(crate) fn bg_affine(&self, index: u8) -> [i16; 4] {
         self.io.bg_affine(index)

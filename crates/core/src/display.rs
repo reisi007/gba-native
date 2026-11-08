@@ -3,8 +3,9 @@
 //! This is not a scanline PPU: it reads the current DISPCNT/VRAM/palette state
 //! once. Mode 0 BG0-BG3 text + OBJ and Mode 1 BG0/BG1 text + BG2 affine + OBJ
 //! are composed with window 0, the OBJ window and BLDCNT alpha/brightness
-//! blending. 2D OBJ mapping, semi-transparent OBJ mode, double-size affine OBJ,
-//! mosaic, window 1 and Mode 2 are explicit errors, never silent approximations.
+//! blending. BG mosaic is supported for text backgrounds; 2D OBJ mapping,
+//! semi-transparent OBJ mode, double-size affine OBJ, affine/OBJ mosaic, window
+//! 1 and Mode 2 are explicit errors, never silent approximations.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};

@@ -210,6 +210,12 @@ Relevant anchors actually consulted for this milestone:
   2026-10-29 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>; that
   retrieval was not separately retained or hashed.
 
+- `#lcd-io-mosaic-function`: MOSAIC BG horizontal/vertical sizes are encoded as
+  size minus one; BGxCNT bit 6 enables BG mosaic per background; each covered
+  screen-pixel group takes the color of its upper-left pixel. Consulted on
+  2026-11-08 in the S1 rendering at <https://mgba-emu.github.io/gbatek/>; this
+  retrieval was not separately retained or hashed.
+
 Only ARMv4T behavior applies. This reference also describes newer ARM CPUs and
 other consoles; their opcodes/features must not accidentally enter the GBA core.
 The implemented subset is deliberately narrower than the document; see

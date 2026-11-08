@@ -1,9 +1,9 @@
 //! Pixel oracles for Mode 0 BG1-BG3/OBJ and Mode 1 affine/window/blend layers.
 
 use gba_native_core::bus::{
-    BG0CNT_ADDR, BG2CNT_ADDR, BG2PA_ADDR, BG2PB_ADDR, BG2PC_ADDR, BG2PD_ADDR, BG2X_ADDR, BG2Y_ADDR,
-    BLDALPHA_ADDR, BLDCNT_ADDR, BLDY_ADDR, Bus, DISPCNT_ADDR, OAM_BASE, PALETTE_BASE, VRAM_BASE,
-    WIN0H_ADDR, WIN0V_ADDR, WININ_ADDR, WINOUT_ADDR,
+    BG0CNT_ADDR, BG1CNT_ADDR, BG2CNT_ADDR, BG2PA_ADDR, BG2PB_ADDR, BG2PC_ADDR, BG2PD_ADDR,
+    BG2X_ADDR, BG2Y_ADDR, BLDALPHA_ADDR, BLDCNT_ADDR, BLDY_ADDR, Bus, DISPCNT_ADDR, MOSAIC_ADDR,
+    OAM_BASE, PALETTE_BASE, VRAM_BASE, WIN0H_ADDR, WIN0V_ADDR, WININ_ADDR, WINOUT_ADDR,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::display;
@@ -80,6 +80,44 @@ fn mode1_bg2_affine_identity_samples_the_map() {
         .expect("Mode 1 BG2");
     let image = display::snapshot(&bus).expect("affine snapshot");
     assert_eq!(image.pixel(0, 0), 0x0000_FF00);
+}
+
+#[test]
+fn mode1_text_bg_mosaic_is_supported_but_affine_bg_mosaic_is_not() {
+    let mut bus = bus();
+    for index in 1..=8 {
+        put_palette(&mut bus, index, index as u16);
+    }
+    for x in 0..4 {
+        let low = (x * 2 + 1) as u8;
+        let high = (x * 2 + 2) as u8;
+        bus.write16(
+            VRAM_BASE + 64 + (x * 2) as u32,
+            u16::from_le_bytes([low, high]),
+        )
+        .expect("BG1 tile pixels");
+    }
+    bus.write16(VRAM_BASE, 1).expect("BG1 map");
+    bus.write16(BG1CNT_ADDR, 0x00C0)
+        .expect("8bpp BG1 with mosaic");
+    bus.write16(MOSAIC_ADDR, 2).expect("3x1 BG mosaic");
+    bus.write16(DISPCNT_ADDR, 0x0001 | BG1_ON)
+        .expect("Mode 1 BG1");
+
+    let image = display::snapshot(&bus).expect("Mode 1 text mosaic");
+    assert_eq!(image.pixel(0, 0), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(2, 0), display::rgb555_to_rgb888(1));
+    assert_eq!(image.pixel(3, 0), display::rgb555_to_rgb888(4));
+
+    bus.write16(BG2CNT_ADDR, 0x00C0)
+        .expect("8bpp affine BG2 with mosaic");
+    bus.write16(DISPCNT_ADDR, 0x0001 | BG2_ON)
+        .expect("Mode 1 affine BG2");
+    assert!(matches!(
+        display::snapshot(&bus),
+        Err(gba_native_core::error::Error::UnsupportedBgControl { reason, .. })
+            if reason.contains("mosaic")
+    ));
 }
 
 #[test]
@@ -187,6 +225,12 @@ fn obj_semi_transparent_and_double_size_are_explicit_errors() {
     bus.write16(OAM_BASE, 0x0400)
         .expect("semi-transparent mode");
     bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D).expect("OBJ");
+    assert!(matches!(
+        display::snapshot(&bus),
+        Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
+    ));
+
+    bus.write16(OAM_BASE, 0x1000).expect("OBJ mosaic");
     assert!(matches!(
         display::snapshot(&bus),
         Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
