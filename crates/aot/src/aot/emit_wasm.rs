@@ -146,12 +146,44 @@ pub fn run_rom(bytes: Vec<u8>) -> std::result::Result<String, JsValue> {
 /// `audio_sample_rate()`; the caller schedules playback. No unbounded run,
 /// filesystem access, speaker access or UI exists here. The ROM binding checks
 /// are identical to `run_rom`, so a wrong image throws before any guest state
-/// is constructed.
+/// is constructed. This compatibility entry uses the default audio settings.
 #[wasm_bindgen]
 pub fn run_rom_audio(bytes: Vec<u8>) -> std::result::Result<Vec<i16>, JsValue> {
-    let mut audio = Some(gba_native::audio::AudioEngine::new(
-        gba_native::audio::AudioSettings::default(),
-    ));
+    run_rom_audio_configured(bytes, gba_native::audio::AudioSettings::default())
+}
+
+/// Execute the same bounded program with the caller's persisted audio settings.
+///
+/// `master_volume` is an integer in 0..=100. The caller remains responsible for
+/// loading and persisting the values, scheduling PCM and honoring browser policy.
+#[wasm_bindgen]
+pub fn run_rom_audio_with_settings(
+    bytes: Vec<u8>,
+    master_volume: f64,
+    muted: bool,
+) -> std::result::Result<Vec<i16>, JsValue> {
+    if !master_volume.is_finite()
+        || master_volume.fract() != 0.0
+        || !(0.0..=100.0).contains(&master_volume)
+    {
+        return Err(JsValue::from_str(
+            "master volume must be an integer in 0..=100",
+        ));
+    }
+    run_rom_audio_configured(
+        bytes,
+        gba_native::audio::AudioSettings {
+            master_volume: master_volume as u8,
+            muted,
+        },
+    )
+}
+
+fn run_rom_audio_configured(
+    bytes: Vec<u8>,
+    settings: gba_native::audio::AudioSettings,
+) -> std::result::Result<Vec<i16>, JsValue> {
+    let mut audio = Some(gba_native::audio::AudioEngine::new(settings));
     execute(bytes, &mut audio).map_err(|error| JsValue::from_str(&format!("{error}")))?;
     let mut engine = audio.expect("the audio engine stays present for this call");
     Ok(engine.take_samples())

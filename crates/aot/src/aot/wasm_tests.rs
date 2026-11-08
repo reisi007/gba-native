@@ -19,6 +19,13 @@ fn wasm_module_embeds_binding_constants_without_rom_bytes() {
     assert!(source.contains("#[wasm_bindgen]"));
     assert!(source.contains("pub fn run_rom(bytes: Vec<u8>)"));
     assert!(source.contains("pub fn run_rom_audio(bytes: Vec<u8>)"));
+    assert!(source.contains(
+        "pub fn run_rom_audio_with_settings(\n    bytes: Vec<u8>,\n    master_volume: f64,\n    muted: bool,"
+    ));
+    assert!(source.contains("!master_volume.is_finite()"));
+    assert!(source.contains("master_volume.fract() != 0.0"));
+    assert!(source.contains("!(0.0..=100.0).contains(&master_volume)"));
+    assert!(source.contains("master_volume: master_volume as u8"));
     assert!(source.contains("let mut bus = Bus::new(cart);"));
     assert!(source.contains("pub fn audio_sample_rate() -> u32"));
     assert!(source.contains(&format!(
@@ -238,6 +245,9 @@ fn wasm_readme_documents_the_callable_module_and_external_binding() {
     for marker in [
         "run_rom(bytes)",
         "run_rom_audio",
+        "run_rom_audio_with_settings(bytes, master_volume, muted)",
+        "caller-persisted integer volume (0..=100) and mute state",
+        "Non-finite, fractional and out-of-range",
         "audio_sample_rate()",
         "PSG and Direct Sound",
         "Uint8Array",

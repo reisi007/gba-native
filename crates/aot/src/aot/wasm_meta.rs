@@ -105,14 +105,17 @@ pub fn wasm_readme(artifact: &AotArtifact, budget: u64) -> String {
          cartridge, CPU or bus is constructed.\n\n\
          ## JavaScript API\n\n\
          ```js\n\
-         import init, { run_rom, run_rom_audio, audio_sample_rate }\n\
+         import init, { run_rom, run_rom_audio, run_rom_audio_with_settings, audio_sample_rate }\n\
            from \"./pkg/gba_native_wasm_module.js\";\n\n\
          await init();\n\
          // `input` is a caller-provided <input type=\"file\"> element; this module\n\
          // generates no page UI and the selected file stays local to the browser.\n\
          const bytes = new Uint8Array(await input.files[0].arrayBuffer());\n\
          const report = run_rom(bytes); // Uint8Array -> compact key=value report\n\
-         const pcm = run_rom_audio(bytes); // Int16Array of mono guest PCM\n\
+         // Load from the application's existing persistence adapter.\n\
+         const settings = await loadPersistedAudioSettings();\n\
+         const pcm = run_rom_audio_with_settings(bytes, settings.master_volume, settings.muted);\n\
+         // Int16Array of mono guest PCM; settings come from the caller's persistence layer.\n\
          console.log(report, pcm.length, audio_sample_rate());\n\
          ```\n\n\
          The bytes come from a browser-local `File` selected by the user. Nothing is\n\
@@ -124,12 +127,16 @@ pub fn wasm_readme(artifact: &AotArtifact, budget: u64) -> String {
          `pc`, `cpsr`, `thumb`, `budget`, `budget_remaining`, `budget_used`,\n\
          `fallbacks` and CPU/bus/ROM digests. Core failures are thrown as JS errors;\n\
          unsupported instructions or I/O are never silently ignored.\n\n\
-         `run_rom_audio` runs the same bounded program with the stateful mixer and\n\
-         returns mono signed 16-bit PCM at `audio_sample_rate()` (32768 Hz), mixing\n\
-         PSG and Direct Sound FIFO playback from guest state. It performs no\n\
-         playback, buffering or scheduling itself: the caller owns the WebAudio\n\
-         sink. A run produces exactly the samples due inside its instruction budget;\n\
-         that is not a track length or real-time guarantee.\n\n\
+         `run_rom_audio` runs the same bounded program with default host audio\n\
+         settings. `run_rom_audio_with_settings(bytes, master_volume, muted)` accepts\n\
+         caller-persisted integer volume (0..=100) and mute state, then returns mono signed\n\
+         16-bit PCM at `audio_sample_rate()` (32768 Hz), mixing PSG and Direct Sound\n\
+         FIFO playback from guest state. Non-finite, fractional and out-of-range\n\
+         volume values are rejected. Neither\n\
+         function performs playback, buffering or scheduling: the caller owns the\n\
+         WebAudio sink and its settings persistence. A run produces exactly the\n\
+         samples due inside its instruction budget; that is not a track length or\n\
+         real-time guarantee.\n\n\
          ## Explicit non-claims\n\n\
          An exhausted instruction budget is not a frame, boot or playability claim.\n\
          This module has no browser UI, no GPU presentation, no game input, no saves\n\
