@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Provision the pinned browser-build tools shared by Rune and the legacy apps/web reference.
+# Provision the pinned tools used by the Rune browser gate and WASM builds.
 #
 # Everything is installed into the repository-ignored target/ tree; nothing is
 # installed globally and no user configuration is changed:
 #
 #   target/tools/bin/                wasm-bindgen CLI 0.2.129 (cargo install --root)
 #   target/tools/node-pinned/        official Node 24.22.1, provenance-verified
-#   target/web-tools/npm/            npm-installed Tailwind 4, DaisyUI 5, Playwright
+#   target/web-tools/npm/            npm-installed Playwright for Rune browser E2E
 #   target/web-tools/cargo-install/  cargo install's own target directory
 #
 # The binary pins are exact. A missing tool is a hard failure with the command
@@ -140,7 +140,7 @@ ACTUAL=$("$TOOLS_DIR/bin/wasm-bindgen" --version 2>/dev/null || true)
 [ "$ACTUAL" = "wasm-bindgen $WASM_BINDGEN_VERSION" ] ||
   fail "expected wasm-bindgen $WASM_BINDGEN_VERSION in target/tools, got '$ACTUAL'"
 
-info "Node $NODE_VERSION for Tailwind and the Playwright runner (pinned archive + binary provenance)"
+info "Node $NODE_VERSION for the Playwright runner (pinned archive + binary provenance)"
 case "$(uname -s)" in
   Darwin) NODE_OS="darwin" ;;
   Linux) NODE_OS="linux" ;;
@@ -232,12 +232,12 @@ NODE_BIN="$NODE_LINK/bin/node"
 [ "$("$NODE_BIN" --version)" = "v$NODE_VERSION" ] ||
   fail "expected Node v$NODE_VERSION at $NODE_BIN"
 
-[ -f apps/web/package.json ] || fail "apps/web/package.json is missing"
-[ -f apps/web/package-lock.json ] || fail "apps/web/package-lock.json is missing"
+[ -f tools/browser/package.json ] || fail "tools/browser/package.json is missing"
+[ -f tools/browser/package-lock.json ] || fail "tools/browser/package-lock.json is missing"
 
-info "npm tooling from apps/web/package.json + package-lock.json into target/web-tools/npm"
+info "npm tooling from tools/browser/package.json + package-lock.json into target/web-tools/npm"
 mkdir -p "$NPM_DIR"
-cp apps/web/package.json apps/web/package-lock.json "$NPM_DIR"/
+cp tools/browser/package.json tools/browser/package-lock.json "$NPM_DIR"/
 (
   cd "$NPM_DIR"
   PATH="$NODE_LINK/bin:$PATH" npm ci --ignore-scripts --no-audit --no-fund
@@ -248,14 +248,11 @@ printf 'node %s\n' "$("$NODE_BIN" --version)"
 printf '%s\n' "$ACTUAL"
 VERSIONS=$(cd "$NPM_DIR" && "$NODE_BIN" -e '
 const fs = require("fs");
-for (const name of ["daisyui", "@tailwindcss/cli", "@playwright/test"]) {
-  const version = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, "utf8")).version;
-  console.log(`${name} ${version}`);
-}
+const name = "@playwright/test";
+const version = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, "utf8")).version;
+console.log(`${name} ${version}`);
 ')
 printf '%s\n' "$VERSIONS"
-printf '%s\n' "$VERSIONS" | grep -qx 'daisyui 5.7.50' || fail "unexpected daisyUI version"
-printf '%s\n' "$VERSIONS" | grep -qx '@tailwindcss/cli 4.3.3' || fail "unexpected Tailwind CLI version"
 printf '%s\n' "$VERSIONS" | grep -qx '@playwright/test 1.64.1' || fail "unexpected Playwright version"
 
 info "browser tooling ready (pinned, repository-owned caches)"

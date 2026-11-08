@@ -1,0 +1,8 @@
+{
+  "name": "gba-native-browser-tools",
+  "private": true,
+  "description": "Pinned Playwright tooling for the canonical Rune browser gate",
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

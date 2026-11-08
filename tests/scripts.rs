@@ -5,17 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[path = "support/linux_ab_diagnostics.rs"]
-mod linux_ab_diagnostics;
-#[path = "support/linux_gpu_features.rs"]
-mod linux_gpu_features;
-#[path = "support/linux_gpu_matrix.rs"]
-mod linux_gpu_matrix;
-#[path = "support/linux_gpu_preflight.rs"]
-mod linux_gpu_preflight;
-#[path = "support/linux_webgpu_smoke.rs"]
-mod linux_webgpu_smoke;
-
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -55,151 +44,6 @@ fn path_with_cargo(extra: &Path) -> String {
         cargo_dir.display(),
         std::env::var("PATH").unwrap_or_default()
     )
-}
-
-fn host_program(name: &str) -> PathBuf {
-    let path = std::env::var_os("PATH").expect("host PATH is set");
-    for directory in std::env::split_paths(&path) {
-        let candidate = directory.join(name);
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-    panic!("host PATH has no {name}");
-}
-
-fn executable(path: &Path, contents: &str) {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::write(path, contents).expect("write fake executable");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-}
-
-fn linux_ab_fixture() -> (TempDir, PathBuf, PathBuf, PathBuf) {
-    let temp = TempDir::new("linux-ab");
-    let root = temp.path().to_path_buf();
-    let script_dir = root.join("scripts");
-    let dist = root.join("output/web-dist");
-    let server_dir = root.join("target/web/debug");
-    let node_dir = root.join("target/tools/node-pinned/bin");
-    let playwright_dir = root.join("target/web-tools/npm/node_modules/@playwright/test");
-    let browser_cache = root.join("home/Library/Caches/ms-playwright/chromium-test-revision");
-    let apps_web = root.join("apps/web");
-    let bin = root.join("bin");
-    for directory in [
-        &script_dir,
-        &dist,
-        &server_dir,
-        &node_dir,
-        &playwright_dir,
-        &browser_cache,
-        &apps_web,
-        &bin,
-    ] {
-        std::fs::create_dir_all(directory).expect("create web E2E fixture directory");
-    }
-
-    let repo = repo_root();
-    for script in [
-        "lib.sh",
-        "web-e2e.sh",
-        "web-gpu-launch-args.sh",
-        "web-linux-gpu-smoke.cjs",
-    ] {
-        std::fs::copy(repo.join("scripts").join(script), script_dir.join(script))
-            .expect("copy web E2E script");
-    }
-    for source in [
-        "playwright.config.ts",
-        "playwright.screenshots.config.ts",
-        "tests/functional.spec.ts",
-    ] {
-        let destination = apps_web.join(source);
-        std::fs::create_dir_all(destination.parent().expect("source parent"))
-            .expect("create copied source parent");
-        std::fs::copy(repo.join("apps/web").join(source), destination)
-            .expect("copy Playwright config or suite");
-    }
-    std::fs::write(dist.join("index.html"), "fixture").expect("write fixture bundle");
-    std::fs::write(dist.join("app.0123456789ab.css"), "fixture").expect("write fixture CSS");
-    std::fs::write(
-        playwright_dir.join("cli.js"),
-        "// fake Playwright entry point\n",
-    )
-    .expect("write fake Playwright entry point");
-
-    executable(
-        &server_dir.join("gba-native-web-serve"),
-        "#!/bin/sh\nprintf 'listening on http://127.0.0.1:43210\\n'\nexec sleep 900\n",
-    );
-    executable(
-        &node_dir.join("node"),
-        r##"#!/bin/sh
-if [ "${1:-}" = "-e" ]; then
-  printf 'test-revision\n'
-  exit 0
-fi
-if [ "${1##*/}" = "web-linux-gpu-smoke.cjs" ]; then
-  mode="$2"
-  printf '%s\t%s\t%s\n' "$mode" "$WEB_E2E_LAUNCH_ARGS" "$WEBGPU_SMOKE_OUTPUT_DIR" >> "$SMOKE_CALL_LOG"
-  printf '{"mode":"%s","ok":true}\n' "$mode" > "$WEBGPU_SMOKE_OUTPUT_DIR/result.json"
-  printf 'fake WebGPU smoke %s\n' "$mode"
-  if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$mode" = canvas ]; then exit 19; fi
-  if [ "${SMOKE_HARNESS_FAIL_MODE:-}" = "$mode" ]; then rm -f "$WEBGPU_SMOKE_OUTPUT_DIR/result.json"; exit 23; fi
-  exit 0
-fi
-count=0
-if [ -f "$AB_CALL_LOG.count" ]; then read count < "$AB_CALL_LOG.count"; fi
-count=$((count + 1))
-printf '%s\n' "$count" > "$AB_CALL_LOG.count"
-printf '%s\t%s\n' "$WEB_E2E_LAUNCH_ARGS" "$WEB_E2E_OUTPUT_DIR" >> "$AB_CALL_LOG"
-printf '%s\n' "$*" > "$WEB_E2E_OUTPUT_DIR/command.txt"
-printf 'fake Playwright run %s\n' "$count"
-if [ "${AB_FAIL_VARIANT:-}" = A ] && [ "$count" -eq 1 ]; then exit 17; fi
-if [ "${AB_FAIL_VARIANT:-}" = B ] && [ "$count" -eq 2 ]; then exit 18; fi
-exit 0
-"##,
-    );
-    executable(&bin.join("uname"), "#!/bin/sh\nprintf 'Linux\\n'\n");
-    linux_webgpu_smoke::install_xvfb_stub(&bin);
-
-    let calls = root.join("calls.log");
-    (temp, root, bin, calls)
-}
-
-fn run_linux_ab_fixture(
-    root: &Path,
-    bin: &Path,
-    calls: &Path,
-    launch_args: &str,
-    fail_variant: Option<&str>,
-) -> Output {
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let mut command = Command::new(host_program("bash"));
-    command
-        .arg(root.join("scripts/web-e2e.sh"))
-        .arg("ci")
-        .current_dir(root)
-        .env("PATH", path)
-        .env("HOME", root.join("home"))
-        .env_remove("DISPLAY")
-        .env_remove("XDG_CACHE_HOME")
-        .env_remove("GITHUB_STEP_SUMMARY")
-        .env("CI", "true")
-        .env("WEB_LINUX_AB_DIAGNOSTICS", "1")
-        .env("WEB_E2E_LAUNCH_ARGS", launch_args)
-        .env("AB_CALL_LOG", calls)
-        .env("SMOKE_CALL_LOG", calls.with_extension("smokes.log"));
-    if let Some(variant) = fail_variant {
-        command.env("AB_FAIL_VARIANT", variant);
-    } else {
-        command.env_remove("AB_FAIL_VARIANT");
-    }
-    command.output().expect("run Linux A/B E2E fixture")
 }
 
 fn fake_ratchet(directory: &Path, version: &str, name: &str) -> PathBuf {
@@ -265,7 +109,7 @@ fn full_fails_closed_when_cargo_is_missing() {
 }
 
 #[test]
-fn web_bootstrap_self_test_runs_before_clean_checkout_provisioning() {
+fn browser_tool_bootstrap_self_test_runs_in_a_clean_checkout() {
     let output = Command::new("bash")
         .arg(repo_root().join("tests/bootstrap-web-tools-clean-checkout.sh"))
         .current_dir(repo_root())
@@ -280,17 +124,14 @@ fn web_bootstrap_self_test_runs_before_clean_checkout_provisioning() {
 }
 
 #[test]
-fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
+fn rune_browser_screenshots_use_the_shared_webgpu_launch_preset() {
+    use std::os::unix::fs::PermissionsExt;
+
     let root = repo_root();
     let helper = root.join("scripts/web-gpu-launch-args.sh");
-    let metadata = std::fs::metadata(&helper).expect("WebGPU launch-args helper exists");
+    let metadata = std::fs::metadata(&helper).expect("shared launch-args helper exists");
     assert!(metadata.is_file());
-    use std::os::unix::fs::PermissionsExt;
-    assert_ne!(
-        metadata.permissions().mode() & 0o111,
-        0,
-        "launch-args helper must be executable"
-    );
+    assert_ne!(metadata.permissions().mode() & 0o111, 0);
 
     let common = [
         "--enable-unsafe-webgpu",
@@ -314,7 +155,8 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
     assert_eq!(
         linux_args,
         common
-            .into_iter()
+            .iter()
+            .copied()
             .chain([
                 "--enable-features=Vulkan",
                 "--use-angle=swiftshader",
@@ -322,13 +164,6 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
             ])
             .map(str::to_owned)
             .collect::<Vec<_>>()
-    );
-    assert!(
-        !linux_args
-            .iter()
-            .any(|arg| arg == linux_gpu_matrix::SURFACE_FLAG),
-        "the promoted Linux preset must not contain {}",
-        linux_gpu_matrix::SURFACE_FLAG
     );
 
     for platform in ["Darwin", "MINGW64_NT-10.0"] {
@@ -342,55 +177,13 @@ fn browser_gpu_launch_args_and_linux_ab_diagnostics_are_contractual() {
             .split_whitespace()
             .map(str::to_owned)
             .collect();
-        assert_eq!(args, common, "platform {platform}");
+        assert_eq!(args, common.map(str::to_owned), "platform {platform}");
     }
 
-    for script in ["web-e2e.sh", "web-screenshots.sh"] {
-        let contents = std::fs::read_to_string(root.join("scripts").join(script))
-            .expect("read browser launch script");
-        assert!(
-            contents.contains("$ROOT/scripts/web-gpu-launch-args.sh"),
-            "{script} must use the shared platform-aware launch preset"
-        );
-        assert!(
-            contents.contains("${WEB_E2E_LAUNCH_ARGS:-$DEFAULT_LAUNCH_ARGS}"),
-            "{script} must preserve non-empty user override semantics"
-        );
-        assert!(
-            contents.contains("WEB_E2E_LAUNCH_ARGS=\"$LAUNCH_ARGS\""),
-            "{script} must pass its final launch args to Playwright"
-        );
-    }
-
-    let workflow =
-        std::fs::read_to_string(root.join(".github/workflows/web.yml")).expect("browser workflow");
-    let reference_step = workflow
-        .split("- name: Legacy browser reference gate")
-        .nth(1)
-        .expect("legacy browser reference step")
-        .split("\n      - name:")
-        .next()
-        .expect("legacy browser reference step body");
-    assert!(
-        reference_step.contains("WEB_LINUX_AB_DIAGNOSTICS: \"1\""),
-        "only the legacy reference step opts into Linux A/B diagnostics"
-    );
-    let rune_workflow =
-        std::fs::read_to_string(root.join(".github/workflows/rune.yml")).expect("Rune workflow");
-    assert!(rune_workflow.contains("Canonical Rune browser gate"));
-    assert!(rune_workflow.contains("run: bash scripts/web.sh --ci"));
-    assert!(workflow.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"));
-    assert!(
-        workflow.contains(
-            "name: web-reference-linux-ab-${{ github.run_id }}-${{ github.run_attempt }}"
-        )
-    );
-    assert!(workflow.contains("path: output/web-linux-ab-*/"));
-    linux_ab_diagnostics::assert_contract();
-    linux_webgpu_smoke::assert_display_contract(&root);
-    linux_gpu_matrix::assert_contract(&repo_root());
-    linux_gpu_features::assert_contract(&repo_root());
-    linux_gpu_preflight::assert_contract();
+    let screenshots = std::fs::read_to_string(root.join("scripts/rune-web-screenshots.sh"))
+        .expect("Rune browser screenshot runner");
+    assert!(screenshots.contains("$ROOT/scripts/web-gpu-launch-args.sh"));
+    assert!(screenshots.contains("RUNE_E2E_LAUNCH_ARGS=\"${RUNE_E2E_LAUNCH_ARGS:-$LAUNCH_ARGS}\""));
 }
 
 fn android_ndk_host_tag() -> &'static str {

@@ -47,29 +47,25 @@ packages: the root `gba-native` CLI/compatibility facade, `crates/core`
 (`gba-native-core`) and `crates/aot` (`gba-native-aot`). The root package remains
 a package (not a virtual workspace) because `CARGO_BIN_EXE_*`, manifest
 resolution and `default-run` depend on it. All three are in `default-members`;
-`apps/android`, `apps/rune`, `apps/desktop` and `apps/web` are excluded and keep
-their own workspaces and lockfiles. Rune is the canonical UI for its supported
-desktop, browser/WASM and iOS targets; Android keeps its existing UI. The other
-desktop/browser packages remain behavioral references.
+`apps/android` and `apps/rune` are excluded and keep their own workspaces and
+lockfiles. Rune is the canonical UI for its supported desktop, browser/WASM and
+iOS targets; Android keeps its existing UI. The removed desktop/browser
+implementations have only dated historical evidence below.
 
 - `tests/workspace_contract.rs` exercises the actual workspace, not manifest
   text. It imports every legacy facade module, performs a real discover/emit,
   and proves that core `Error` and the AOT/root error spellings are one identity.
   It runs `cargo metadata --offline --no-deps` and checks the three
-  `default-members` and all frontend exclusions; it checks the root lockfile has
+  `default-members` and the Android/Rune exclusions; it checks the root lockfile has
   exactly the three internal packages and no registry `source`/`checksum`; it
-  runs a default `cargo tree` and rejects Rune/desktop/browser dependencies,
-  including Pixels/Winit/WGPU and wasm-bindgen.
+  runs a default `cargo tree` and rejects Rune and browser/WASM dependencies,
+  including wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-   --locked`. It pins every target: 193 core integration tests across 28 files,
-   41 core library unit tests, 34 AOT integration tests across 13 files, 22 AOT
-   library unit tests, 31 root integration tests across six files and 5 root
-   binary unit tests, exactly 326 selected package tests. The workspace
-   compatibility contracts and frontend-tree failure contract add four tests to
-   the full `cargo test -- --list` inventory (330 total). The web clean-checkout
-  bootstrap test is included in the root integration targets; no prior core,
-  AOT or root tests are removed. Bare
+   --locked`. It pins the current core, AOT and root targets (594 selected
+   package tests) and the full default `cargo test -- --list` inventory (601
+   tests). The browser-tool bootstrap self-test is included in the root
+   integration targets. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
   unrelated working directory that owns all generated output, and the quality
   counter is run through `--bin quality-counter` from the same directory.
@@ -79,20 +75,16 @@ desktop/browser packages remain behavioral references.
   `gba-native` facade. The generated manifest keeps the `gba_native` source
   namespace via a package rename and still binds SHA-256+length, requires an
   external `--rom PATH` and uses no `ROM_BYTES` array.
-- `tests/frontend_tree_contract.rs` uses a fake Cargo to prove that
-  `scripts/frontend-reference.sh` fails closed when the resolved tree is missing
-  `gba-native-core` or contains the AOT crate/root facade. The static desktop
-  manifest/lock contract is in `tests/workspace_contract.rs`; the real frontend
-  reference gate performs the locked offline tree check against the actual registry
-  resolution.
+- `tests/rune_manifest_contract.rs` keeps the Rune manifest, canonical native
+  and browser gates, pinned Playwright tooling, and removal of the former UI
+  packages/workflows contractual.
 - The Rune app is isolated in `apps/rune`, with its own Cargo workspace/lockfile
   and direct core dependency. `scripts/frontend.sh` checks the shared native UI
   headlessly; `scripts/web.sh --ci` checks the WASM app, adapters and Chromium
   interactions. The iOS adapter/device and simulator targets plus simulator
-  launch are gated in `.github/workflows/rune.yml`. The retained `apps/web`
-  reference has separate Cargo/npm locks and a direct core dependency;
-  `scripts/web-reference.sh` checks its WASM build, dependency tree, bundle and
-  functional browser E2E. None changes the root three-package dependency graph.
+  launch are gated in `.github/workflows/rune.yml`. The Rune browser gate uses
+  the Playwright-only package in `tools/browser/`; it does not change the root
+  three-package dependency graph.
 
 ### Cartridge
 
@@ -723,11 +715,12 @@ observations, not a generated inventory:
   271/271 passing tests in debug and release. This round's full logs are retained
   under `output/fixround-swi-aot-e40418c-run5/` (`short.log`, `full.log`,
   `frontend.log`, `fresh-debug.log` and `fresh-release.log`).
-- The retained `apps/desktop` reference package is not part of that count: its
-  separate `scripts/frontend-reference.sh` gate ran 15 frontend unit tests plus locked fmt, Clippy,
-  build, a locked offline dependency-tree check and a headless `--help`, and all
-  passed. The tree contains `gba-native-core` and not `gba-native-aot` or the
-  root facade. None of its dependencies enter the root default graph.
+- At that time, the separate `apps/desktop` reference package was not part of
+  that count: its `scripts/frontend-reference.sh` gate ran 15 frontend unit
+  tests plus locked fmt, Clippy, build, a locked offline dependency-tree check
+  and a headless `--help`, and all passed. The tree contained `gba-native-core`
+  and not `gba-native-aot` or the root facade. That package and gate were later
+  removed; this is historical evidence only.
 - Generated harnesses built and run by tests: `crates/aot/tests/aot_native.rs` four (demo,
   mid-budget, immediate regression, fallback), `crates/aot/tests/aot_alu.rs` two (expanded
   ALU/banking/BL and dynamic-PC fallback), `crates/aot/tests/aot_thumb_alu.rs` two
@@ -858,9 +851,9 @@ render, WASM/Chromium interaction suite, and iOS device/simulator target checks
 plus simulator package/install/launch. These do not prove physical-GPU
 presentation, physical iOS behavior, screen-reader behavior, audible output or
 real document-picker interaction.
-The former `apps/desktop` and `apps/web` implementations are retained behavioral
-references; their prior build/test evidence does not establish Rune parity. The
-separate ROM-bound WASM module from
+The former `apps/desktop` and `apps/web` implementations were removed for issue
+#32; their prior build/test evidence is historical and does not establish Rune
+parity or describe current repository capabilities. The separate ROM-bound WASM module from
 `aot build --target wasm32-unknown-unknown` has synthetic-module and pinned-Node
 evidence only; no browser hosting, GPU presentation, input, saves or per-ROM
 application around it is verified. Neither app is a per-ROM playable/input loop.
@@ -891,11 +884,14 @@ All five hosted workflows on `cf2ac67` completed successfully:
 | Legacy desktop reference (Linux/Windows/macOS) | `42470521162` | Passed |
 | Legacy browser reference | `42470521122` | Passed |
 
+Those two legacy workflow results are historical evidence for the implementations
+that existed at that commit. Issue #32 subsequently removed the old UI packages,
+their standalone locks, reference gates and workflows; they are not current CI
+jobs or supported packages.
+
 The root dependency tree remains limited to `gba-native`, `gba-native-aot` and
 `gba-native-core`; the canonical Rune package depends on Rune rather than the
-former Pixels desktop implementation. The legacy desktop/browser packages and
-their GUI dependencies remain intentionally available as behavioral references
-under the repository's project rules. This is not a claim of physical-GPU or
+former Pixels desktop implementation. This is not a claim of physical-GPU or
 physical-iOS execution, audible output, assistive-technology validation, or
 Android Rune support.
 
@@ -1524,14 +1520,13 @@ native AOT harness, verifies the fresh and loaded frames against the same raw
 `--save` image, checks a second independent image, and repeats the multi-slot,
 default and import/export flow through the CLI. The Linux CI job runs it.
 
-The retained browser reference save panel uses `apps/web/www/saves.mjs`: base64
+At this historical round, the then-current `apps/web` save panel used base64
 raw images in `localStorage`, named slots, default selection, import/export and
-delete. `apps/web/tests/js/saves.test.mjs` covers that storage model; the
-reference Playwright test imports two synthetic 32 KiB images, selects the
-default, downloads the default image, reloads the page and checks persistence.
-Rune's distinct browser save adapter accepts only its exact generated 512-byte
-fixture on import; its local browser gate checks the export/import round trip.
-These are host-side save managers; neither page executes guest saves.
+delete. Its Node and Playwright tests covered that storage model; the package
+and tests were later removed for issue #32. Rune's browser save adapter accepts
+only its exact generated 512-byte fixture on import; current coverage is in
+`apps/rune/tests/browser-save.test.mjs` and the Rune browser gate. These are
+host-side save managers; neither page executes guest saves.
 
 Local retail proof: `crates/core/tests/local_emerald_save.rs` is ignored and
 environment-gated (`GBA_NATIVE_LOCAL_ROM`), reads the retail ROM read-only, drives
@@ -1641,8 +1636,9 @@ Playback evidence:
 - The browser E2E suite (22 Playwright tests) exercises
   `__gbaNative.audio.playPcm(Int16Array, 32768)`, which schedules mono signed
   16-bit PCM of the same shape returned by the wasm `run_rom_audio` export.
-  Browser *guest* playback is explicitly out of scope for both apps: Rune and
-  the retained `apps/web` reference do not load the AOT module or execute ROMs. The module returns PCM and
+  Browser *guest* playback was explicitly out of scope for both apps at that
+  round: Rune and the then-current `apps/web` reference did not load the AOT
+  module or execute ROMs. The module returns PCM and
   `playPcm` accepts it; wiring a module instance and its pacing into a page is
   a caller integration, documented rather than claimed.
 

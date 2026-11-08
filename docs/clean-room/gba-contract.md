@@ -33,12 +33,10 @@ not a roadmap promise and not a retail-game compatibility statement.
   boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. `apps/rune` is the
   canonical shared synthetic UI for desktop, browser/WASM and iOS; Android stays
-  on its existing adapter. The former `apps/desktop` and `apps/web` packages are
-  retained behavioral references for native Winit/Pixels/WGPU and browser
-  WebGPU/WebGL2. All are separate from the default CLI, depend directly on the
-  std-only `gba-native-core`, accept no cartridge and are not playable/per-ROM
-  frontends. Host-side synthetic save images are UI demonstrations, not guest
-  save emulation or retail save compatibility. Rune WebGL is disabled.
+  on its existing adapter. Both are separate from the default CLI and accept no
+  cartridge; neither is a playable/per-ROM frontend. Host-side synthetic save
+  images are UI demonstrations, not guest save emulation or retail save
+  compatibility. Rune WebGL is disabled.
 - `aot build` compiles a headless release executable for a locally supported
   Cargo target from an externally bound ROM. It is an experimental artifact, not
   a playable game, GUI frontend, save-aware application, final app or browser
@@ -333,11 +331,10 @@ Implemented regions and widths:
   button/key-binding model, an 800x600 landscape and a portrait normalised touch
   layout, the persisted settings document and instruction-indexed input
    scripts. Rune and Android use that model for keyboard/touch buttons,
-   fullscreen and settings; the retained desktop/browser references keep their
-   earlier implementations. These are synthetic-only UIs: they do not accept a
+   fullscreen and settings. These are synthetic-only UIs: they do not accept a
    cartridge, retail save data or guest audio stream. Rune accepts only its
-   documented synthetic save fixture on import; the legacy browser panel manages
-   synthetic raw images locally. None is a retail-game or playability claim.
+   documented synthetic save fixture on import. Neither is a retail-game or
+   playability claim.
    BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
@@ -832,15 +829,13 @@ Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output
 dimensions 1..=4096 and at least 240x160. FSR1, temporal FSR, ML-FSR and DLSS
 names return `UnsupportedBackend`. Canonical `apps/rune` presents the same
-  static synthetic snapshot on desktop, browser/WASM and iOS; Rune WebGL is not
-  enabled. The former `apps/desktop` and `apps/web` packages remain behavioral
-  references for Pixels/WGPU and browser WebGPU/WebGL2, respectively. These
-  packages are outside the root graph and are not vendor upscalers or per-ROM
-  execution (`apps/rune/README.md`, `docs/gpu-frontend.md`,
-  `docs/web-frontend.md`). A separate `aot build --target wasm32-unknown-unknown`
+static synthetic snapshot on desktop, browser/WASM and iOS; Rune WebGL is not
+enabled. Rune and Android are outside the root graph and are not vendor
+upscalers or per-ROM execution (`apps/rune/README.md`). A separate
+`aot build --target wasm32-unknown-unknown`
 branch produces a ROM-bound WASM
 execution module callable from a browser, but it ships no HTML/JS application,
-renderer, input or persistence and is not part of `apps/web`.
+renderer, input or persistence and is not part of the Rune UI.
 
 ## Typed IR and interpreter
 
@@ -1041,12 +1036,11 @@ does not write PC and does not itself end the block.
 ## CLI output and artifacts
 
 `info`, `demo`, `run`, `aot proof`, `aot emit` and `aot build` are documented in
-`README.md`. PPM is the only image output of the core CLI. The optional,
-separate `apps/desktop` package presents the static synthetic snapshot in a
-Winit/Pixels window, while `apps/web` presents the same synthetic image in a
-browser through WASM/WebGPU or WebGL2. Neither accepts a cartridge or is built
-by the default workspace; neither is a core CLI output format. See
-`docs/gpu-frontend.md` and `docs/web-frontend.md`.
+`README.md`. PPM is the only image output of the core CLI. The separate canonical
+`apps/rune` package presents the static synthetic snapshot on supported desktop,
+browser/WASM and iOS targets; Android retains its existing adapter. Neither
+accepts a cartridge or is built by the default workspace, and neither is a core
+CLI output format. See `apps/rune/README.md` for its platform evidence limits.
 
 - Generated files are restricted to `<cwd>/output/...`. Relative paths resolve
   against the process working directory; absolute paths are accepted only when

@@ -3,9 +3,8 @@
 **Status:** canonical desktop, browser and iOS UI entrypoint; supported-platform
 cutover gates passed on commit `cf2ac67` and the evidence is recorded in
 [`docs/clean-room/verification.md`](../../docs/clean-room/verification.md).
-`apps/desktop` and `apps/web` remain behavioral references, not alternate
-product entrypoints. Android stays on its existing adapter pending Rune Android
-support (tracked in issue [#31](https://github.com/reisi007/gba-native/issues/31)).
+Android stays on its existing adapter pending Rune Android support (tracked in
+issue [#31](https://github.com/reisi007/gba-native/issues/31)).
 This status does not claim physical-GPU, physical-iOS, audible-output or
 assistive-technology behavior.
 
@@ -26,23 +25,19 @@ frame or cycle timing.
 | Browser/WASM | Rune WebGPU shell; localStorage settings and synthetic slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | WASM, adapter and Chromium interaction/capture gates passed in run `42470521196`. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
 | iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
 
-The legacy desktop and browser packages remain behavioral references, and their
-separate CI gates continue to exercise those implementations. A successful
-cross-build or browser capture alone is not runtime parity; the Rune-specific
-host, browser and iOS runtime gates above are separately recorded in the
-verification log.
+The Rune-specific host, browser and iOS runtime gates above are separately
+recorded in the verification log. A successful cross-build or browser capture
+alone is not runtime parity.
 
 The Rune host/browser feature declaration is checked against the full core
 contract. The iOS feature subset is tested against the isolated adapter's
 capabilities, including native test-tone playback and save import picking.
 
-Save-action affordances differ deliberately from the existing frontends. Rune
-disables Export, Make default and Delete while no slot is selected, and disables
-Make default when the selected slot is already default; the desktop saves page
-leaves those controls enabled and treats the same actions as silent no-ops. The
-Rune's incoming Import action intentionally accepts only an exact byte-for-byte
-generated 512-byte `GBANSV01` fixture. Newly created synthetic slots use those
-same fixtures. Existing shared host slots follow the core raw-image contract:
+Rune disables Export, Make default and Delete while no slot is selected, and
+disables Make default when the selected slot is already default. Rune's incoming
+Import action intentionally accepts only an exact byte-for-byte generated
+512-byte `GBANSV01` fixture. Newly created synthetic slots use those same
+fixtures. Existing host slots follow the core raw-image contract:
 Rune lists, displays, defaults, deletes and exports any non-empty image up to
 128 KiB byte-for-byte, including images without a `GBANSV01` prefix. This is
 host-side persistence only, not guest save emulation or a retail compatibility
@@ -51,32 +46,16 @@ picker rejects oversized files before reading their payload; core save loads
 use the same bounded-read policy. The iOS picker accepts `.sav` documents only,
 and Rune applies the same exact-fixture restriction after selection.
 
-Executable parity coverage is in `apps/rune/src/ui/parity_tests.rs`. It drives
-the real desktop save state machine (`apps/desktop/src/saves.rs`) and Rune's UI
-through the same sequences — create two slots, make the second default, export,
-delete, then create after deletion — and requires equal slot names (`slot<n>`),
-zero-based fixture seeds, default markers and exported bytes. Regression tests
-also verify that malformed desktop-shared slots stay hidden and cannot be
-exported. If the count-based next name is occupied by a hidden native slot,
-Rune advances to the next unused `slot<n>` instead of overwriting it; the
-desktop's unchecked count-based action differs in this collision case. The
-suite also compares Rune's demo shell (empty and pressed input),
-fullscreen demo and settings page against the shared core renderers.
+Executable Rune UI contract coverage is in `apps/rune/src/ui/parity_tests.rs`.
+It checks Rune-only save creation, default selection, export/delete and
+collision-safe slot naming, verifies settings transitions, and checks that the
+demo shell, pressed input, fullscreen demo and settings page use the shared core
+contracts.
 
-The settings parity test also clicks the Rune controls, changes touch controls,
-integer scaling, mute, volume and the A binding, then compares the result with
-the shared desktop `Settings` value and canonical persisted document. The Web
-test performs the same transitions through the real browser settings module and
-verifies persistence through its storage adapter.
-
-The browser side is `apps/rune/tests/web-parity.test.mjs`, which imports the
-real `apps/web/www` modules and checks the same fixture round trip, default
-transitions and settings defaults. Accepted, asserted differences: the browser
-rejects the three JS prototype names (`__proto__`, `prototype`, `constructor`)
-and stores JSON settings, while the native library accepts those names and
-stores a `key=value` document; invalid settings input is normalised by the
-browser and rejected by the native parser. These are format/validation
-differences, not save-content differences.
+The settings test clicks Rune controls for touch controls, integer scaling,
+mute, volume and the A binding, then checks the shared `Settings` value and
+canonical persisted document. Browser-specific storage behavior is covered by
+Rune's browser-shell and browser-save adapter tests.
 
 Growing slot lists land their layout in the same frame
 (`El::instant_changes`), so the action row cannot overlap a just-added row while
@@ -115,8 +94,7 @@ gate runs the desktop settings/save interaction check and the
 Playwright capture set for desktop, mobile portrait and mobile landscape,
 including empty/filled save states and scrolled sections. PNGs are written under
 an ignored `output/rune-web-review-*` directory for visual inspection. This is
-not evidence of physical-GPU or iOS behavior. The former `apps/web` implementation
-is retained under the separate `scripts/web-reference.sh` gate.
+not evidence of physical-GPU or iOS behavior.
 
 Browser adapter unit tests use the pinned Node installation after bootstrap:
 
@@ -156,8 +134,7 @@ CARGO_TARGET_DIR=target/rune cargo run --locked --manifest-path apps/rune/Cargo.
 ```
 
 The canonical native host gate is `scripts/frontend.sh`; it is headless and
-does not open a live GPU window. `scripts/frontend-reference.sh` and
-`scripts/web-reference.sh` exercise the retained legacy implementations.
+does not open a live GPU window.
 
 ## Headless checks
 

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::save::{SaveLibrary, SaveResult};
 
-/// The committed save-tester fixture's identity, shared with `apps/web`.
+/// The committed save-tester fixture's identity, shared with Rune's browser adapter.
 pub const SYNTHETIC_ROM_SHA: &str =
     "f8dbe41f4dcd1e134759a23cce988b4a05f1185f102b3153d69240600e76c4e3";
 
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn the_synthetic_digest_matches_the_browser_panel() {
-        // apps/web/www/saves.mjs uses the same digest for its synthetic ROM.
+        // Rune's browser save adapter uses the same digest for its synthetic ROM.
         assert_eq!(SYNTHETIC_ROM_SHA.len(), 64);
         assert!(
             SYNTHETIC_ROM_SHA

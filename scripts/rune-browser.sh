@@ -26,7 +26,6 @@ bash scripts/rune-web.sh
 info "Rune browser adapter tests (Node VM stubs, no browser/GPU claim)"
 "$NODE" --experimental-vm-modules --test \
   apps/rune/tests/browser-shell.test.mjs \
-  apps/rune/tests/browser-save.test.mjs \
-  apps/rune/tests/web-parity.test.mjs
+  apps/rune/tests/browser-save.test.mjs
 
 info "Rune browser gate passed (no screen-reader, audible-output or GPU claim)"

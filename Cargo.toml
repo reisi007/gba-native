@@ -1,7 +1,7 @@
 [workspace]
 members = ["crates/core", "crates/aot"]
 default-members = [".", "crates/core", "crates/aot"]
-exclude = ["apps/android", "apps/desktop", "apps/rune", "apps/web"]
+exclude = ["apps/android", "apps/rune"]
 resolver = "3"
 
 [package]

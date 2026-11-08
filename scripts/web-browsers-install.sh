@@ -7,8 +7,8 @@
 # also installs the required system libraries via the distribution package
 # manager; on macOS only the browser download is needed.
 #
-# The tool versions themselves (Node, wasm-bindgen, Tailwind/DaisyUI/Playwright
-# npm packages) are provisioned by scripts/bootstrap-web-tools.sh.
+# The tool versions themselves (Node, wasm-bindgen and Playwright) are
+# provisioned by scripts/bootstrap-web-tools.sh.
 
 set -euo pipefail
 

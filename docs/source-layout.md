@@ -43,25 +43,14 @@
   `gba_native_aot::aot`; `src/main.rs`, `src/cli/`: CLI dispatch, commands
   (including the experimental `aot build` native and wasm32 branches) and safe
   `output/` writes.
-- `apps/desktop/`: retained, separately excluded synthetic Winit/Pixels/WGPU
-  package with its own workspace/lockfile. It depends directly on
-  `crates/core` (as `gba-native-core`, aliased to `gba_native`), not on the AOT
-  crate or the root facade, and has no ROM surface. `ui.rs` composes the
-  windowed GBA shell, fullscreen frame and persisted settings page; `settings.rs`
-  owns the per-user file; `app/input.rs` handles keyboard, pointer and touch.
-- `apps/web/`: retained legacy, separately excluded synthetic WASM/WebGPU/WebGL2
-  package with its own Cargo/npm locks. It depends directly on `crates/core`,
-  not the AOT crate or root facade; it accepts no ROM or guest audio and its
-  save panel manages synthetic raw images only. Its
-  committed `www/input.mjs` maps browser keys and touch buttons to KEYINPUT and
-  persists the same settings fields in a JSON localStorage payload. `www/saves.mjs`
-  is the browser save library (base64 raw images in localStorage, named slots,
-  default, import/export) and is covered by Node tests and Playwright E2E.
+- `tools/browser/`: pinned Playwright-only package and lock used to test the
+  canonical Rune browser application. The bootstrap installs its dependencies
+  under the ignored root `target/web-tools/` directory.
 - `src/bin/quality-counter/`: the maintained-Rust population and 500-line
   counter used by the hard gate and Ratchet.
 - `tests/`: root CLI-output, target-profile CLI build, quality-counter/script
-  failure paths, Rune/legacy frontend reference gate contracts, web-tool
-  bootstrap regression and workspace compatibility contracts.
+  failure paths, Rune manifest/gate contract, browser-tool bootstrap regression
+  and workspace compatibility contracts.
 - `tests/roms/gba-tests/`: optional MIT-licensed local black-box ROM tests;
   immutable inputs, not part of `cargo test` or CI. See the directory README for
   cross-target execution instructions and visible-pass criteria.
@@ -79,7 +68,7 @@
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the
-  desktop, Android and Rune apps (`image`, `viewport`, `ui` including
+  Android and Rune apps (`image`, `viewport`, `ui` including
   `ui/shell.rs`, `settings`, `saves`, `tone`, `player`, `features`). It is the
   canonical feature contract.
 - `apps/rune/`: canonical shared Rune UI app pinned to one upstream
@@ -96,22 +85,11 @@
   use the Files-shared Documents folder, with import from `saves/import.sav`.
   WebGL is not buildable with the pinned revision. `scripts/rune-native-snapshot.sh` exercises the native
   offscreen renderer; Linux CI provisions Mesa software Vulkan, not a physical
-  GPU. Android remains outside this migration. The old desktop/browser packages
-  are behavioral references with separate gates (`scripts/frontend-reference.sh`
-  and `scripts/web-reference.sh`); issue #30 records remaining verification.
+  GPU. Android remains on its existing adapter pending issue #31.
   `scripts/rune-web-serve.sh` builds and serves the browser app on loopback.
 - `apps/android/`: separate NativeActivity package; `model.rs` is the
   host-tested shell (composition, touch, settings, saves, tone artifact) and
   `app.rs` the Android-only window and event loop.
-- `apps/desktop/src/saves.rs`, `apps/desktop/src/app/render.rs`,
-  `apps/desktop/src/app/audio.rs`: desktop saves page, screen selection and
-  tone playback over the shared frontend.
-- `apps/web/www/audio.mjs`, `apps/web/www/features.mjs`: browser tone WAV
-  artifact and the browser feature declaration checked against the Rust
-  contract by `tests/js/features.test.mjs`.
-- `apps/web/tools/bundle.mjs`, `apps/web/tests/js/bundle.test.mjs`: the
-  import-graph bundle step with content-hashed names and a manifest, and its
-  unit tests.
 - `scripts/android.sh`: Android NDK cross-build gate for the three ABIs, with
   ELF machine/interpreter verification; part of the `android-native` CI job.
 - `scripts/android-app.sh`: builds and signs the synthetic APK for the three
@@ -134,9 +112,8 @@
 - `scripts/frontend.sh`, `scripts/web.sh`: canonical Rune host/browser gates;
   `scripts/rune-web.sh` builds the WASM bundle and
   `scripts/rune-web-screenshots.sh` exercises the browser UI.
-- `scripts/frontend-reference.sh`, `scripts/web-reference.sh`,
-  `scripts/web-e2e.sh`, `scripts/web-screenshots.sh` and
-  `scripts/bootstrap-web-tools.sh`: retained legacy frontend reference checks,
-  browser review and pinned repository-owned tooling.
+- `scripts/bootstrap-web-tools.sh`, `scripts/web-browsers-install.sh` and
+  `tools/browser/`: pinned tooling and Chromium provisioning for Rune's browser
+  gate. `scripts/web-gpu-launch-args.sh` supplies its SwiftShader test flags.
 - `ratchet.config.jsonc`, `ratchet.baseline.json`: machine-managed quality
   rules and baseline.

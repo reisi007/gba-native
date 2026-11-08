@@ -61,13 +61,10 @@ No JIT or executable writable memory is required. iOS JIT constraints therefore
 do not block the current portable-core design. Standalone per-game packaging,
 GPU vendor upscaling and retail-game compatibility are not claimed. `apps/rune`
 is the canonical synthetic UI for Linux, macOS, Windows, browser/WASM and iOS;
-Android remains on its existing adapter. The former `apps/desktop` and `apps/web`
-implementations are retained as behavioral references (native Winit/Pixels/WGPU
-and browser WebGPU/WebGL2, respectively). All these packages remain outside the
-std-only core and accept no cartridge; none is playable or vendor-upscaled.
+Android remains on its existing adapter. Rune and Android remain outside the
+std-only core and accept no cartridge; neither is playable or vendor-upscaled.
 Rune WebGL is disabled, and physical iOS/device and GPU runtime evidence is
-tracked separately (`apps/rune/README.md`, `docs/gpu-frontend.md`,
-`docs/web-frontend.md`).
+tracked separately in `apps/rune/README.md` and `verification.md`.
 
 ## Artifacts
 
@@ -77,10 +74,6 @@ tracked separately (`apps/rune/README.md`, `docs/gpu-frontend.md`,
   hardware behavior.
 - `apps/rune/README.md`: canonical Rune app entrypoints, platform adapters,
   gates, and current verification limits.
-- `gpu-frontend.md`: retained legacy Winit/Pixels/WGPU desktop reference,
-  dependency pins, gate/artifact rules and observed limits.
-- `web-frontend.md`: retained legacy synthetic WASM/browser reference,
-  pinned-tool bootstrap, gates/artifacts and observed limits.
 - `rea-status.md`: actual tool observations, including blockers. No Evidence ID
   exists for this investigation.
 - `verification.md`: executable acceptance criteria and test boundaries.
@@ -132,6 +125,6 @@ retail cartridges**.
   WASM module has no HTML/JS UI, renderer, input or persistence. Building one
   target triple with the installed toolchain does not establish cross-platform
   support.
-- Rune and the retained desktop/browser references present only the static
-  synthetic bitmap. None is a playable/retail frontend, per-ROM application or
-  vendor upscaler; none establishes frame/cycle timing.
+- Rune and Android present only the static synthetic bitmap. Neither is a
+  playable/retail frontend, per-ROM application or vendor upscaler; neither
+  establishes frame/cycle timing.

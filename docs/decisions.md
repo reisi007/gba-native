@@ -118,8 +118,9 @@ presentation alone is still neither AI reconstruction nor vendor upscaling.
 Decided by the owner on 2026-10-25. The portable runtime (including typed IR
 and HLE), AOT tooling and CLI are separate crates: `gba-native-core` in
 `crates/core`, `gba-native-aot` in `crates/aot`, and the root `gba-native` CLI
-plus compatibility facade. The GPU frontend remains isolated in `apps/desktop`,
-excluded from the root workspace and depending directly on the core package.
+plus compatibility facade. At that time the GPU frontend was isolated in
+`apps/desktop`, excluded from the root workspace and depending directly on the
+core package; that frontend was later removed by D49.
 Frontends must not need to depend on host-side AOT build/process tooling just to
 execute the runtime. The root facade preserves the existing
 `gba_native::{bus, cpu, cart, decode, demo, display, error, interpret, ir, bios,
@@ -129,7 +130,8 @@ external dependencies: the root workspace lockfile contains only the three
 internal path packages, and the default third-party dependency set is empty.
 Implementation, independent verification and CI evidence are tracked in issue
 #23. This decision records the architecture, not a playability or compatibility
-claim.
+claim. The isolated desktop-app clause was later superseded by D49; the frontend
+dependency boundary remains.
 
 ## D11 — Per-ROM applications, Web as a target, multiple save profiles
 
@@ -149,10 +151,11 @@ not existing features. This does not authorize embedding or publishing the
 original ROM or existing user saves: the current external, read-only,
 SHA-256/length-bound ROM contract and data-preservation boundaries still apply.
 
-Implementation note (2026-10-25): `apps/web` now provides an isolated synthetic
-WASM presentation foundation with WebGPU and WebGL2 paths. It does not execute a
-user ROM, implement browser AOT, input, or persistence, and does not satisfy the
-per-ROM application or save-profile targets above.
+Implementation note (2026-10-25): at that time `apps/web` provided an isolated
+synthetic WASM presentation foundation with WebGPU and WebGL2 paths. It did not
+execute a user ROM, implement browser AOT, input, or persistence, and did not
+satisfy the per-ROM application or save-profile targets above. The package was
+later removed by D49.
 
 ## D12 — Mobile targets and configurable controls
 
@@ -234,8 +237,10 @@ claim), the target, ROM identity, entry/state, budget and discovery facts, the
 program-source hash, actual Cargo/rustc facts and the wasm-bindgen CLI version,
 with no absolute paths, timestamps or ROM bytes.
 
-The root workspace, its lockfile, `apps/web` and the frontend packages are
-unchanged; the generated crate owns its offline dependency resolution. Other
+At the time of this decision, the root workspace, its lockfile, `apps/web` and
+the frontend packages were unchanged; the generated crate owned its offline
+dependency resolution. The former `apps/web` package was later removed by D49.
+Other
 `wasm32*`/`wasm64*` triples are rejected explicitly, and a missing or mismatched
 pinned tool fails with the `scripts/bootstrap-web-tools.sh` instruction instead
 of a global fallback or auto-install. This is a browser-callable execution
@@ -1011,6 +1016,10 @@ execution evidence, not a playability claim and not an Android
 compatibility statement. Audio playback on Android stays an artifact write;
 there is no live device sink, matching the desktop artifact path.
 
+The desktop/browser implementation details in this decision describe the
+frontends that existed at that time. Those duplicate UIs were later removed by
+D49; Android's separate app remains, with Rune canonical for supported targets.
+
 ### Parity matrix
 
 | Feature | Desktop | Android | Browser |
@@ -1035,29 +1044,32 @@ code and their tests compare the declared ids with the contract; the browser
 Node test parses the Rust contract and compares it with `www/features.mjs`. A
 target that drops a feature fails its own CI job.
 
-## D47 — Content-hashed import-graph bundle
+## D47 — Former browser's content-hashed import-graph bundle
 
-Decided 2026-10-31. The browser app is not bundled by Vite or Webpack; it stays
-native ES modules plus wasm-bindgen output, but the "copy the www files" step
-was a hand-maintained list and could silently omit a module (it did: the new
-`audio.mjs` import broke the served page). The build now derives the served set
-from the code:
+Decided 2026-10-31 for the then-current `apps/web` application. That browser app
+was not bundled by Vite or Webpack; it used native ES modules plus wasm-bindgen
+output, and its former "copy the www files" step was a hand-maintained list that
+could silently omit a module (the new `audio.mjs` import broke the served page).
+Its build derived the served set from the code:
 
-- `apps/web/tools/bundle.mjs` walks the relative imports of `app.js`, reads the
-  generated `pkg/` root for wasm-bindgen output, and fails on a missing import,
+- `apps/web/tools/bundle.mjs` walked the relative imports of `app.js`, read the
+  generated `pkg/` root for wasm-bindgen output, and failed on a missing import,
   an import that leaves the source tree, or a cycle.
-- Served artifacts are content-hashed (`app.<hash>.js`, `audio.<hash>.mjs`,
+- Served artifacts were content-hashed (`app.<hash>.js`, `audio.<hash>.mjs`,
   `app.<hash>.css`, `pkg/gba_native_web_bg.<hash>.wasm`); import specifiers,
   the glue's wasm reference and the index.html entry/CSS references are
   rewritten to the hashed names.
-- `bundle-manifest.json` records the served path and SHA-256 of every module and
-  asset, so the bundle can be audited and cached by immutable name.
-- `scripts/web-reference.sh` checks the hashed glue/wasm and that the bundle has no remote
-  references, and `web-e2e.sh`/the browser tests accept the hashed CSS name.
+- `bundle-manifest.json` recorded the served path and SHA-256 of every module and
+  asset, so the bundle could be audited and cached by immutable name.
+- The then-current `scripts/web-reference.sh` checked the hashed glue/wasm and
+  that the bundle had no remote references; its E2E/browser tests accepted the
+  hashed CSS name.
 
-Limits: this is still not an application bundler (no tree shaking, no
-minification, no code splitting); it only makes module closure and cache-safe
-names deterministic and fail-closed. A Vite/Webpack migration remains possible
+The package, bundle pipeline and gate were later removed by D49. These are
+historical implementation details, not current browser-gate behavior. Limits at
+the time: this was not an application bundler (no tree shaking, no
+minification, no code splitting); it only made module closure and cache-safe
+names deterministic and fail-closed. A Vite/Webpack migration remained possible
 but would add another pinned toolchain to the browser gate.
 
 ## D48 — Rune is the canonical supported-platform UI
@@ -1074,4 +1086,17 @@ The canonical developer/CI entrypoints are `scripts/frontend.sh` and
 tools and Chromium, and its `--build-only` mode is partial evidence. This
 cutover does not itself establish physical-GPU, screen-reader, physical-iOS or
 interactive iOS picker behavior. Keep issue #30 open until independent review,
-remote CI and the documented runtime/platform evidence pass.
+remote CI and the documented runtime/platform evidence pass. Its decision to
+retain the former packages was superseded by D49.
+
+## D49 — Remove superseded desktop and browser frontends
+
+Decided 2026-11-08 for issue #32. Rune remains the canonical UI for its supported
+desktop, browser/WASM and iOS targets; Android remains on its existing frontend
+while Rune Android support is blocked by issue #31. Remove the former
+`apps/desktop` and `apps/web` implementations, their GUI-specific assets and
+locks, reference gates and workflows rather than maintaining duplicate UIs.
+Retain Rune's pinned browser toolchain (`tools/browser/` and its bootstrap and
+provisioning scripts) plus the shared Chromium launch-argument helper. Prior CI
+passes for the removed UIs may be recorded in the verification log only as
+dated historical evidence, not current repository capabilities.

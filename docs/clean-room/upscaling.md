@@ -17,11 +17,9 @@ establishes a tested baseline only: **it is neither FSR nor DLSS nor AI
 upscaling**.
 
 The canonical `apps/rune` UI presents the same static synthetic snapshot on
-Rune-supported desktop, browser/WASM and iOS targets. The former, separate
-`apps/desktop` Winit/Pixels/WGPU package remains a behavioral reference with
-pixel-perfect integer scaling and a black letterbox. Neither is integrated into
-the std-only core, accepts a cartridge or implements a vendor backend. See
-`apps/rune/README.md` and `docs/gpu-frontend.md`.
+Rune-supported desktop, browser/WASM and iOS targets. Android remains on its
+existing adapter. Neither UI is integrated into the std-only core, accepts a
+cartridge or implements a vendor backend. See `apps/rune/README.md`.
 
 | Backend name | CLI value | Status |
 | --- | --- | --- |
@@ -34,8 +32,8 @@ the std-only core, accepts a cartridge or implements a vendor backend. See
 Selecting any unimplemented vendor backend returns `UnsupportedBackend`. It is
 never silently replaced by nearest-neighbor. No GPU detection claim is made.
 The default core build has no graphics device, shader, model, weights or vendor
-SDK. Rune and the retained desktop reference present the synthetic bitmap only;
-neither integrates a vendor backend.
+SDK. Rune and Android present the synthetic bitmap only; neither integrates a
+vendor backend.
 
 ## Intended separation
 
