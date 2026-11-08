@@ -92,15 +92,18 @@ visible register snapshot, participates in the differential.
 
 ## D8 — Documented HLE for the playability milestone
 
-Decided by the owner on 2026-10-25. Continue toward Emerald playability using
-independently implemented BIOS-service HLE derived from public interface and
-hardware documentation, not a bundled or disassembled Nintendo BIOS. This is a
-chosen implementation strategy, not evidence that HLE services already exist.
-Missing services must fail explicitly; direct entry is not BIOS reset execution.
-Title/new-game interaction, a controllable overworld and save/load validation
-are the gameplay acceptance milestones; an exhausted instruction budget is not
-playability. ROMs and existing saves remain local, unmodified test inputs and
-are never published.
+Decided by the owner on 2026-10-25 (issue #6). Choose independently implemented
+BIOS-service HLE from public interface and hardware documentation, not a
+user-supplied, bundled or disassembled Nintendo BIOS. The default has no BIOS
+image or instruction execution: guests use explicit direct entry and the six
+documented HLE services; unsupported services fail explicitly. Additional
+documented services remain host-selected opt-ins. The exact behavior and
+synthetic-only tests are in `docs/clean-room/gba-contract.md` and
+`docs/clean-room/verification.md`. This is an implementation strategy, not a
+BIOS boot or retail-game compatibility claim. Title/new-game interaction, a
+controllable overworld and save/load validation are the gameplay acceptance
+milestones; an exhausted instruction budget is not playability. ROMs and
+existing saves remain local, unmodified test inputs and are never published.
 
 ## D9 — GPU presentation, with a possible WebGPU target
 

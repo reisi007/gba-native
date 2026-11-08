@@ -202,6 +202,8 @@ is covered by its host/browser tests and Playwright checks.
   bit-for-bit reproducible-build guarantee; see
   [`docs/aot-artifact-integrity.md`](docs/aot-artifact-integrity.md) for the
   trust boundary and precise non-claims.
+  Host-observed synthetic runtime and artifact-size procedure:
+  [`docs/aot-runtime-measurements.md`](docs/aot-runtime-measurements.md).
   Neither branch is a playable standalone game, GUI frontend, save-aware app,
   final application or complete browser app: the WASM artifact is a
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or

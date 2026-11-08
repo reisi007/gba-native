@@ -62,10 +62,10 @@ implementations have only dated historical evidence below.
   including wasm-bindgen.
 - The same test lists the actual test inventory in an owned fresh
   `CARGO_TARGET_DIR` with an **empty owned `CARGO_HOME`** and `--offline
-   --locked`. It pins the current core, AOT and root targets (594 selected
-   package tests) and the full default `cargo test -- --list` inventory (601
-   tests). The browser-tool bootstrap self-test is included in the root
-   integration targets. Bare
+  --locked`. It pins the current core, AOT and root targets (600 selected
+  package tests) and the full default `cargo test -- --list` inventory (607
+  tests). The browser-tool bootstrap self-test is included in the root
+  integration targets. Bare
   `cargo run` default-run help, `demo` and `aot proof` are executed from an
   unrelated working directory that owns all generated output, and the quality
   counter is run through `--bin quality-counter` from the same directory.
@@ -438,6 +438,18 @@ expectations, not from the decoder/interpreter:
   `crates/core/tests/cpu.rs::ram_code_is_decoded_fresh_after_self_modification`. The separate
   committed native-harness self-modifying-RAM regression remains open as issue
   #17; this round did not add it.
+
+`crates/aot/tests/aot_discovery_scale.rs` adds bounded, synthetic-only scale
+measurements (not ROM coverage or playability evidence): a generated 2,048-word
+reachable ARM branch chain reaches the default 512-block/512-instruction cap
+(25% of that constructed stream). Its exact 520-step run reports 512 native
+instructions and 8 fresh reference fallbacks, with zero budget remaining and
+PC/state matching `interpret::run_budget`. A separate contiguous 16,384-word
+`MOV r0,r0` stream reaches the default 8,192-instruction cap in 128 blocks,
+with 127 continuation splits at the 64-instruction per-block limit (50% of
+that constructed stream). Both artifacts are verified instruction-by-instruction
+against their immutable generated cartridge; the stream fixture seeds discovery
+only at its explicit entry.
 
 Discovery unit tests additionally cover: per-block cap splits blocks with
 queued continuations (`block_limit_splits`), a zero per-block cap is an explicit
