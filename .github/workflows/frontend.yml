@@ -1,4 +1,4 @@
-name: Frontend
+name: Legacy desktop frontend reference
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   frontend:
-    name: frontend (${{ matrix.os }})
+    name: desktop reference (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -26,8 +26,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # The same optional gate a developer runs locally. It compiles, lints,
-      # unit-tests and checks --help. It never opens a GPU window, so the job
-      # does not claim live rendering or a visible frame on any OS.
-      - name: Optional frontend gate (no live GPU window)
-        run: bash scripts/frontend.sh
+      # Keep the former Pixels/Winit implementation exercised as a behavioral
+      # reference; the canonical frontend gate is the Rune workflow.
+      - name: Legacy desktop reference gate (no live GPU window)
+        run: bash scripts/frontend-reference.sh

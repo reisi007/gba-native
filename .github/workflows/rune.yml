@@ -1,9 +1,9 @@
 name: Rune UI
 
-# The Rune app is an isolated, additive migration target. These jobs verify
-# host builds, a Linux native offscreen render, the WASM/browser adapters and
-# iOS simulator launch; they do not replace existing frontends or claim
-# physical-GPU/iOS-device execution.
+# Rune is the canonical desktop, browser and iOS frontend. These jobs verify
+# host builds, a Linux native offscreen render, WASM/browser interactions, and
+# iOS adapter cross-builds/simulator launch. They do not claim physical-GPU or
+# physical-iOS-device execution. Android stays on its existing frontend.
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Rune host gate (headless)
-        run: bash scripts/rune.sh
+        run: bash scripts/frontend.sh
 
       - name: Install Mesa software Vulkan for native render check
         if: matrix.os == 'ubuntu-latest'
@@ -52,7 +52,7 @@ jobs:
           retention-days: 14
 
   ios-cross:
-    name: Rune iOS cross-check (compile only)
+    name: Rune iOS adapter cross-check and simulator smoke
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -65,10 +65,10 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
-      - name: Check iOS device target
+      - name: Compile Rune and isolated iOS adapters for the device target
         run: cargo check --locked --manifest-path apps/rune/Cargo.toml --all-targets --target aarch64-apple-ios
 
-      - name: Check iOS simulator target
+      - name: Compile Rune and isolated iOS adapters for the simulator target
         run: cargo check --locked --manifest-path apps/rune/Cargo.toml --all-targets --target aarch64-apple-ios-sim
 
       - name: Package and launch the iOS simulator app
@@ -84,7 +84,7 @@ jobs:
           retention-days: 14
 
   browser:
-    name: Rune browser foundation (WASM, adapter tests)
+    name: Canonical Rune browser frontend (WASM and Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -98,15 +98,10 @@ jobs:
       - name: Provision pinned browser tools and Chromium
         run: bash scripts/web-browsers-install.sh
 
-      - name: Rune WASM and browser-adapter gate
+      - name: Canonical Rune browser gate (WASM, adapter tests, Chromium interaction)
         env:
           CARGO_TARGET_DIR: target/rune
-        run: bash scripts/rune-browser.sh
-
-      - name: Rune desktop/mobile browser visual capture
-        env:
-          CARGO_TARGET_DIR: target/rune
-        run: bash scripts/rune-web-screenshots.sh
+        run: bash scripts/web.sh --ci
 
       - name: Upload Rune browser review captures
         if: always()
