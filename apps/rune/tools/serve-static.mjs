@@ -1,3 +1,4 @@
+// Loopback-only static file server shared by Rune's local preview and browser E2E.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';

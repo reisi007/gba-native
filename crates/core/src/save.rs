@@ -10,7 +10,7 @@
 //! not a save-device compatibility claim and it does not embed retail save data.
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// Maximum accepted backup image length (the documented flash size).
@@ -149,18 +149,22 @@ impl SaveLibrary {
 
     pub fn load(&self, digest: &str, slot: &str) -> SaveResult<Vec<u8>> {
         let path = self.slot_path(digest, slot)?;
-        match fs::read(&path) {
-            Ok(bytes) => {
-                if bytes.is_empty() || bytes.len() > MAX_SAVE_LEN {
-                    return Err(SaveError::InvalidSaveLength(bytes.len()));
-                }
-                Ok(bytes)
-            }
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                Err(SaveError::UnknownSlot(slot.to_owned()))
+                return Err(SaveError::UnknownSlot(slot.to_owned()));
             }
-            Err(error) => Err(error.into()),
+            Err(error) => return Err(error.into()),
+        };
+        // Read at most one byte beyond the accepted limit. A manually placed
+        // oversized file must not allocate unbounded memory before rejection.
+        let mut bytes = Vec::with_capacity(MAX_SAVE_LEN + 1);
+        file.take((MAX_SAVE_LEN + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.is_empty() || bytes.len() > MAX_SAVE_LEN {
+            return Err(SaveError::InvalidSaveLength(bytes.len()));
         }
+        Ok(bytes)
     }
 
     /// Store a slot and make it default when no default exists yet.
@@ -352,6 +356,23 @@ mod tests {
             Err(SaveError::InvalidSaveLength(_))
         ));
         assert!(library.list(DIGEST).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn loading_an_oversized_file_reads_only_the_rejection_byte() {
+        let root = temp_root("oversized-load");
+        let path = root.join(DIGEST).join("large.sav");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::File::create(&path)
+            .unwrap()
+            .set_len((MAX_SAVE_LEN + 1) as u64)
+            .unwrap();
+
+        assert!(matches!(
+            SaveLibrary::new(&root).load(DIGEST, "large"),
+            Err(SaveError::InvalidSaveLength(len)) if len == MAX_SAVE_LEN + 1
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 }

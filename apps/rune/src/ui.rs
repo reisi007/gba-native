@@ -9,7 +9,7 @@ mod keys;
 mod saves_view;
 mod settings_view;
 mod surface;
-use buttons::{button, state_button};
+use buttons::{accent_foreground, button, state_button};
 use surface::{nearest_fit, nearest_scale};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod parity_tests;
@@ -291,7 +291,7 @@ fn fullscreen_button() -> El {
         .child(
             text("Fullscreen")
                 .font(type_::LABEL)
-                .color(rune::Color::WHITE),
+                .color(accent_foreground()),
         )
         .on_press_tx(toggle_fullscreen)
 }
@@ -305,7 +305,6 @@ fn create_tone_artifact(state: &mut AppState) {
         Some(crate::audio::create_artifact(state.model.settings()).unwrap_or_else(|error| error));
 }
 
-#[cfg(not(target_os = "ios"))]
 fn play_test_tone(state: &mut AppState) {
     state.audio_status =
         Some(crate::audio::play(state.model.settings()).unwrap_or_else(|error| error));

@@ -8,7 +8,11 @@ const source = await readFile(new URL('../www/app.js', import.meta.url), 'utf8')
 
 async function start(init, importFailure = null) {
   const status = { removed: false, textContent: '', remove() { this.removed = true; } };
-  const saveInput = { files: [], value: '', listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; } };
+  const saveInput = {
+    files: [], value: '', clicks: 0, listeners: {},
+    addEventListener(name, fn) { this.listeners[name] = fn; },
+    click() { this.clicks += 1; },
+  };
   const values = new Map();
   const errors = [];
   const observers = [];
@@ -27,7 +31,10 @@ async function start(init, importFailure = null) {
       if (selector === '[data-rune-a11y]') return a11yMirror;
       assert.fail(`unexpected selector: ${selector}`);
     }, documentElement },
-    localStorage: { setItem(key, value) { values.set(key, value); } },
+    localStorage: {
+      getItem(key) { return values.get(key) ?? null; },
+      setItem(key, value) { values.set(key, value); },
+    },
     MutationObserver: MutationObserverStub,
     Uint8Array,
     console: { error(error) { errors.push(error); } },
@@ -58,9 +65,14 @@ async function start(init, importFailure = null) {
 
 function action(label) {
   const attributes = new Map();
+  const listeners = new Map();
   return {
     textContent: label,
     disabled: false,
+    style: {},
+    dataset: {},
+    addEventListener(name, fn) { listeners.set(name, fn); },
+    click() { listeners.get('click')?.(); },
     setAttribute(name, value) { attributes.set(name, value); },
     removeAttribute(name) { attributes.delete(name); },
     getAttribute(name) { return attributes.get(name) ?? null; },
@@ -100,6 +112,17 @@ test('a chosen file is staged for the Rune synthetic-save importer', async () =>
   assert.equal(values.get('gba-native.rune.save.pending'), '4742');
 });
 
+test('oversized save files are rejected before reading their payload', async () => {
+  const { saveInput, values } = await start(async () => {});
+  saveInput.files = [{
+    size: 128 * 1024 + 1,
+    async arrayBuffer() { assert.fail('oversized payload must not be read'); },
+  }];
+  await saveInput.listeners.change();
+  assert.equal(saveInput.value, '');
+  assert.equal(values.has('gba-native.rune.save.pending'), false);
+});
+
 test('save action availability follows delayed Rune mirror and selected-slot updates', async () => {
   const app = await start(async () => {});
   const exportAction = action('Export');
@@ -128,4 +151,20 @@ test('save action availability follows delayed Rune mirror and selected-slot upd
   app.observers[1].trigger();
   assert.equal(defaultAction.disabled, false);
   assert.equal(defaultAction.getAttribute('aria-disabled'), null);
+});
+
+test('Import fixture opens the native file picker synchronously only when no file is staged', async () => {
+  const app = await start(async () => {});
+  const importAction = action('Import fixture');
+  app.setA11yMirror(mirror([importAction]));
+  app.observers[0].trigger();
+  app.observers[1].trigger();
+
+  assert.equal(importAction.style.pointerEvents, 'auto');
+  importAction.click();
+  assert.equal(app.saveInput.clicks, 1);
+
+  app.values.set('gba-native.rune.save.pending', '4742');
+  importAction.click();
+  assert.equal(app.saveInput.clicks, 1, 'the second click consumes the staged file instead');
 });

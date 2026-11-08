@@ -1,6 +1,12 @@
 //! Shared core save-slot operations with browser localStorage/download adapters.
 
+#[cfg(not(target_arch = "wasm32"))]
+use gba_native::frontend::saves::SYNTHETIC_ROM_SHA;
 use gba_native::frontend::saves::{MAX_SAVE_BYTES, SaveSlot, SaveSlots};
+#[cfg(not(target_arch = "wasm32"))]
+use gba_native::save::SaveLibrary;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Read;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use std::path::PathBuf;
@@ -10,17 +16,38 @@ use std::path::PathBuf;
 const savePrefix = "gba-native.rune.slot.";
 const saveDefaultKey = "gba-native.rune.default-slot";
 const savePendingKey = "gba-native.rune.save.pending";
+const maxSaveHexLength = 2 * 128 * 1024;
 function safeStorage() { try { return globalThis.localStorage; } catch (_) { return null; } }
+function validSynthetic(bytes) {
+  if (bytes.length !== 512 || String.fromCharCode(...bytes.slice(0, 8)) !== "GBANSV01") return false;
+  const seed = bytes[8];
+  for (let index = 9; index < bytes.length; index += 1) {
+    if (bytes[index] !== ((index * 31 + seed) & 0xff)) return false;
+  }
+  return true;
+}
+function validRawHex(encoded) {
+  return typeof encoded === "string" && encoded.length >= 2 && encoded.length <= maxSaveHexLength && encoded.length % 2 === 0 && /^[\da-f]+$/i.test(encoded);
+}
+function storedNames(storage) { return Object.keys(storage).filter((key) => key.startsWith(savePrefix)).map((key) => key.slice(savePrefix.length)).sort(); }
+function syntheticImage(seed) {
+  const bytes = new Uint8Array(512);
+  bytes.set([0x47, 0x42, 0x41, 0x4e, 0x53, 0x56, 0x30, 0x31]);
+  bytes[8] = seed & 0xff;
+  for (let index = 9; index < bytes.length; index += 1) {
+    bytes[index] = ((index * 31 + seed) & 0xff);
+  }
+  return bytes;
+}
 export function runeSaveNames() {
   try {
     const storage = safeStorage();
     if (!storage) return "";
-    return Object.keys(storage).filter((key) => key.startsWith(savePrefix))
-      .map((key) => key.slice(savePrefix.length)).sort().join("\n");
+    return storedNames(storage).filter((name) => validRawHex(storage.getItem(savePrefix + name))).join("\n");
   } catch (_) { return ""; }
 }
 export function runeSaveSize(name) {
-  try { return (safeStorage()?.getItem(savePrefix + name) ?? "").length / 2; }
+  try { const encoded = safeStorage()?.getItem(savePrefix + name); return validRawHex(encoded) ? encoded.length / 2 : 0; }
   catch (_) { return 0; }
 }
 export function runeSaveIsDefault(name) {
@@ -30,7 +57,7 @@ export function runeSaveIsDefault(name) {
 export function runeSaveStore(name, bytes) {
   try {
     const storage = safeStorage();
-    if (!storage) return false;
+    if (!storage || !validSynthetic(bytes)) return false;
     let hex = "";
     for (const byte of bytes) hex += byte.toString(16).padStart(2, "0");
     storage.setItem(savePrefix + name, hex);
@@ -38,10 +65,26 @@ export function runeSaveStore(name, bytes) {
     return true;
   } catch (_) { return false; }
 }
+export function runeSaveCreate() {
+  try {
+    const storage = safeStorage();
+    if (!storage) return false;
+    const count = storedNames(storage).length;
+    let number = count + 1;
+    let name = `slot${number}`;
+    if (name.length > 32) return false;
+    while (storage.getItem(savePrefix + name) !== null) {
+      number += 1;
+      name = `slot${number}`;
+      if (name.length > 32) return false;
+    }
+    return runeSaveStore(name, syntheticImage(count));
+  } catch (_) { return false; }
+}
 export function runeSaveDelete(name) {
   try {
     const storage = safeStorage();
-    if (!storage?.getItem(savePrefix + name)) return false;
+    if (!storage || !validRawHex(storage.getItem(savePrefix + name))) return false;
     storage.removeItem(savePrefix + name);
     if (storage.getItem(saveDefaultKey) === name) {
       const next = runeSaveNames().split("\n").filter(Boolean)[0];
@@ -53,13 +96,13 @@ export function runeSaveDelete(name) {
 export function runeSaveSetDefault(name) {
   try {
     const storage = safeStorage();
-    if (!storage?.getItem(savePrefix + name)) return false;
+    if (!storage || !validRawHex(storage.getItem(savePrefix + name))) return false;
     storage.setItem(saveDefaultKey, name);
     return true;
   } catch (_) { return false; }
 }
 export function runeSaveRead(name) {
-  try { return safeStorage()?.getItem(savePrefix + name) ?? null; }
+  try { const encoded = safeStorage()?.getItem(savePrefix + name); return validRawHex(encoded) ? encoded : null; }
   catch (_) { return null; }
 }
 export function runeSaveReadPending() {
@@ -68,10 +111,6 @@ export function runeSaveReadPending() {
 }
 export function runeSaveClearPending() {
   try { safeStorage()?.removeItem(savePendingKey); } catch (_) {}
-}
-export function runeSaveRequestImport() {
-  try { safeStorage()?.removeItem(savePendingKey); } catch (_) {}
-  document.querySelector("#rune-save-import")?.click();
 }
 export function runeSaveDownload(name, bytes) {
   try {
@@ -94,6 +133,8 @@ extern "C" {
     fn browser_is_default(name: &str) -> bool;
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveStore)]
     fn browser_store(name: &str, bytes: &[u8]) -> bool;
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveCreate)]
+    fn browser_create() -> bool;
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveDelete)]
     fn browser_delete(name: &str) -> bool;
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveSetDefault)]
@@ -104,8 +145,6 @@ extern "C" {
     fn browser_read_pending() -> Option<String>;
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveClearPending)]
     fn browser_clear_pending();
-    #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveRequestImport)]
-    fn browser_request_import();
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeSaveDownload)]
     fn browser_download(name: &str, bytes: &[u8]) -> bool;
 }
@@ -136,41 +175,94 @@ impl SaveStore {
     pub(crate) fn slots(&self) -> Result<Vec<SaveSlot>, String> {
         #[cfg(target_arch = "wasm32")]
         {
-            let names = browser_names();
-            return Ok(names
-                .lines()
-                .filter(|name| !name.is_empty())
-                .map(|name| SaveSlot {
-                    name: name.to_owned(),
-                    bytes: browser_size(name),
-                    default: browser_is_default(name),
-                })
-                .collect());
+            let mut slots = Vec::new();
+            for name in browser_names().lines().filter(|name| valid_name(name)) {
+                let Some(encoded) = browser_read(name) else {
+                    continue;
+                };
+                let Ok(bytes) = decode_hex(&encoded) else {
+                    continue;
+                };
+                if browser_size(name) == bytes.len() && validate_raw_image(&bytes).is_ok() {
+                    slots.push(SaveSlot {
+                        name: name.to_owned(),
+                        bytes: bytes.len(),
+                        default: browser_is_default(name),
+                    });
+                }
+            }
+            return Ok(slots);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.library
+            let root = self
+                .library
                 .as_ref()
                 .ok_or_else(|| "no save directory is available".to_owned())?
-                .slots()
-                .map_err(|error| error.to_string())
+                .root()
+                .to_path_buf();
+            let library = SaveLibrary::new(root);
+            let names = library
+                .list(SYNTHETIC_ROM_SHA)
+                .map_err(|error| error.to_string())?;
+            let default = library
+                .default_slot(SYNTHETIC_ROM_SHA)
+                .map_err(|error| error.to_string())?;
+            let mut slots = Vec::new();
+            for name in names {
+                let Ok(bytes) = library.load(SYNTHETIC_ROM_SHA, &name) else {
+                    continue;
+                };
+                if validate_raw_image(&bytes).is_ok() {
+                    slots.push(SaveSlot {
+                        bytes: bytes.len(),
+                        default: default.as_deref() == Some(name.as_str()),
+                        name,
+                    });
+                }
+            }
+            Ok(slots)
         }
     }
 
     pub(crate) fn create(&self) -> Result<(), String> {
-        let slots = self.slots()?;
-        let mut number = 1usize;
-        while slots
-            .iter()
-            .any(|slot| slot.name == format!("slot{number}"))
+        #[cfg(target_arch = "wasm32")]
         {
-            number += 1;
+            browser_create()
+                .then_some(())
+                .ok_or_else(|| "cannot create synthetic save slot".to_owned())
         }
-        // Same naming and seed convention as the existing desktop and Android
-        // frontends: `slot<n>` with the zero-based creation index as fixture seed.
-        let name = format!("slot{number}");
-        let bytes = SaveSlots::synthetic_image((number - 1) as u8);
-        self.store(&name, &bytes)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Keep the desktop count-based name and seed when that name is
+            // available, but never replace a hidden or corrupt existing file.
+            let root = self
+                .library
+                .as_ref()
+                .ok_or_else(|| "no save directory is available".to_owned())?
+                .root()
+                .to_path_buf();
+            let library = SaveLibrary::new(root);
+            let existing = library
+                .list(SYNTHETIC_ROM_SHA)
+                .map_err(|error| error.to_string())?;
+            let seed = existing.len();
+            let mut number = seed + 1;
+            let name = loop {
+                let candidate = format!("slot{number}");
+                if !valid_name(&candidate) {
+                    return Err("no unused valid synthetic save slot name is available".to_owned());
+                }
+                if !existing.iter().any(|slot| slot == &candidate) {
+                    break candidate;
+                }
+                number = number
+                    .checked_add(1)
+                    .ok_or_else(|| "no unused synthetic save slot name is available".to_owned())?;
+            };
+            let bytes = SaveSlots::synthetic_image(seed as u8);
+            self.store(&name, &bytes)
+        }
     }
 
     pub(crate) fn delete(&self, name: &str) -> Result<(), String> {
@@ -212,6 +304,7 @@ impl SaveStore {
             let encoded =
                 browser_read(name).ok_or_else(|| format!("save slot {name} is unavailable"))?;
             let bytes = decode_hex(&encoded)?;
+            validate_raw_image(&bytes)?;
             if !browser_download(name, &bytes) {
                 return Err("browser download is unavailable".to_owned());
             }
@@ -219,12 +312,15 @@ impl SaveStore {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.library
+            let bytes = self.native_bytes(name)?;
+            let library = self
+                .library
                 .as_ref()
-                .ok_or_else(|| "no save directory is available".to_owned())?
-                .export_to_file(name)
-                .map(|path| format!("exported {name} to {}", path.display()))
-                .map_err(|error| error.to_string())
+                .ok_or_else(|| "no save directory is available".to_owned())?;
+            let path = library.root().join(format!("export-{name}.sav"));
+            std::fs::write(&path, bytes)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            Ok(format!("exported {name} to {}", path.display()))
         }
     }
 
@@ -234,8 +330,7 @@ impl SaveStore {
             .library
             .as_ref()
             .ok_or_else(|| "no save directory is available".to_owned())?;
-        let bytes = std::fs::read(path)
-            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let bytes = read_bounded(path)?;
         validate_synthetic_image(&bytes)?;
         library
             .import("imported", &bytes)
@@ -248,11 +343,7 @@ impl SaveStore {
 
     #[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), test)))]
     pub(crate) fn export_path(&self, name: &str, path: &std::path::Path) -> Result<String, String> {
-        let library = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?;
-        let bytes = library.export(name).map_err(|error| error.to_string())?;
+        let bytes = self.native_bytes(name)?;
         std::fs::write(path, bytes)
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         Ok(format!("exported {name} to {}", path.display()))
@@ -263,7 +354,6 @@ impl SaveStore {
         #[cfg(target_arch = "wasm32")]
         {
             let Some(encoded) = browser_read_pending() else {
-                browser_request_import();
                 return Err("choose a .sav file, then press Import again".to_owned());
             };
             browser_clear_pending();
@@ -281,7 +371,26 @@ impl SaveStore {
             let path = library
                 .root()
                 .join(gba_native::frontend::saves::IMPORT_FILE);
-            self.import_path(&path)
+            #[cfg(target_os = "ios")]
+            {
+                match rune_ios_platform::take_save_import_result() {
+                    Some(result) => result?,
+                    None => {
+                        rune_ios_platform::present_save_import_picker(&path)?;
+                        return Ok("choose a .sav file, then press Import again".to_owned());
+                    }
+                }
+                if !path.is_file() {
+                    return Err("the selected save was not staged".to_owned());
+                }
+                let result = self.import_path(&path);
+                let _ = std::fs::remove_file(&path);
+                result
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                self.import_path(&path)
+            }
         }
     }
 
@@ -289,6 +398,7 @@ impl SaveStore {
         if !valid_name(name) {
             return Err(format!("invalid save slot name: {name}"));
         }
+        validate_synthetic_image(bytes)?;
         #[cfg(target_arch = "wasm32")]
         let result = browser_store(name, bytes);
         #[cfg(not(target_arch = "wasm32"))]
@@ -303,6 +413,35 @@ impl SaveStore {
             .then_some(())
             .ok_or_else(|| format!("cannot store save slot {name}"))
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_bytes(&self, name: &str) -> Result<Vec<u8>, String> {
+        if !valid_name(name) {
+            return Err(format!("invalid save slot name: {name}"));
+        }
+        let bytes = self
+            .library
+            .as_ref()
+            .ok_or_else(|| "no save directory is available".to_owned())?
+            .load(name)
+            .map_err(|error| error.to_string())?;
+        validate_raw_image(&bytes)?;
+        Ok(bytes)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_bounded(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut bytes = Vec::with_capacity(MAX_SAVE_BYTES + 1);
+    file.take((MAX_SAVE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if bytes.len() > MAX_SAVE_BYTES {
+        return Err(format!("save image exceeds {MAX_SAVE_BYTES} bytes"));
+    }
+    Ok(bytes)
 }
 
 fn valid_name(name: &str) -> bool {
@@ -313,10 +452,17 @@ fn valid_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-fn validate_synthetic_image(bytes: &[u8]) -> Result<(), String> {
-    if bytes.len() > MAX_SAVE_BYTES {
-        return Err(format!("save image exceeds {MAX_SAVE_BYTES} bytes"));
+fn validate_raw_image(bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() || bytes.len() > MAX_SAVE_BYTES {
+        return Err(format!(
+            "save image length must be 1..={MAX_SAVE_BYTES} bytes"
+        ));
     }
+    Ok(())
+}
+
+fn validate_synthetic_image(bytes: &[u8]) -> Result<(), String> {
+    validate_raw_image(bytes)?;
     if bytes.len() != 512 || bytes.get(..8) != Some(b"GBANSV01") {
         return Err("only 512-byte GBANSV01 synthetic save fixtures are accepted".to_owned());
     }
@@ -342,71 +488,5 @@ fn decode_hex(encoded: &str) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-
-    fn temp_root(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "gba-native-rune-saves-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-    }
-
-    #[test]
-    fn synthetic_slots_create_select_export_and_delete_through_core_library() {
-        let root = temp_root("crud");
-        let store = SaveStore::at(root.clone());
-        assert!(store.slots().unwrap().is_empty());
-        store.create().unwrap();
-        store.create().unwrap();
-        let slots = store.slots().unwrap();
-        assert_eq!(slots.len(), 2);
-        assert_eq!(slots[0].name, "slot1");
-        assert!(slots[0].default);
-        store.set_default("slot2").unwrap();
-        let path = root.join("chosen-export.sav");
-        assert!(
-            store
-                .export_path("slot2", &path)
-                .unwrap()
-                .contains("chosen-export.sav")
-        );
-        assert_eq!(std::fs::read(&path).unwrap(), SaveSlots::synthetic_image(1));
-        store.delete("slot1").unwrap();
-        assert_eq!(store.slots().unwrap()[0].name, "slot2");
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn import_only_accepts_exact_generated_synthetic_save_images() {
-        let root = temp_root("import");
-        let store = SaveStore::at(root.clone());
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join(gba_native::frontend::saves::IMPORT_FILE),
-            [1, 2, 3],
-        )
-        .unwrap();
-        assert!(store.import_selected().is_err());
-        assert!(store.slots().unwrap().is_empty());
-
-        let synthetic = SaveSlots::synthetic_image(8);
-        std::fs::write(
-            root.join(gba_native::frontend::saves::IMPORT_FILE),
-            &synthetic,
-        )
-        .unwrap();
-        assert!(
-            store
-                .import_selected()
-                .unwrap()
-                .contains("synthetic fixture")
-        );
-        assert_eq!(store.slots().unwrap()[0].name, "imported");
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
+#[path = "saves/tests.rs"]
+mod tests;

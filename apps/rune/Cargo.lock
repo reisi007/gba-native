@@ -958,6 +958,7 @@ dependencies = [
  "blake3",
  "gba-native-core",
  "rune",
+ "rune-ios-platform",
  "wasm-bindgen",
 ]
 
@@ -2514,6 +2515,16 @@ dependencies = [
  "xkbcommon",
  "zbus 6.2.1",
  "zeroize",
+]
+
+[[package]]
+name = "rune-ios-platform"
+version = "0.1.0"
+dependencies = [
+ "objc2 0.5.3",
+ "objc2-foundation 0.2.2",
+ "objc2-ui-kit",
+ "objc2-uniform-type-identifiers",
 ]
 
 [[package]]

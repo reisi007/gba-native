@@ -146,16 +146,19 @@ test.describe('Rune UI review captures', () => {
     const exportedBytes = await readFile(downloadPath!);
     expect(exportedBytes.toString('hex')).toBe(savedFixture);
 
-    const fileChooserPromise = page.waitForEvent('filechooser');
-    await page.mouse.click(216, 206); // Choose a fixture through the browser file input.
-    const fileChooser = await fileChooserPromise;
+    const importFixture = page.getByRole('button', { name: 'Import fixture', exact: true });
+    await expect(importFixture).toBeEnabled();
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      importFixture.click(),
+    ]);
     await fileChooser.setFiles({
       name: 'slot-1.sav',
       mimeType: 'application/octet-stream',
       buffer: exportedBytes,
     });
     await page.waitForFunction(() => localStorage.getItem('gba-native.rune.save.pending') !== null);
-    await page.mouse.click(216, 206); // Import the staged exact fixture.
+    await importFixture.click(); // Consume the staged exact fixture.
     await page.waitForFunction(() => localStorage.getItem('gba-native.rune.slot.imported') !== null);
     expect(await page.evaluate(() => localStorage.getItem('gba-native.rune.slot.imported'))).toBe(savedFixture);
     expect(await page.evaluate(() => localStorage.getItem('gba-native.rune.save.pending'))).toBeNull();

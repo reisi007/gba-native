@@ -3,6 +3,11 @@ use rune::{El, el, text};
 
 use super::{AppState, input};
 
+pub(super) fn accent_foreground() -> rune::Color {
+    // Rune's bright blue accent needs a dark foreground for readable labels.
+    rune::Color::BLACK
+}
+
 pub(super) fn button(key: &'static str, label: impl Into<String>, action: fn(&mut AppState)) -> El {
     state_button(key, label, action, true, true)
 }
@@ -46,7 +51,7 @@ pub(super) fn button_base(
             theme.card
         })
         .child(text(label).font(type_::LABEL).color(if enabled {
-            rune::Color::WHITE
+            accent_foreground()
         } else {
             theme.text_secondary
         }));

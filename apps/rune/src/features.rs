@@ -2,16 +2,14 @@
 
 use gba_native::frontend::features::Feature;
 
-/// Features available in the host and browser Rune shells.
-///
-/// iOS does not yet have a native audio-output adapter, so the test-tone
-/// playback action remains explicitly unavailable there.
+/// Features exposed by the iOS Rune shell and its isolated adapter.
 pub const IOS_FEATURES: &[Feature] = &[
     Feature::DemoFrame,
     Feature::TouchControls,
     Feature::Fullscreen,
     Feature::Settings,
     Feature::AudioArtifact,
+    Feature::AudioPlayback,
     Feature::SaveSlots,
     Feature::SaveImportExport,
 ];
@@ -19,7 +17,7 @@ pub const IOS_FEATURES: &[Feature] = &[
 #[cfg(not(target_os = "ios"))]
 pub const FEATURES: &[Feature] = Feature::ALL;
 
-/// Features available in the iOS Rune shell until native audio is implemented.
+/// Features available in the iOS Rune shell and its native adapter.
 #[cfg(target_os = "ios")]
 pub const FEATURES: &[Feature] = IOS_FEATURES;
 
@@ -36,9 +34,15 @@ mod tests {
     }
 
     #[test]
-    fn ios_feature_declaration_keeps_unavailable_native_audio_explicit() {
-        assert!(!IOS_FEATURES.contains(&Feature::AudioPlayback));
+    fn ios_feature_declaration_matches_the_isolated_native_adapters() {
+        assert!(IOS_FEATURES.contains(&Feature::AudioPlayback));
         assert!(IOS_FEATURES.contains(&Feature::AudioArtifact));
         assert!(IOS_FEATURES.contains(&Feature::SaveImportExport));
+        assert!(rune_ios_platform::supports(
+            rune_ios_platform::Capability::TestTonePlayback
+        ));
+        assert!(rune_ios_platform::supports(
+            rune_ios_platform::Capability::SaveImportPicker
+        ));
     }
 }

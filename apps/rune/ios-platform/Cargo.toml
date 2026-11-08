@@ -1,0 +1,16 @@
+[package]
+name = "rune-ios-platform"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+description = "Isolated iOS AVFoundation and document-picker adapter for Rune"
+
+[lib]
+crate-type = ["rlib"]
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "=0.5.3"
+objc2-foundation = { version = "=0.2.2", features = ["NSArray", "NSError", "NSObject", "NSString", "NSThread", "NSURL"] }
+objc2-ui-kit = { version = "=0.2.2", default-features = false, features = ["std", "UIApplication", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow", "block2", "objc2-uniform-type-identifiers"] }
+objc2-uniform-type-identifiers = { version = "=0.2.2", features = ["UTCoreTypes", "UTType"] }

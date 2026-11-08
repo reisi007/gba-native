@@ -1,4 +1,4 @@
-//! Shared test-tone artifact with native-player and browser Web Audio adapters.
+//! Shared test-tone artifact with native, iOS and browser playback adapters.
 
 use gba_native::input::Settings;
 
@@ -58,7 +58,6 @@ pub(crate) fn create_artifact(settings: &Settings) -> Result<String, String> {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn play(settings: &Settings) -> Result<String, String> {
     #[cfg(target_arch = "wasm32")]
     let bytes = gba_native::frontend::tone::tone_wav(settings);
@@ -82,6 +81,13 @@ pub(crate) fn play(settings: &Settings) -> Result<String, String> {
             artifact.volume,
             artifact.muted
         ))
+    }
+    #[cfg(all(not(target_arch = "wasm32"), target_os = "ios"))]
+    {
+        let path = tone_path()?;
+        write_native_artifact(&path, settings)?;
+        rune_ios_platform::play_test_tone(&path)?;
+        Ok("requested AVFoundation playback; audio output is not confirmed".to_owned())
     }
 }
 
@@ -112,6 +118,11 @@ mod tests {
     fn tone_artifact_uses_the_shared_core_wav_and_mute_settings() {
         let audible = gba_native::frontend::tone::tone_wav(&Settings::default());
         assert_eq!(&audible[..4], b"RIFF");
+        let quiet = gba_native::frontend::tone::tone_wav(&Settings {
+            master_volume: 25,
+            ..Settings::default()
+        });
+        assert_ne!(&quiet[44..], &audible[44..]);
         let silent = gba_native::frontend::tone::tone_wav(&Settings {
             muted: true,
             ..Settings::default()

@@ -15,6 +15,24 @@ function syncSaveActionAvailability(root) {
   ]);
 
   for (const button of buttons) {
+    if (button.textContent?.trim() === 'Import fixture') {
+      // Rune handles canvas actions on a later frame. The browser's file picker
+      // requires transient user activation, so open it synchronously from the
+      // positioned semantic button while the real click is still on the stack.
+      button.style.pointerEvents = 'auto';
+      if (button.dataset.runeImportBound !== 'true') {
+        button.dataset.runeImportBound = 'true';
+        button.addEventListener('click', () => {
+          let hasPendingFile = false;
+          try {
+            hasPendingFile = localStorage.getItem('gba-native.rune.save.pending') !== null;
+          } catch (_) {
+            // Still let the browser picker open when storage is unavailable.
+          }
+          if (!hasPendingFile) saveInput.click();
+        });
+      }
+    }
     const disabled = disabledActions.get(button.textContent?.trim() ?? '');
     if (disabled === undefined) continue;
     button.disabled = disabled;

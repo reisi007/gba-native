@@ -9,7 +9,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     let theme = tok::theme(dark);
     let mut slots = col().key("save-slot-list").w_full().gap(8.0);
     if state.save_slots.is_empty() {
-        slots = slots.child(text("No synthetic save slots yet.").color(theme.text_secondary));
+        slots = slots.child(text("No host save images yet.").color(theme.text_secondary));
     } else {
         for (index, slot) in state.save_slots.iter().enumerate() {
             let selected = index == state.selected_save_slot;
@@ -44,7 +44,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
                         ))
                         .font(type_::LABEL)
                         .color(if selected {
-                            rune::Color::WHITE
+                            super::accent_foreground()
                         } else {
                             theme.text
                         }),
@@ -91,7 +91,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     };
     #[cfg(target_os = "ios")]
     let status = format!(
-        "{}. Files: On My iPhone/iPad > GBA Native Rune > saves. Copy only an exact GBANSV01 fixture there as import.sav; exports are written to this folder. These are not game saves.",
+        "{}. Import opens the iOS .sav picker; after choosing a file, press Import again to validate and consume it. Files exports are in On My iPhone/iPad > GBA Native Rune > saves. Imports accept only exact generated fixtures; listed slots are raw host images, not game saves.",
         state
             .save_status
             .as_deref()
@@ -99,7 +99,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     );
     #[cfg(not(target_os = "ios"))]
     let status = state.save_status.as_deref().unwrap_or(
-        "Only generated GBANSV01 synthetic fixtures are accepted; these slots are not game saves.",
+        "Imports accept only exact generated GBANSV01 fixtures; listed slots are raw host images, not game saves.",
     );
     col()
         .key("saves-page")
@@ -109,11 +109,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
         // animated height puts the buttons on top of a just-added row, so a
         // click on that row would hit Delete instead.
         .instant_changes()
-        .child(
-            text("Synthetic save slots")
-                .font(type_::TITLE)
-                .color(theme.text),
-        )
+        .child(text("Host save slots").font(type_::TITLE).color(theme.text))
         .child(slots)
         .child(actions)
         .child(
@@ -145,7 +141,7 @@ fn import_button() -> El {
         .child(
             text("Import fixture")
                 .font(type_::LABEL)
-                .color(rune::Color::WHITE),
+                .color(super::accent_foreground()),
         )
         .on_press_tx(|_: &mut AppState, tx: &mut rune::Tx| {
             let options = rune::FileDialogOptions {
@@ -186,11 +182,11 @@ fn export_button(enabled: bool, dark: bool) -> El {
         };
         let name = slot.name.clone();
         let options = rune::FileDialogOptions {
-            title: "Export synthetic save fixture".to_owned(),
+            title: "Export save image".to_owned(),
             file_name: Some(format!("{name}.sav")),
             ..Default::default()
         }
-        .filter("Synthetic save fixture", &["sav"]);
+        .filter("Save image", &["sav"]);
         tx.save_file(options, move |state: &mut AppState, result, _| {
             state.save_status = Some(match result {
                 Ok(Some(path)) => state

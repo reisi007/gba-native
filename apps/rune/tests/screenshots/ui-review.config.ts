@@ -18,7 +18,7 @@ export const routes: RuneCaptureRoute[] = [
   {
     name: 'rune-window',
     path: '/',
-    expectedTitle: 'GBA synthetic snapshot — Rune prototype',
+    expectedTitle: 'GBA synthetic snapshot — Rune',
     states: [
       { id: 'filled-demo', page: 'demo', slots: 'empty', note: 'Built-in synthetic snapshot; no ROM is loaded.' },
       { id: 'filled-settings', page: 'settings', slots: 'empty', note: 'Default settings and host key bindings.' },

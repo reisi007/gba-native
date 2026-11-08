@@ -2,6 +2,17 @@ use super::*;
 use gba_native::frontend::ui as core_ui;
 use rune::{Env, Runtime};
 
+#[test]
+fn accent_foreground_meets_normal_text_contrast_on_rune_blue() {
+    let accent = rune::tok::accent(0, true).luminance();
+    let foreground = super::accent_foreground().luminance();
+    let contrast = (accent.max(foreground) + 0.05) / (accent.min(foreground) + 0.05);
+    assert!(
+        contrast >= 4.5,
+        "Rune accent text contrast was {contrast:.2}:1"
+    );
+}
+
 fn click(runtime: &mut Runtime<AppState>, key: &str) {
     let (x, y) = runtime.find(key).expect("button is laid out");
     runtime.pointer_down(x, y);
@@ -129,7 +140,7 @@ fn compact_settings_fit_the_viewport_and_scroll_to_lower_controls() {
 
 #[cfg(target_os = "ios")]
 #[test]
-fn ios_settings_do_not_advertise_unavailable_native_audio_playback() {
+fn ios_settings_expose_test_tone_playback_through_the_adapter() {
     let mut state = AppState::default();
     state.select_page(Page::Settings);
     let mut runtime = Runtime::new(state, view, (390.0, 844.0), Env::new(true, 2.0));
@@ -137,14 +148,14 @@ fn ios_settings_do_not_advertise_unavailable_native_audio_playback() {
     runtime.frame(1.0 / 60.0);
 
     assert!(runtime.find("button-tone-artifact").is_some());
-    assert!(runtime.find("button-tone-play").is_none());
+    assert!(runtime.find("button-tone-play").is_some());
     assert!(
         runtime
             .state
             .audio_status
             .as_deref()
-            .unwrap_or("native audio playback is not yet supported")
-            .contains("native audio playback")
+            .unwrap_or("core-generated WAV is available for AVFoundation playback")
+            .contains("WAV")
     );
 }
 

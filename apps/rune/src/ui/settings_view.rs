@@ -2,7 +2,6 @@ use gba_native::input::Button;
 use rune::tok::{self, type_};
 use rune::{El, col, el, row, text};
 
-#[cfg(not(target_os = "ios"))]
 use super::play_test_tone;
 use super::{AppState, create_tone_artifact, input};
 
@@ -47,7 +46,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
                     text(format!("{}: {}", button.name(), label))
                         .font(type_::LABEL)
                         .color(if selected {
-                            rune::Color::WHITE
+                            super::accent_foreground()
                         } else {
                             theme.text
                         }),
@@ -84,9 +83,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
         "Download WAV"
     };
     let download = super::button("tone-artifact", artifact_label, create_tone_artifact);
-    #[cfg(not(target_os = "ios"))]
     let play = super::button("tone-play", "Play test tone", play_test_tone);
-    #[cfg(not(target_os = "ios"))]
     let actions = if compact {
         col()
             .w_full()
@@ -96,13 +93,6 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     } else {
         row().gap(8.0).child(download).child(play)
     };
-    #[cfg(target_os = "ios")]
-    let actions = if compact {
-        col().w_full().child(download.w_full())
-    } else {
-        row().child(download)
-    };
-
     let status = state
         .binding_status
         .as_deref()
@@ -111,7 +101,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
         .unwrap_or({
             #[cfg(target_os = "ios")]
             {
-                "Settings are saved on this device; native audio playback is not yet supported."
+                "Settings are saved on this device; Play requests the core-generated WAV through AVFoundation. Output is not confirmed."
             }
             #[cfg(not(target_os = "ios"))]
             {

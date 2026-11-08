@@ -3,9 +3,10 @@
 //! The desktop saves page is pure state (`apps/desktop/src/saves.rs`), so the
 //! same action sequence can be driven through the real desktop state machine and
 //! through Rune's shared UI in one test. Slot sets, default markers and exported
-//! bytes must match. The single accepted difference is affordance: Rune marks
-//! slot-dependent actions disabled, while the desktop page leaves them enabled
-//! and treats them as silent no-ops; both must end in the same state.
+//! bytes match when the count-based candidate name is free. Rune additionally
+//! skips an occupied candidate instead of replacing its contents. The other
+//! accepted difference is affordance: Rune marks slot-dependent actions disabled,
+//! while the desktop page leaves them enabled and treats them as silent no-ops.
 //!
 //! Settings and demo composition are compared against the shared core contract
 //! (`Settings::render`/`parse`, `ui::shell_with_controls`) that the desktop and
@@ -133,6 +134,62 @@ fn desktop_and_rune_save_transitions_agree() {
     click(&mut rune, "button-save-delete");
     assert_eq!(desktop_slots(&desktop), rune_slots(&rune));
     assert_eq!(desktop_slots(&desktop).len(), 1);
+
+    std::fs::remove_dir_all(desktop_root).ok();
+    std::fs::remove_dir_all(rune_root).ok();
+}
+
+#[test]
+fn rune_creation_after_deletion_skips_the_occupied_count_based_slot() {
+    let desktop_root = temp_root("desktop-recreate");
+    let rune_root = temp_root("rune-recreate");
+    let mut desktop = SavesState::new(desktop_root.clone());
+    desktop.open();
+    let mut rune = rune_runtime(rune_root.clone());
+    click(&mut rune, "button-saves");
+
+    desktop.apply(SavesAction::New);
+    click(&mut rune, "button-save-new");
+    desktop.apply(SavesAction::New);
+    click(&mut rune, "button-save-new");
+    assert_eq!(desktop_slots(&desktop), rune_slots(&rune));
+
+    // Leave only slot2, then repeat New. The count-based candidate is occupied:
+    // desktop recreates slot2, while Rune preserves it and advances to slot3.
+    desktop.select(0);
+    click(&mut rune, "save-slot-slot1");
+    desktop.apply(SavesAction::Delete);
+    click(&mut rune, "button-save-delete");
+    assert_eq!(desktop_slots(&desktop), rune_slots(&rune));
+    assert_eq!(desktop_slots(&desktop)[0].0, "slot2");
+
+    desktop.apply(SavesAction::New);
+    click(&mut rune, "button-save-new");
+    assert_eq!(
+        desktop_slots(&desktop),
+        vec![("slot2".to_owned(), 512, true)]
+    );
+    assert_eq!(
+        rune_slots(&rune),
+        vec![
+            ("slot2".to_owned(), 512, true),
+            ("slot3".to_owned(), 512, false)
+        ]
+    );
+    desktop.apply(SavesAction::Export);
+    click(&mut rune, "button-save-export");
+    assert_eq!(
+        std::fs::read(desktop_root.join("export-slot2.sav")).unwrap(),
+        std::fs::read(rune_root.join("export-slot2.sav")).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(rune_root.join("export-slot2.sav")).unwrap(),
+        SaveSlots::synthetic_image(1)
+    );
+    assert_eq!(
+        SaveSlots::new(rune_root.clone()).load("slot3").unwrap(),
+        SaveSlots::synthetic_image(1)
+    );
 
     std::fs::remove_dir_all(desktop_root).ok();
     std::fs::remove_dir_all(rune_root).ok();
