@@ -1100,3 +1100,17 @@ Retain Rune's pinned browser toolchain (`tools/browser/` and its bootstrap and
 provisioning scripts) plus the shared Chromium launch-argument helper. Prior CI
 passes for the removed UIs may be recorded in the verification log only as
 dated historical evidence, not current repository capabilities.
+
+## D50 — AOT hashes identify outputs but do not authenticate them
+
+Decided 2026-11-08 as the documentation-only issue #19 clarification. The
+current AOT metadata records source and output hashes plus limited Cargo/rustc
+facts, but is unsigned and does not bind every source, toolchain, dependency,
+linker, configuration, or environment input. Generated native and WASM outputs
+are executable code, not sandboxed data; consumers must trust the repository
+checkout and build environment. Deterministic metadata tests do not prove
+bit-for-bit reproducibility of independently built binaries or packages. The
+precise current trust boundary, integrity meaning, and non-claims live in
+[`aot-artifact-integrity.md`](aot-artifact-integrity.md). No signing, sandbox,
+provenance system, or reproducible-build guarantee is introduced by this
+decision.

@@ -198,6 +198,10 @@ is covered by its host/browser tests and Playwright checks.
   `artifact.meta` for the WASM branch). Metadata contains no absolute paths,
   timestamps or ROM bytes. A generated `README.md` in the WASM workspace
   documents the `run_rom(Uint8Array)` call and the external-ROM binding.
+  Artifact hashes identify output bytes but are not signatures or a
+  bit-for-bit reproducible-build guarantee; see
+  [`docs/aot-artifact-integrity.md`](docs/aot-artifact-integrity.md) for the
+  trust boundary and precise non-claims.
   Neither branch is a playable standalone game, GUI frontend, save-aware app,
   final application or complete browser app: the WASM artifact is a
   browser-callable execution module with no HTML/JS UI, GPU renderer, input or
