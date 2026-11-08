@@ -122,7 +122,7 @@ Use a clean target directory so stale artifacts cannot hide a failure:
 CARGO_TARGET_DIR="$(mktemp -d)/target" cargo test
 CARGO_TARGET_DIR="$(mktemp -d)/target" cargo test --release
 cargo run -- demo --out output/verify-demo.ppm
-cargo run -- aot proof --out output/verify-aot
+cargo run -- aot proof
 ```
 
 Do not delete or overwrite `output/` contents that you did not create. All

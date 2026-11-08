@@ -85,7 +85,7 @@ cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
 cargo run -- save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
 cargo run -- audio --out output/<new-directory>/tone.wav [--frequency 440] [--seconds 2] [--volume 80] [--mute]
 cargo run -- aot proof [--out output/<new-directory>]
-cargo run -- aot emit <rom.gba> <generated.rs>
+cargo run -- aot emit <rom.gba> output/<name>.rs
 cargo run -- aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N]
 cargo run -- aot build <rom.gba> --target wasm32-unknown-unknown [--out output/<new-directory>] [--budget N]
 ```
@@ -215,9 +215,13 @@ is covered by its host/browser tests and Playwright checks.
   data or opcodes) while fetches and writes stay rejected. No new supplied-ROM
   result is claimed. This is not a compatibility, boot or playability claim.
 - Generated paths are restricted to `<cwd>/output/...`; relative and absolute
-  paths are resolved into that root, symlinks below it are refused, and the
-  location is validated before any directory is created. An existing explicit
-  `--out` directory is refused rather than reused or overwritten.
+  paths are resolved against that root before any directory is created. A path
+  alias is accepted only when its resolved destination remains inside
+  `output/`; symlink components addressed below `output/` and links resolving
+  outside it are refused. `aot emit` source paths must also be inside `output/`.
+  `aot proof`, `run` and `aot build` create fresh directories: explicit `--out`
+  targets must not already exist, while `aot proof` without `--out` allocates a
+  unique workspace for every run.
 - Scaling is integer nearest-neighbor only, with exact 3:2 centering and black
   letterboxing. Vendor backends are rejected with a clear error.
 

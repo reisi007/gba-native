@@ -1,12 +1,13 @@
 //! Safe writes and fresh workspaces under `<cwd>/output/`.
 //!
-//! Contract: the CLI creates or writes only paths that are lexically inside
+//! Contract: the CLI creates or writes only paths that resolve strictly inside
 //! `<cwd>/output/` after resolving `.` and `..`, including absolute paths.
-//! Existing components may not be symbolic links. Generated directories and
-//! files use `create_dir`/`create_new`, so pre-existing files, directories or
-//! links are refused instead of reused or followed. This is an ownership check,
-//! not a claim of race-freedom against an actively hostile concurrent process
-//! mutating the filesystem between checks.
+//! Symlink components spelled below `output/` are refused; an alias is accepted
+//! only when its canonical destination remains inside the root. Generated
+//! directories and files use `create_dir`/`create_new`, so pre-existing paths
+//! are refused instead of reused or followed. This is an ownership check, not a
+//! claim of race-freedom against an actively hostile concurrent process mutating
+//! the filesystem between checks.
 
 use std::ffi::OsString;
 use std::io::Write as _;
@@ -125,10 +126,18 @@ fn create_fresh_directory_under(root: &Path, path: &Path) -> Result<PathBuf> {
             verify_real_directory(&target)?;
             Ok(target)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::Io(format!(
-            "refusing to reuse existing directory {}; pass a new --out path or omit --out",
-            target.display()
-        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let kind = match std::fs::symlink_metadata(&target) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    "directory"
+                }
+                _ => "path",
+            };
+            Err(Error::Io(format!(
+                "refusing to reuse existing {kind} {}; pass a new --out path or omit --out",
+                target.display()
+            )))
+        }
         Err(error) => Err(error.into()),
     }
 }

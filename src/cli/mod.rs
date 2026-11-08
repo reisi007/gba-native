@@ -31,18 +31,19 @@ usage:
   gba-native save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
   gba-native audio --out output/<tone.wav> [--frequency 440] [--seconds 2] [--volume 80] [--mute]
   gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--volume 0..100] [--mute] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
-  gba-native aot proof [--out output/aot-proof]
-  gba-native aot emit <rom.gba> <generated.rs>
+  gba-native aot proof [--out output/<new-directory>]
+  gba-native aot emit <rom.gba> output/<name>.rs
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
 measured in instructions, not frames; retail games are not supported.
 --synthetic-bios-zero-fill is an explicit experimental opt-in that returns
 zero for BIOS data reads; it is not authentic BIOS data or hardware behavior.
-Generated files are restricted to <cwd>/output/; an explicit --out
-directory must not already exist. aot build compiles a headless native
-artifact, or a ROM-bound WASM execution module for wasm32-unknown-unknown;
-neither is a playable game or browser app.";
+Generated paths must resolve below <cwd>/output/. aot proof without --out
+allocates a unique workspace; explicit --out targets for proof, run and build
+must not already exist. aot emit writes its source below output/. aot build
+compiles a headless native artifact, or a ROM-bound WASM execution module for
+wasm32-unknown-unknown; neither is a playable game or browser app.";
 
 pub fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);

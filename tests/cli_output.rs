@@ -199,6 +199,24 @@ fn explicit_existing_out_is_refused_without_following_links() {
 }
 
 #[test]
+fn explicit_existing_file_out_is_not_reported_as_a_directory() {
+    let temp = TempDir::new("proof-existing-file");
+    let cwd = temp.path().join("cwd");
+    let existing = cwd.join("output").join("existing-file");
+    std::fs::create_dir_all(existing.parent().expect("output parent")).expect("output dir");
+    std::fs::write(&existing, b"KEEP-FILE").expect("file sentinel");
+
+    let output = cli(&cwd, &["aot", "proof", "--out", "output/existing-file"]);
+    let message = expect_failure(&output, "proof with an existing --out file");
+    assert!(message.contains("existing path"), "{message}");
+    assert!(!message.contains("existing directory"), "{message}");
+    assert_eq!(
+        std::fs::read(existing).expect("file survives"),
+        b"KEEP-FILE"
+    );
+}
+
+#[test]
 fn proof_out_outside_output_is_refused_before_creating_anything() {
     let temp = TempDir::new("proof-outside");
     let cwd = temp.path().join("cwd");
@@ -357,4 +375,24 @@ fn cli_refuses_symlinks_and_dangling_links_inside_output() {
     let message = expect_failure(&output, "demo through a dangling link");
     assert!(message.contains("symbolic link"), "{message}");
     assert!(!dangling_target.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_alias_resolving_inside_output_is_allowed() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new("output-alias");
+    let cwd = temp.path().join("cwd");
+    let destination = cwd.join("output").join("real");
+    std::fs::create_dir_all(&destination).expect("output destination");
+    symlink(&destination, cwd.join("output-alias")).expect("alias into output");
+
+    let output = cli(&cwd, &["demo", "--out", "output-alias/demo.ppm"]);
+    assert!(
+        output.status.success(),
+        "canonical in-output alias failed\nstderr:\n{}",
+        stderr(&output)
+    );
+    assert!(destination.join("demo.ppm").is_file());
 }
