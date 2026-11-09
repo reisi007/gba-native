@@ -112,22 +112,25 @@ fn native_views_list_and_export_core_valid_raw_images_unchanged() {
 #[test]
 fn creating_after_invalid_slot2_preserves_its_corrupt_bytes() {
     let root = temp_root("slot-collision");
+    let rune = SaveStore::at(root.clone());
+    rune.create().unwrap();
+
     let corrupt: [u8; 0] = [];
     let slot_path = root
         .join(gba_native::frontend::saves::SYNTHETIC_ROM_SHA)
         .join("slot2.sav");
-    std::fs::create_dir_all(slot_path.parent().unwrap()).unwrap();
     std::fs::write(&slot_path, corrupt).unwrap();
 
-    let rune = SaveStore::at(root.clone());
-    assert!(rune.slots().unwrap().is_empty());
+    let visible = rune.slots().unwrap();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].name, "slot1");
     rune.create().unwrap();
 
     assert_eq!(std::fs::read(slot_path).unwrap(), corrupt);
     let core_slots = SaveSlots::new(root.clone());
     assert_eq!(
         core_slots.load("slot3").unwrap(),
-        SaveSlots::synthetic_image(1)
+        SaveSlots::synthetic_image(2)
     );
     std::fs::remove_dir_all(root).unwrap();
 }
