@@ -20,6 +20,45 @@ fn vblank_request(bus: &Bus) -> u16 {
 }
 
 #[test]
+fn hblank_flag_and_irq_follow_exact_boundaries_on_all_lines() {
+    for line in [0, VBLANK_FIRST_LINE, FRAME_LINES - 1] {
+        let mut line_bus = bus();
+        line_bus.tick_cycles(u32::from(line) * CYCLES_PER_LINE);
+        line_bus
+            .write16(DISPSTAT_ADDR, 1 << 4)
+            .expect("HBlank IRQ enable");
+        line_bus.tick_cycles(CYCLES_TO_HBLANK - 1);
+        assert_eq!(line_bus.read16(DISPSTAT_ADDR).unwrap() & 2, 0);
+        assert_eq!(line_bus.read16(IF_ADDR).unwrap() & IF_HBLANK, 0);
+        line_bus.tick_cycles(1);
+        assert_eq!(line_bus.read16(DISPSTAT_ADDR).unwrap() & 2, 2);
+        assert_eq!(line_bus.read16(IF_ADDR).unwrap() & IF_HBLANK, IF_HBLANK);
+        line_bus.write16(IF_ADDR, IF_HBLANK).unwrap();
+        line_bus.tick_cycles(CYCLES_PER_LINE - CYCLES_TO_HBLANK);
+        assert_eq!(line_bus.read16(DISPSTAT_ADDR).unwrap() & 2, 0);
+        assert_eq!(line_bus.read16(IF_ADDR).unwrap() & IF_HBLANK, 0);
+    }
+}
+
+#[test]
+fn hblank_flag_is_derived_enable_is_writable_and_batched_ticks_match() {
+    let mut batched = bus();
+    let mut split = bus();
+    for candidate in [&mut batched, &mut split] {
+        candidate.write16(DISPSTAT_ADDR, 0xFFFF).unwrap();
+        assert_eq!(candidate.read16(DISPSTAT_ADDR).unwrap() & 0x0012, 0x0010);
+    }
+    batched.tick_cycles(CYCLES_TO_HBLANK + CYCLES_PER_LINE + 7);
+    split.tick_cycles(CYCLES_TO_HBLANK);
+    split.tick_cycles(CYCLES_PER_LINE);
+    split.tick_cycles(7);
+    assert_eq!(batched.state_digest(), split.state_digest());
+    assert_eq!(batched.read16(DISPSTAT_ADDR), split.read16(DISPSTAT_ADDR));
+    assert_eq!(batched.read16(IF_ADDR), split.read16(IF_ADDR));
+    assert_eq!(batched.read16(IF_ADDR).unwrap() & IF_HBLANK, IF_HBLANK);
+}
+
+#[test]
 fn nominal_instruction_helpers_round_cycle_boundaries_across_frame() {
     // Compatibility instruction count is derived from the documented cycle total.
     assert_eq!(FRAME_CYCLES, 280_896);

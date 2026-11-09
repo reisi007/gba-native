@@ -107,9 +107,11 @@ retail cartridges**.
   audio compatibility. The core accepts host-injected KEYINPUT state, but does
   not schedule input sampling against the modeled LCD boundaries or make a
   sampling guarantee.
-- No cycle/frame-accurate timing, DMA arbitration, HBlank events, timer-driven
-  sound request, or DMA-driven IRQ. The bounded LCD model advances VCOUNT and
-  latches the modeled VBlank request at nominal-cycle line boundaries. Timers
+- No cycle/frame-accurate timing, DMA arbitration, HBlank DMA/rendering,
+  timer-driven sound request, or DMA-driven IRQ. A bounded HBlank status/IRQ
+  transition is modeled at nominal scanline phase, without HBlank DMA,
+  rendering or arbitration. The bounded LCD model advances VCOUNT and latches
+  the modeled VBlank request at nominal-cycle line boundaries. Timers
   advance by supplied nominal cycles; guest instruction retirement currently
   supplies three cycles per instruction. This is not hardware timing.
   Immediate DMA and the bounded host-triggered Sound FIFO subset are implemented;

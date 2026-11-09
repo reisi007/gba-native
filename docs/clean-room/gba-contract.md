@@ -92,7 +92,7 @@ are governed by the policy below.
 - CPU execution remains instruction-budgeted. `Bus::tick_cycles` advances the
   bounded LCD line and timer models by supplied nominal cycles; guest instruction
   retirement still maps to three nominal cycles. This does not add per-instruction
-  timing, waitstates, bus arbitration, HBlank/drawing-period timing or a rendered-
+  timing, waitstates, bus arbitration, drawing-period timing or a rendered-
   frame concept, and is not a cycle-accurate bus.
 
 ## Synthetic BIOS data policy (Design)
@@ -289,15 +289,17 @@ Entry consumes no guest instruction budget; guest-handler instructions and the
 modeled epilogue each consume one.
 
 This behavior-only model follows the public BIOS interrupt-handling contract;
-it is not BIOS execution or a claim to reproduce BIOS bytes. Four request
+it is not BIOS execution or a claim to reproduce BIOS bytes. Five request
 sources are generated: the VBlank request once per frame at the modelled
 line-160 transition, modelled timer overflow requests on `IF` bits 3..6, and the
 V-Counter match request on `IF` bit 2 (see the `VCOUNT` model below). The
 KEYCNT condition below can also latch the keypad request on `IF` bit 12, as
 documented in GBATEK's GBA Keypad Input and Interrupt Control sections; this
 model evaluates it only at the bounded input/control events described below.
-`0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/DMA IRQs,
-HBlank IRQs, hardware-accurate cycle timing and BIOS boot remain unsupported.
+HBlank IRQ requests on `IF` bit 1 are latched at each modeled HBlank entry when
+DISPSTAT bit 4 is enabled. The `0x03007FF8` interrupt-check flag, IRQ nesting,
+FIQ, serial/DMA IRQs, hardware-accurate cycle timing and BIOS boot remain
+unsupported.
 Do not interpret this as general GBA interrupt compatibility.
 
 ## Bus
@@ -411,9 +413,9 @@ Implemented regions and widths:
   IRQ request latches once when line 160 is entered. This replaces the earlier
   two-value `0`/`160` placeholder and its undocumented one-tenth VBlank phase.
   **Bounded timing model, not hardware-accurate timing:** LCD line/VCOUNT,
-  VBlank and VCOUNT-match transitions follow the supplied nominal cycles.
-  Retired instructions are still approximated as three cycles; instruction
-  timings, waitstates, bus arbitration, drawing and HBlank phases are not
+  VBlank, HBlank status and VCOUNT-match transitions follow supplied nominal
+  cycles. Retired instructions are still approximated as three cycles;
+  instruction timings, waitstates, bus arbitration and drawing periods are not
   modelled. The DISPSTAT V-Count setting (bits 8..15) is
   writable and compared against the current line: GBATEK
   `#lcd-io-interrupts-and-status` says "when its value is identical to the
@@ -426,9 +428,14 @@ Implemented regions and widths:
   section states the flag/request condition for `LYC == VCOUNT` but not when a
   write is evaluated, so this immediate evaluation is an implementation choice,
   not a quoted rule. All `LYC` values `0..=255` are accepted, but only the
-  modelled lines `0..=227` can match. There is no HBlank, per-line interrupt
-  scheduling beyond this match, hardware wait-state/cycle accounting or scanline
-  renderer. The
+  modelled lines `0..=227` can match. HBlank status (DISPSTAT bit 1) is derived
+  from line phase: clear for the first 1006 nominal cycles of each 1232-cycle
+  line, then set through line end, including VBlank lines. DISPSTAT bit 4 enables
+  an IRQ request on HBlank entry, latched in IF bit 1 and acknowledged by IF
+  write-one-to-clear. Writing the status flag has no effect. Batched nominal
+  cycle ticks process each crossed HBlank and line boundary. This bounded slice
+  adds no HBlank DMA, rendering, bus arbitration or hardware-accurate timing.
+  The
   pre-existing byte-addressed sound-register reads are unchanged, every other
   I/O address keeps the existing register-specific dispatch, and
   otherwise-unmodelled reads remain explicit `UnsupportedIoRead { width: 8 }`

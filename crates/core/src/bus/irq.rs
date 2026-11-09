@@ -3,14 +3,15 @@
 //! **Bounded design, not cycle-accurate timing.** LCD counters advance by
 //! supplied nominal cycles using 1232 cycles per documented line. Compatibility
 //! instruction helpers map each instruction to three nominal cycles. CPU
-//! instruction lengths, waitstates, drawing/HBlank phases and arbitration are
-//! not modelled. The DISPSTAT VBlank flag covers lines `160..=226` and line
+//! instruction lengths, waitstates, drawing periods and arbitration are not
+//! modelled. HBlank status/IRQ uses a bounded nominal phase transition. The
+//! DISPSTAT VBlank flag covers lines `160..=226` and line
 //! 227 clears it, per GBATEK `#lcd-io-interrupts-and-status` ("set in line
 //! 160..226; not 227"). The VBlank IRQ request latches once when line 160 is
 //! entered. `DISPSTAT` bits 8..15 are the writable V-Count setting, bit 2 is
 //! the read-only match flag for `LYC == VCOUNT`, and bit 5 gates the documented
-//! V-Counter request (`IF` bit 2) on every matching line transition. HBlank,
-//! HBlank/drawing timing and BIOS execution remain absent.
+//! V-Counter request (`IF` bit 2) on every matching line transition. HBlank DMA,
+//! rendering, arbitration and BIOS execution remain absent.
 
 use super::Bus;
 
@@ -22,6 +23,8 @@ pub(super) const IME_ADDR: u32 = 0x0400_0208;
 
 /// Nominal cycles in one documented scanline.
 pub const CYCLES_PER_LINE: u32 = 1232;
+/// Nominal cycles before the documented HBlank status transition.
+pub const CYCLES_TO_HBLANK: u32 = 1006;
 /// Nominal cycles in one documented 228-line frame.
 pub const FRAME_CYCLES: u32 = 280_896;
 
@@ -68,11 +71,14 @@ pub const fn instructions_until_line(line: u8) -> u64 {
 }
 
 const DISPSTAT_VBLANK_FLAG: u16 = 1 << 0;
+const DISPSTAT_HBLANK_FLAG: u16 = 1 << 1;
 const DISPSTAT_VCOUNT_FLAG: u16 = 1 << 2;
+const DISPSTAT_HBLANK_IRQ_ENABLE: u16 = 1 << 4;
 const DISPSTAT_VCOUNT_IRQ_ENABLE: u16 = 1 << 5;
 /// Bits 3..5 plus the V-Count setting in bits 8..15.
 const DISPSTAT_WRITABLE: u16 = 0xFF38;
 const IF_VBLANK: u16 = 1 << 0;
+const IF_HBLANK: u16 = 1 << 1;
 const IF_VCOUNT: u16 = 1 << 2;
 const IE_MASK: u16 = 0x3FFF;
 const IME_ENABLE: u16 = 1;
@@ -118,6 +124,9 @@ impl IrqState {
                 let mut flags = 0;
                 if self.in_vblank() {
                     flags |= DISPSTAT_VBLANK_FLAG;
+                }
+                if self.line_phase >= CYCLES_TO_HBLANK {
+                    flags |= DISPSTAT_HBLANK_FLAG;
                 }
                 if self.vcount_match() {
                     flags |= DISPSTAT_VCOUNT_FLAG;
@@ -174,12 +183,24 @@ impl IrqState {
     pub(super) fn advance_cycles(&mut self, cycles: u32) {
         let mut remaining = cycles;
         while remaining > 0 {
-            let to_boundary = CYCLES_PER_LINE - self.line_phase;
+            let next_event = if self.line_phase < CYCLES_TO_HBLANK {
+                CYCLES_TO_HBLANK
+            } else {
+                CYCLES_PER_LINE
+            };
+            let to_boundary = next_event - self.line_phase;
             if remaining < to_boundary {
                 self.line_phase += remaining;
                 break;
             }
             remaining -= to_boundary;
+            self.line_phase = next_event;
+            if next_event == CYCLES_TO_HBLANK {
+                if self.dispstat & DISPSTAT_HBLANK_IRQ_ENABLE != 0 {
+                    self.pending |= IF_HBLANK;
+                }
+                continue;
+            }
             self.line_phase = 0;
             self.line = if self.line + 1 == FRAME_LINES {
                 0

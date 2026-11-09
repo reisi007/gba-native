@@ -147,7 +147,7 @@ Relevant anchors actually consulted for this milestone:
 - `#lcd-io-interrupts-and-status` and `#lcd-dimensions-and-timings`: implemented
   subset now advances LCD line/VCOUNT, VBlank and VCOUNT-match transitions from
   supplied nominal cycles (1232 cycles per line; 228 lines). This is not
-  instruction-timing, waitstate, HBlank/drawing-phase, arbitration or
+  instruction-timing, waitstate, drawing-phase, arbitration or
   cycle-accurate hardware support; CPU retirement still maps nominally to three
   cycles per instruction. The cited source also specifies `VCOUNT` (`0x04000006`)
   as the current scanline in `0..=227`, the DISPSTAT VBlank flag
@@ -164,8 +164,10 @@ Relevant anchors actually consulted for this milestone:
   of the nominal-cycle line model, with `LYC` values `0..=255` accepted and
   only `0..=227` reachable. The same section does not state when a *write* that
   creates a match is evaluated; the model raises it immediately and labels
-  that choice as an implementation decision, not a quoted rule. No HBlank/drawing
-  phase model or hardware-accurate cycle timing is claimed. Instruction timing,
+  that choice as an implementation decision, not a quoted rule. DISPSTAT
+  HBlank status (bit 1) changes at nominal cycle 1006 of each line; bit 4 gates
+  an IF bit 1 request on HBlank entry. No drawing-phase model or hardware-accurate
+  cycle timing is claimed. Instruction timing,
   waitstates and arbitration remain absent. These anchors were consulted on
   2026-10-29 in the same upstream GBATEK text at
   <https://problemkaputt.de/gbatek.htm>, which is the

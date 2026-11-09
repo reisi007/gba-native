@@ -629,11 +629,12 @@ the matching line latches `IF` bit 2. This is a generic, documented register
 behaviour, not a cartridge-specific condition, and it does not add HBlank,
 cycle timing or BIOS execution.
 
-HBlank remains unimplemented: `IE` bit 1 and `DISPSTAT` bit 4 are still absent
-from the model, so a guest that needs HBlank still stops or waits instead of
-receiving a fabricated interrupt. D32 narrows D28's exclusion list: the
-VCOUNT-match request is now modelled, while D28's other exclusions (HBlank,
-per-line scheduling, cycle timing) still hold.
+At the time of D32, HBlank was unimplemented: `IE` bit 1 and `DISPSTAT` bit 4
+were absent from the model. The later bounded HBlank status/IRQ slice in the
+current contract supersedes that status statement, while D32 still excludes
+HBlank DMA/rendering, hardware timing and general per-line compatibility. D32
+narrows D28's exclusion list: the VCOUNT-match request is modelled. D28's
+remaining exclusions apply except for the later bounded HBlank status/IRQ slice.
 
 ## D33 — Explicit opt-in for documented decompression HLE
 
