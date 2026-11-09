@@ -825,8 +825,17 @@ scanline PPU, frame renderer or timing claim.
   remains transparent; the snapshot does not search for a later opaque texel.
   This bounded sampling policy is static snapshot behavior, not scanline timing
   or hardware validation.
-  Double-size affine sprites are explicit errors. OBJ mode 2
-  sprites form the OBJ-window mask and are not displayed, as documented.
+  Double-size affine sprites use a 2x source-dimension output clipping canvas;
+  source tile dimensions and addressing remain based on the original OBJ. **Design
+  policy:** preserve the documented upper-left source reference and center the
+  expanded canvas on the original source center. Inverse mapping uses that source
+  center and the expanded canvas center. Mosaic groups cover the expanded bounds
+  and sample the first in-bounds transformed source coordinate. Public wording
+  does not fully pin down expanded-canvas origin/wrap details, so this is a static
+  approximation, not hardware validation. The existing offscreen rejection for
+  Y coordinates 160..255 is preserved; this slice adds no Y wrapping. Semi-transparent
+  OBJ remains an explicit unsupported feature. OBJ mode 2 sprites form the
+  OBJ-window mask and are not displayed, as documented.
 - Window 0/1 use their horizontal/vertical registers with inclusive starts and
   exclusive ends. An end beyond 240/160 or a start greater than the end clamps
   the end to the screen limit. WININ low/upper six-bit masks select Window 0/1
@@ -852,8 +861,8 @@ scanline PPU, frame renderer or timing claim.
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
   In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
-- OBJ double-size affine sprites, nonidentity bitmap/affine combinations and
-  scanline effects remain absent. Unsupported registers or layers fail
+- Nonidentity bitmap/affine combinations and scanline effects remain absent.
+  Unsupported registers or layers fail
   explicitly rather than being treated as no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer

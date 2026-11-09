@@ -359,6 +359,11 @@ expectations, not from the decoder/interpreter:
   blank white; BG2-disabled backdrop.
 - Mode 1/2 remain unsupported; unsupported OBJ/BG/window/CGB features are
   rejected. Mode 3/4/5 bitmap behavior remains covered by the existing tests.
+- `crates/core/tests/display_obj_affine.rs` supplies independent color oracles
+  for identity double-size placement/clipping, preserved offscreen-Y rejection,
+  and a nonidentity, mosaiced expanded canvas. These are synthetic static
+  snapshots, not hardware validation; semi-transparent OBJ remains explicitly
+  unsupported and issue #3 remains open.
 - Integer nearest scaling, exact 3:2 letterboxing, invalid sizes, and explicit
   rejection of FSR1/temporal-FSR/ML-FSR/DLSS names.
 - PPM header and payload length.
@@ -2074,3 +2079,27 @@ on-device MediaPlayer playback remains outside CI.
 - This remains static snapshot software-test evidence, not hardware validation
   or scanline behavior; remaining issue #3 acceptance work is incomplete and
   #3 stays open.
+
+## Round: Double-size affine OBJ snapshot slice (2026-11-09)
+
+- Added a 2x source-dimension affine OBJ clipping canvas. Tile dimensions and
+  1D/2D addressing remain based on the source OBJ; affine inverse mapping and
+  mosaic sampling use the expanded output bounds.
+- **Design policy:** preserve the source upper-left reference and center the
+  expanded canvas on the original source center. GBATEK establishes double-size
+  clipping and the source rotation center but does not fully specify the expanded
+  origin convention; no Y-wrap change was made. This is not hardware validation.
+- `display_obj_affine.rs` contains independent identity placement/clipping and
+  nonidentity/mosaic pixel oracles. `cargo check -p gba-native-core --tests`,
+  `cargo fmt --check`, `git diff --check`, and the focused `display_obj_affine`,
+  `display_layers` and `display_mode0` integration tests pass with the configured
+  repository toolchain and linker.
+- `cargo test --test workspace_contract --offline --locked` passes (2 tests);
+  the full inventory is 627 tests, including the three affine OBJ tests.
+- After the independent review correction, the focused `display_obj_affine`
+  tests pass 3/3; `display_layers` and `display_mode0` pass 9/9 each. The fresh
+  `./scripts/full.sh` passes for this corrected state: Ratchet fast/slow, fmt,
+  Clippy, debug/release workspace tests, demo, and synthetic AOT proof
+  (`native_vs_reference=match`, 0 fallbacks). Final output: `==> full gate passed`.
+- Semi-transparent OBJ remains fail-closed. This is partial synthetic static
+  snapshot work; issue #3 remains open.

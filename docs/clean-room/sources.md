@@ -214,7 +214,10 @@ Relevant anchors actually consulted for this milestone:
   affine BG control/scroll, BG2/BG3 affine matrix/reference registers, OAM
   normal/affine attributes, 1D/2D OBJ tile mapping, window ranges/masks and
   BLDCNT/BLDALPHA/BLDY blending modes. Only the static snapshot subset described
-  in `gba-contract.md` is implemented; double-size affine OBJ remains absent.
+  in `gba-contract.md` is implemented. The 2026-11-09 double-size OBJ slice
+  applies the documented 2x clipping bounds and source-center transform; the
+  expanded-canvas placement convention is explicitly a Design policy, not
+  hardware validation.
   The 2D mapping slice was retrieved 2026-11-08 from the public page at
   <https://problemkaputt.de/gbatek.htm>: DISPCNT bit 6 selects 1D/2D, and the
   2D 32x32 matrix has a 32-unit row stride (16 physical 8bpp

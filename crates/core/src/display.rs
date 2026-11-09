@@ -4,8 +4,8 @@
 //! once. Mode 0 BG0-BG3 text + OBJ and Mode 1 BG0/BG1 text + BG2 affine + OBJ
 //! are composed with windows 0/1, the OBJ window and BLDCNT alpha/brightness
 //! blending. Text/affine BG mosaic and normal/affine OBJ mosaic plus 1D/2D OBJ
-//! mapping are supported. Double-size affine OBJ, semi-transparent OBJ mode,
-//! Mode 2 and scanline effects remain explicit errors or absent.
+//! mapping and double-size affine OBJ snapshots are supported. Semi-transparent
+//! OBJ mode remains an explicit error; Mode 2 and scanline effects are absent.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};

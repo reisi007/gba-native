@@ -1,9 +1,8 @@
 //! Static Mode 0 OBJ (sprite) layer for the supported OAM forms.
 //!
 //! Supports normal and affine sprites, 1D/2D tile mapping, 4/8bpp tiles, flips,
-//! per-pixel priority and per-OBJ mosaic. Semi-transparent OBJ mode and
-//! double-size affine sprites are explicit errors rather than approximated
-//! layers.
+//! per-pixel priority and per-OBJ mosaic. Semi-transparent OBJ mode remains an
+//! explicit error; double-size canvas placement is a static Design policy.
 
 use super::layer::{LayerPixel, choose};
 use super::{HEIGHT, WIDTH};
@@ -15,14 +14,21 @@ const VRAM_LEN: u32 = 96 * 1024;
 const OBJ_PALETTE_BASE: u32 = PALETTE_BASE + 0x200;
 const OBJ_TILE_BASE: u32 = 0x1_0000;
 
+#[derive(Clone, Copy)]
+struct ObjDimensions {
+    source_width: usize,
+    source_height: usize,
+    canvas_width: usize,
+    canvas_height: usize,
+}
+
 pub(super) struct ObjLayer {
     pub pixels: Vec<Option<LayerPixel>>,
     pub window: Vec<bool>,
 }
 
 struct AffineMosaicSampler {
-    width: usize,
-    height: usize,
+    dimensions: ObjDimensions,
     origin_x: i32,
     origin_y: i32,
     mosaic_width: i32,
@@ -35,16 +41,15 @@ impl AffineMosaicSampler {
         let left = group_x.max(self.origin_x).max(0);
         let top = group_y.max(self.origin_y).max(0);
         let right = (group_x + self.mosaic_width)
-            .min(self.origin_x + self.width as i32)
+            .min(self.origin_x + self.dimensions.canvas_width as i32)
             .min(WIDTH as i32);
         let bottom = (group_y + self.mosaic_height)
-            .min(self.origin_y + self.height as i32)
+            .min(self.origin_y + self.dimensions.canvas_height as i32)
             .min(HEIGHT as i32);
         for screen_y in top..bottom {
             for screen_x in left..right {
                 if let Some(source) = source_pixel(
-                    self.width,
-                    self.height,
+                    self.dimensions,
                     screen_x - self.origin_x,
                     screen_y - self.origin_y,
                     false,
@@ -87,11 +92,8 @@ fn render_entry(
     let attr1 = read_oam16(bus, base + 2)?;
     let attr2 = read_oam16(bus, base + 4)?;
     let affine = attr0 & 0x0100 != 0;
-    if affine {
-        if attr0 & 0x0200 != 0 {
-            return Err(Error::UnsupportedPpuFeature { dispcnt });
-        }
-    } else if attr0 & 0x0200 != 0 {
+    let double_size = affine && attr0 & 0x0200 != 0;
+    if !affine && attr0 & 0x0200 != 0 {
         return Ok(()); // disabled
     }
     let mode = (attr0 >> 10) & 0x3;
@@ -109,14 +111,27 @@ fn render_entry(
     let Some((width, height)) = obj_size(shape, size) else {
         return Ok(());
     };
-    let origin_y = (attr0 & 0x00FF) as i32;
+    let source_origin_y = (attr0 & 0x00FF) as i32;
+    let mut origin_y = source_origin_y;
     let mut origin_x = (attr1 & 0x01FF) as i32;
     if origin_x >= 256 {
         origin_x -= 512;
-    } else if origin_x >= 240 {
+    } else if origin_x >= 240 && !double_size {
         return Ok(());
     }
-    if origin_y >= 160 {
+    let dimensions = ObjDimensions {
+        source_width: width,
+        source_height: height,
+        canvas_width: width * if double_size { 2 } else { 1 },
+        canvas_height: height * if double_size { 2 } else { 1 },
+    };
+    if double_size {
+        // Design policy: preserve the source upper-left reference and center
+        // the expanded clipping canvas on the original source center.
+        origin_x -= (dimensions.canvas_width - width) as i32 / 2;
+        origin_y -= (dimensions.canvas_height - height) as i32 / 2;
+    }
+    if source_origin_y >= 160 {
         return Ok(());
     }
     let priority = ((attr2 >> 10) & 0x3) as u8;
@@ -131,15 +146,16 @@ fn render_entry(
         matrix.map(|matrix| {
             let first_group_x = origin_x.div_euclid(mosaic_width) * mosaic_width;
             let first_group_y = origin_y.div_euclid(mosaic_height) * mosaic_height;
-            let last_group_x =
-                (origin_x + width as i32 - 1).div_euclid(mosaic_width) * mosaic_width;
-            let last_group_y =
-                (origin_y + height as i32 - 1).div_euclid(mosaic_height) * mosaic_height;
+            let last_group_x = (origin_x + dimensions.canvas_width as i32 - 1)
+                .div_euclid(mosaic_width)
+                * mosaic_width;
+            let last_group_y = (origin_y + dimensions.canvas_height as i32 - 1)
+                .div_euclid(mosaic_height)
+                * mosaic_height;
             let columns = ((last_group_x - first_group_x) / mosaic_width + 1) as usize;
             let rows = ((last_group_y - first_group_y) / mosaic_height + 1) as usize;
             let sampler = AffineMosaicSampler {
-                width,
-                height,
+                dimensions,
                 origin_x,
                 origin_y,
                 mosaic_width,
@@ -157,18 +173,18 @@ fn render_entry(
     } else {
         None
     };
-    for dy in 0..height as i32 {
+    for dy in 0..dimensions.canvas_height as i32 {
         let screen_y = origin_y + dy;
         if !(0..HEIGHT as i32).contains(&screen_y) {
             continue;
         }
-        for dx in 0..width as i32 {
+        for dx in 0..dimensions.canvas_width as i32 {
             let screen_x = origin_x + dx;
             if !(0..WIDTH as i32).contains(&screen_x) {
                 continue;
             }
             let source = if !mosaic_enabled {
-                source_pixel(width, height, dx, dy, flip_x, flip_y, matrix)
+                source_pixel(dimensions, dx, dy, flip_x, flip_y, matrix)
             } else if let Some((first_group_x, first_group_y, columns, sampler, samples)) =
                 &mut affine_mosaic_samples
             {
@@ -187,8 +203,7 @@ fn render_entry(
                 let sample_x = (screen_x - screen_x % mosaic_width).max(origin_x);
                 let sample_y = (screen_y - screen_y % mosaic_height).max(origin_y);
                 source_pixel(
-                    width,
-                    height,
+                    dimensions,
                     sample_x - origin_x,
                     sample_y - origin_y,
                     flip_x,
@@ -237,8 +252,7 @@ fn render_entry(
 }
 
 fn source_pixel(
-    width: usize,
-    height: usize,
+    dimensions: ObjDimensions,
     dx: i32,
     dy: i32,
     flip_x: bool,
@@ -246,20 +260,30 @@ fn source_pixel(
     matrix: Option<[i16; 4]>,
 ) -> Option<(i32, i32)> {
     if let Some([pa, pb, pc, pd]) = matrix {
-        let center_x = width as i32 / 2;
-        let center_y = height as i32 / 2;
-        let rel_x = dx - center_x;
-        let rel_y = dy - center_y;
+        let center_x = dimensions.source_width as i32 / 2;
+        let center_y = dimensions.source_height as i32 / 2;
+        let rel_x = dx - dimensions.canvas_width as i32 / 2;
+        let rel_y = dy - dimensions.canvas_height as i32 / 2;
         let source_x = center_x + ((i32::from(pa) * rel_x + i32::from(pb) * rel_y) >> 8);
         let source_y = center_y + ((i32::from(pc) * rel_x + i32::from(pd) * rel_y) >> 8);
-        if (0..width as i32).contains(&source_x) && (0..height as i32).contains(&source_y) {
+        if (0..dimensions.source_width as i32).contains(&source_x)
+            && (0..dimensions.source_height as i32).contains(&source_y)
+        {
             Some((source_x, source_y))
         } else {
             None
         }
     } else {
-        let source_x = if flip_x { width as i32 - 1 - dx } else { dx };
-        let source_y = if flip_y { height as i32 - 1 - dy } else { dy };
+        let source_x = if flip_x {
+            dimensions.source_width as i32 - 1 - dx
+        } else {
+            dx
+        };
+        let source_y = if flip_y {
+            dimensions.source_height as i32 - 1 - dy
+        } else {
+            dy
+        };
         Some((source_x, source_y))
     }
 }

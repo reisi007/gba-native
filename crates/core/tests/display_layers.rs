@@ -389,17 +389,11 @@ fn mode0_obj_uses_32_byte_tile_units_in_1d_and_2d() {
 }
 
 #[test]
-fn obj_semi_transparent_and_double_size_are_explicit_errors() {
+fn obj_semi_transparent_mode_remains_an_explicit_error() {
     let mut bus = bus();
     bus.write16(OAM_BASE, 0x0400)
         .expect("semi-transparent mode");
     bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D).expect("OBJ");
-    assert!(matches!(
-        display::snapshot(&bus),
-        Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
-    ));
-
-    bus.write16(OAM_BASE, 0x0300).expect("double-size affine");
     assert!(matches!(
         display::snapshot(&bus),
         Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
