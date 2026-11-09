@@ -2103,3 +2103,36 @@ on-device MediaPlayer playback remains outside CI.
   (`native_vs_reference=match`, 0 fallbacks). Final output: `==> full gate passed`.
 - Semi-transparent OBJ remains fail-closed. This is partial synthetic static
   snapshot work; issue #3 remains open.
+
+## Round: PSG noise frequency divisor slice (2026-11-09)
+
+- Noise frequency now uses NR43 ratio bits 0..2 (`r=0` means `0.5`) and shift
+  bits 4..7 with the documented `524288 / r / 2^(s+1)` formula. The noise phase
+  accumulator advances by that rate and steps the LFSR for each crossed cycle.
+- `audio::tests::noise_frequency_uses_the_documented_nr43_ratio_and_shift`
+  checks `r=0`, `r=1`, a nonzero ratio/shift pair, the maximum shift and the
+  disabled case. `noise_phase_advances_at_the_calculated_nr43_frequency` checks
+  an above-host rate of 8/7 shift cycles per sample, preserves the fractional
+  phase over frames and advances the LFSR for the two crossed cycles. Remaining
+  noise width/LFSR, envelope, length, and frame-sequencer behavior is not
+  completed.
+- `cargo test -p gba-native-core --lib audio` passes 19/19; the workspace
+  inventory contract passes 2/2 with 629 total tests, including 180 core unit
+  tests. `cargo fmt --check` and `git diff --check` pass.
+- Independent review round 1 requested explicit evidence that fractional phase
+  carries into LFSR step counts. The sample and next fractional phase now derive
+  from the same full advance; the above-host-rate test checks phase and LFSR
+  steps together. Review round 1 returned CHANGES REQUIRED with one medium
+  finding; round 2 approved the correction over the complete unpushed range
+  with no new findings.
+- Fresh-target `./scripts/full.sh` passes with
+  `CARGO_TARGET_DIR=/tmp/gba-native-noise-reviewfix-target.fDU7Qi`: hard 500-line
+  gate, Ratchet fast 8/8 and slow 1/1, formatting, Clippy, debug/release
+  workspace tests, demo, and synthetic AOT proof (`native_vs_reference=match`,
+  zero fallbacks). Final output: `==> full gate passed`.
+- Source grounding: public GBATEK `#gbasoundchannel4noise`, retrieved
+  2026-11-09 from <https://problemkaputt.de/gbatek.htm>. No emulator
+  implementation source was consulted.
+- This is one bounded audio slice; issue #29 remains open for its remaining
+  acceptance work. Host-rate sample generation remains approximate, not hardware
+  cycle/timing or retail-audio validation.

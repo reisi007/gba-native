@@ -50,6 +50,10 @@ Relevant anchors actually consulted for this milestone:
   reference does not establish a fixed DMA1/A and DMA2/B pairing.
 - `#4000082h---soundcnt-h---dma-sound-control-mixing`: Direct Sound control and
   the FIFO A/B reset bits.
+- `#gbasoundchannel4noise`: NR43 ratio/shift fields, `r=0` treated as `0.5`,
+  the `524288 / r / 2^(s+1)` frequency formula, and documented 7-/15-bit noise
+  generator behavior. The noise-frequency slice below implements the divisor
+  and shift formula only; it does not claim the complete noise generator.
 - `#gba-timers`, `#4000100h---tm0cnt_l---timer-0-counterreload-rw` and
   `#4000102h---tm0cnt_h---timer-0-control-rw`: the four incrementing 16-bit
   timers, `F/1`/`F/64`/`F/256`/`F/1024` prescaler selection, count-up cascading
@@ -63,6 +67,9 @@ Relevant anchors actually consulted for this milestone:
   `verification.md`); that is an audio approximation, not hardware timing.
   These anchors were consulted on 2026-10-29 in the same upstream GBATEK text at
   <https://problemkaputt.de/gbatek.htm>; that retrieval was not separately
+  retained or hashed.
+- The Channel 4 noise section was consulted on 2026-11-09 at
+  <https://problemkaputt.de/gbatek.htm>; this retrieval was not separately
   retained or hashed.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.

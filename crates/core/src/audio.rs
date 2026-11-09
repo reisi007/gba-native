@@ -128,20 +128,33 @@ fn wave_sample(regs: &[u8], phase: f32) -> f32 {
     sample / f32::from(1u16 << volume_shift)
 }
 
-fn noise_sample(regs: &[u8], phase: f32, lfsr: &mut u16) -> f32 {
-    let control = u16_at(regs, 0x18);
-    let volume = f32::from((control >> 12) & 0xF) / 15.0;
+fn noise_frequency(regs: &[u8]) -> Option<f32> {
     let raw = u16_at(regs, 0x1C);
     if raw & 0x8000 == 0 {
-        return 0.0;
+        return None;
     }
-    let divisor = u32::from(raw & 0x07FF).max(1);
-    let steps = (phase * (524_288.0 / divisor as f32)) as u32;
-    if steps.is_multiple_of(2) {
+    let ratio = match raw & 0x7 {
+        0 => 0.5,
+        value => f32::from(value),
+    };
+    let shift = u32::from((raw >> 4) & 0xF);
+    Some(524_288.0 / ratio / (1_u32 << (shift + 1)) as f32)
+}
+
+fn noise_sample(regs: &[u8], phase: f32, lfsr: &mut u16) -> (f32, f32) {
+    let Some(frequency) = noise_frequency(regs) else {
+        return (0.0, phase);
+    };
+    let control = u16_at(regs, 0x18);
+    let volume = f32::from((control >> 12) & 0xF) / 15.0;
+    let advance = phase + frequency / SAMPLE_RATE as f32;
+    let steps = advance.floor() as u32;
+    for _ in 0..steps {
         let bit = (*lfsr ^ (*lfsr >> 1)) & 1;
         *lfsr = (*lfsr >> 1) | (bit << 14);
     }
-    if *lfsr & 1 == 0 { volume } else { -volume }
+    let sample = if *lfsr & 1 == 0 { volume } else { -volume };
+    (sample, advance.fract())
 }
 
 /// Phase and noise state of the four PSG channels.
@@ -188,8 +201,9 @@ impl PsgMixer {
             active += 1;
         }
         if channel_enabled(regs, 3) {
-            mixed += noise_sample(regs, self.phases[3], &mut self.lfsr);
-            self.phases[3] = (self.phases[3] + 1.0 / SAMPLE_RATE as f32).fract();
+            let (sample, next_phase) = noise_sample(regs, self.phases[3], &mut self.lfsr);
+            mixed += sample;
+            self.phases[3] = next_phase;
             active += 1;
         }
         (mixed, active)

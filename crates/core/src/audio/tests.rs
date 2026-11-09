@@ -14,6 +14,15 @@ fn square_regs() -> [u8; 0x48] {
     regs
 }
 
+fn noise_regs(nr43: u8) -> [u8; 0x48] {
+    let mut regs = [0u8; 0x48];
+    regs[0x19] = 0xF0;
+    regs[0x1C..0x1E].copy_from_slice(&(0x8000u16 | u16::from(nr43)).to_le_bytes());
+    regs[0x20..0x22].copy_from_slice(&0x0800u16.to_le_bytes());
+    regs[0x24] = 0x80;
+    regs
+}
+
 /// A bus with timer 0 at 65536 Hz (reload 0xFF00, prescaler F/1).
 fn direct_sound_bus() -> Bus {
     let mut bus = Bus::new(Cartridge::from_bytes(vec![0u8; 0x200]).expect("cart"));
@@ -48,6 +57,41 @@ fn square_tone_is_audible_and_periodic() {
         .count();
     // One second of 440 Hz square has about 880 sign changes.
     assert!((800..=960).contains(&crossings), "crossings={crossings}");
+}
+
+#[test]
+fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
+    for (nr43, expected) in [
+        (0x00, 524_288.0),
+        (0x01, 262_144.0),
+        (0x37, 524_288.0 / 7.0 / 16.0),
+        (0xF0, 16.0),
+    ] {
+        let frequency = noise_frequency(&noise_regs(nr43)).expect("triggered noise");
+        assert!(
+            (frequency - expected).abs() < 0.01,
+            "NR43={nr43:#04x}: {frequency} != {expected}"
+        );
+    }
+    assert_eq!(noise_frequency(&noise_regs(0x00)), Some(524_288.0));
+    let mut disabled = noise_regs(0x00);
+    disabled[0x1D] = 0;
+    assert_eq!(noise_frequency(&disabled), None);
+}
+
+#[test]
+fn noise_phase_advances_at_the_calculated_nr43_frequency() {
+    // r=7, s=0 gives 524288 / 7 / 2 = 8/7 shift cycles per host sample.
+    let regs = noise_regs(0x07);
+    let mut mixer = PsgMixer::new();
+    mixer.frame(&regs);
+    assert!((mixer.phases[3] - 1.0 / 7.0).abs() < 0.00001);
+    mixer.frame(&regs);
+    assert!((mixer.phases[3] - 2.0 / 7.0).abs() < 0.00001);
+    assert_eq!(
+        mixer.lfsr, 0x1FFF,
+        "two crossed cycles advance the LFSR twice"
+    );
 }
 
 #[test]
