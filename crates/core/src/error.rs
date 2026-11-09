@@ -23,6 +23,11 @@ pub enum Error {
     UnsupportedSave {
         addr: u32,
     },
+    UnsupportedCartGpio {
+        addr: u32,
+        width: u8,
+        write: bool,
+    },
     SaveImage {
         len: usize,
     },
@@ -139,6 +144,11 @@ impl fmt::Display for Error {
             Error::UnsupportedSave { addr } => {
                 write!(f, "save hardware at 0x{addr:08X} is not implemented")
             }
+            Error::UnsupportedCartGpio { addr, width, write } => write!(
+                f,
+                "unsupported {width}-bit cartridge GPIO {} at 0x{addr:08X}",
+                if *write { "write" } else { "read" }
+            ),
             Error::SaveImage { len } => {
                 write!(f, "save image length {len} is not 1..=131072 bytes")
             }

@@ -92,6 +92,18 @@ fn emit_program_runner(out: &mut String, artifact: &AotArtifact) -> Result<()> {
         "pub fn run_program(cpu: &mut Cpu, bus: &mut Bus, budget: u64, input: &gba_native::input::InputScript, audio: &mut Option<gba_native::audio::AudioEngine>) -> Result<ProgramReport> {{"
     )
     .unwrap();
+    writeln!(
+        out,
+        "    // Translated ROM blocks are valid only under the ordinary immutable-ROM mapping."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    if bus.gpio_policy() != gba_native::bus::GpioPolicy::Strict {{"
+    )
+    .unwrap();
+    writeln!(out, "        return Err(gba_native::error::Error::Aot(\"GPIO-enabled buses are reference-only and cannot run AOT\".to_string()));").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "    let mut remaining = budget;").unwrap();
     writeln!(out, "    let mut fallbacks = 0u64;").unwrap();
     writeln!(out, "    let mut irq_returns = 0u64;").unwrap();

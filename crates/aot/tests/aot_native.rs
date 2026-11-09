@@ -147,6 +147,67 @@ fn generated_native_demo_matches_reference_and_binds_rom() {
     );
 }
 
+#[test]
+fn generated_program_rejects_gpio_without_mutation_but_allows_strict_bus() {
+    let cart = demo::demo_cartridge();
+    let artifact = aot::discover(&cart, demo::ENTRY, false, aot::Limits::default())
+        .expect("discover synthetic demo");
+    let mut source =
+        aot::emit_program_module(&cart, &artifact).expect("emit target-neutral program");
+    source.push_str(
+        r#"
+fn main() {
+    let cart = gba_native::demo::demo_cartridge();
+    let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
+    cpu.set_pc(ENTRY);
+    cpu.set_thumb(ENTRY_THUMB);
+    let mut gpio_bus = Bus::new(cart.clone())
+        .with_gpio_policy(gba_native::bus::GpioPolicy::DocumentedStorage);
+    let cpu_before = cpu.state_digest();
+    let bus_before = gpio_bus.state_digest();
+    let input = gba_native::input::InputScript::parse("0:A:1").expect("input script");
+    let mut audio = None;
+    let error = run_program(&mut cpu, &mut gpio_bus, 0, &input, &mut audio)
+        .expect_err("GPIO-enabled bus must be rejected even at zero budget");
+    assert!(matches!(error, gba_native::error::Error::Aot(_)));
+    assert_eq!(cpu.state_digest(), cpu_before, "rejection mutated CPU state");
+    assert_eq!(gpio_bus.state_digest(), bus_before, "rejection mutated bus state");
+
+    let mut strict_cpu = Cpu::direct_entry();
+    strict_cpu.initialize_bios_stacks();
+    strict_cpu.set_pc(ENTRY);
+    strict_cpu.set_thumb(ENTRY_THUMB);
+    let mut strict_bus = Bus::new(cart);
+    assert_eq!(strict_bus.gpio_policy(), gba_native::bus::GpioPolicy::Strict);
+    let mut no_audio = None;
+    let report = run_program(
+        &mut strict_cpu,
+        &mut strict_bus,
+        1,
+        &gba_native::input::InputScript::default(),
+        &mut no_audio,
+    ).expect("ordinary ROM bus is allowed");
+    assert_eq!(report.budget_remaining, 0);
+    assert_ne!(strict_cpu.pc(), ENTRY, "strict default should execute the entry block");
+}
+"#,
+    );
+
+    let temp = TempDir::new("gpio-aot-guard");
+    let harness = NativeHarness::build(&source, &temp.path().join("generated-program"))
+        .expect("compile generated target-neutral program");
+    let output = Command::new(harness.executable())
+        .output()
+        .expect("execute generated target-neutral program");
+    assert!(
+        output.status.success(),
+        "generated program failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// The generated crate must resolve the std-only core package only. It must not
 /// regain a dependency on the host-side AOT crate or the root CLI/facade, which
 /// would pull host build/process tooling into a generated native program.

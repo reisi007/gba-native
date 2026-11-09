@@ -9,13 +9,16 @@
 use std::collections::BTreeSet;
 
 mod access;
+mod access_helpers;
 mod backup;
 mod dma;
 mod eeprom;
+mod gpio;
 mod input;
 mod io;
 mod irq;
 mod sound;
+mod state;
 mod timer;
 mod video;
 pub use backup::{
@@ -35,7 +38,6 @@ pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 use crate::bios::{AffinePolicy, DecompressionPolicy};
 use crate::cart::{Cartridge, ROM_BASE};
 use crate::error::{Error, Result};
-use crate::sha256;
 
 pub const BIOS_BASE: u32 = 0x0000_0000;
 pub const BIOS_LEN: usize = 16 * 1024;
@@ -178,6 +180,14 @@ pub enum RomWritePolicy {
     Dropped,
 }
 
+/// Host-selected, volatile GPIO register overlay at the documented first ROM
+/// window offsets. This models storage/input only, not a cartridge protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpioPolicy {
+    Strict,
+    DocumentedStorage,
+}
+
 impl RomWritePolicy {
     /// Stable label for CLI output and snapshot reports.
     pub fn name(self) -> &'static str {
@@ -203,6 +213,11 @@ pub struct Bus {
     backup_policy: BackupPolicy,
     decompression_policy: DecompressionPolicy,
     affine_policy: AffinePolicy,
+    gpio_policy: GpioPolicy,
+    gpio_data: u8,
+    gpio_direction: u8,
+    gpio_control: u8,
+    gpio_input: u8,
     backup: Vec<u8>,
     flash: backup::FlashState,
     eeprom: eeprom::EepromState,
@@ -246,6 +261,11 @@ impl Bus {
             backup_policy: BackupPolicy::Strict,
             decompression_policy: DecompressionPolicy::Strict,
             affine_policy: AffinePolicy::Strict,
+            gpio_policy: GpioPolicy::Strict,
+            gpio_data: 0,
+            gpio_direction: 0,
+            gpio_control: 0,
+            gpio_input: 0,
             // Fixed 128 KiB erased image: the selected policy only gates the
             // accessible capacity, so the guest-state digest is policy-independent.
             backup: vec![0xFF; SAVE_LEN_FLASH],
@@ -291,6 +311,29 @@ impl Bus {
 
     pub fn rom_write_policy(&self) -> RomWritePolicy {
         self.rom_write_policy
+    }
+
+    /// Opts in to storage-only GPIO at 0x080000C4..=0x080000C9.
+    #[must_use]
+    pub fn with_gpio_policy(mut self, policy: GpioPolicy) -> Self {
+        self.gpio_policy = policy;
+        self
+    }
+
+    pub fn gpio_policy(&self) -> GpioPolicy {
+        self.gpio_policy
+    }
+
+    /// Injects the externally supplied levels of GPIO pins 0..3. No clock,
+    /// protocol, or automatic sampling is implied.
+    pub fn set_gpio_input(&mut self, input: u8) {
+        self.gpio_input = input & 0x0F;
+    }
+
+    /// Returns the low four data bits, including output latch levels and the
+    /// explicitly injected levels on input-configured pins.
+    pub fn gpio_data(&self) -> u8 {
+        ((self.gpio_data & self.gpio_direction) | (self.gpio_input & !self.gpio_direction)) & 0x0F
     }
 
     /// Selects an explicit volatile SRAM, flash, or EEPROM model. EEPROM size
@@ -398,54 +441,6 @@ impl Bus {
             return self.read32(addr);
         }
         Err(Error::NonExecutable { addr })
-    }
-
-    /// SWI 01h group 7 over the modelled "other I/O" set. DISPCNT is
-    /// deliberately absent: the service forces blank separately.
-    pub fn reset_group7_io(&mut self) {
-        self.io.reset_group7();
-    }
-
-    /// SWI 01h group 5 over the modelled serial-register storage.
-    pub fn reset_group5_sio(&mut self) {
-        self.io.reset_group5();
-    }
-
-    /// SWI 01h group 6 over the modelled sound-register storage.
-    pub fn reset_group6_sound(&mut self) {
-        self.io.reset_group6();
-    }
-
-    pub fn state_digest(&self) -> [u8; 32] {
-        let mut bytes = Vec::with_capacity(
-            self.ewram.len()
-                + self.iwram.len()
-                + self.palette.len()
-                + self.vram.len()
-                + self.oam.len()
-                + self.backup.len()
-                + 10,
-        );
-        bytes.extend_from_slice(&self.ewram);
-        bytes.extend_from_slice(&self.iwram);
-        bytes.extend_from_slice(&self.palette);
-        bytes.extend_from_slice(&self.vram);
-        bytes.extend_from_slice(&self.oam);
-        self.io.append_digest(&mut bytes);
-        // The backup bytes are guest state only under a selected device model;
-        // under strict they are the constant erased image. The image stays
-        // fixed-size while flash/EEPROM transient state is hashed separately,
-        // so host-selected device policy itself is not part of the digest.
-        bytes.extend_from_slice(&self.backup);
-        bytes.push(self.flash.command as u8);
-        bytes.push(self.flash.bank);
-        self.eeprom.append_digest(&mut bytes);
-        bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
-        sha256::digest(&bytes)
-    }
-
-    pub fn vram_digest(&self) -> [u8; 32] {
-        sha256::digest(&self.vram)
     }
 
     pub(crate) fn is_work_ram_range(addr: u32, len: usize) -> bool {

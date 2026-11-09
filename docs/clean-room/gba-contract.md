@@ -158,6 +158,41 @@ command/bank state and transient EEPROM serial state are guest state included in
 `Bus::state_digest`, while the selected policy is host configuration and is not
 hashed. Selecting more than one backup-device flag is an argument error.
 
+The cartridge GPIO foundation is a separate host opt-in,
+`Bus::with_gpio_policy(GpioPolicy::DocumentedStorage)`; default strict ROM
+mapping is unchanged. Only offsets `0x080000C4`, `C6` and `C8` in the first ROM
+window are overlaid. It stores volatile GPIO data (low four bits), direction
+(low four bits; zero=input, one=output), and control (bit 0); higher bits are
+masked. With control bit 0 clear, aligned 16-/32-bit reads use the immutable
+cartridge bytes as ordinary ROM reads, including normal overread errors. With
+bit 0 set, 16-bit reads expose the registers; 32-bit reads compose two
+halfword reads, so a read beginning at C4 includes data and direction, and one
+at C8 composes control with the ordinary following ROM halfword. The host may
+inject low-four-bit input levels through `Bus::set_gpio_input`; they are
+deterministic state, not a clock or sampling schedule. Data reads select the
+output latch for output-configured pins and injected levels for input pins.
+16-bit writes at the three register addresses and aligned 32-bit writes
+composed from two halfword stores update the addressed registers when both
+halves land on supported registers; a 32-bit store beginning at C8 also reaches
+the following ordinary ROM location and can therefore fail under the strict ROM
+write policy after its low control halfword has been applied. Such composed
+stores are not atomic. Stores never change cartridge bytes. Byte GPIO accesses
+are explicit errors when the overlay is enabled. Unaligned halfword/word
+accesses retain the bus alignment errors.
+Addresses outside these three registers are not GPIO: no alternate windows,
+mirrors, serial protocol, RTC, analog input, timing, IRQ, or persistence is
+implemented or claimed. GPIO register and injected-input values are included
+in `Bus::state_digest`; policy selection is host configuration and excluded.
+This storage/input foundation is not a GPIO peripheral or cartridge protocol
+implementation.
+The opt-in is reference-interpreter-only: the shared generated AOT
+`run_program` rejects any bus whose GPIO policy is not `Strict`, before guest
+state mutation, including when the instruction budget is zero. Translated ROM
+blocks may span GPIO offsets and execute without bus fetches, so matching ROM
+bytes at discovery time is insufficient to establish safety with a mutable
+overlay. This restriction applies to native and WASM AOT callers of the shared
+program module; it does not change reference fetch semantics.
+
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
 `run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`,

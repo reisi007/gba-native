@@ -71,6 +71,11 @@ Relevant anchors actually consulted for this milestone:
 - The Channel 4 noise section was consulted on 2026-11-09 at
   <https://problemkaputt.de/gbatek.htm>; this retrieval was not separately
   retained or hashed.
+- `#gba-cart-io-port-gpio`: GPIO data/direction/control registers at ROM-window
+  offsets `C4h`/`C6h`/`C8h`, low-four-bit data and direction, control bit 0, and
+  the documented 16-/32-bit ROM-store access forms. Consulted at
+  <https://problemkaputt.de/gbatek.htm> on 2026-11-09; retrieval not separately
+  retained or hashed. No protocol or RTC material was used.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC

@@ -1,10 +1,12 @@
 # Source layout
 
-- `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `bus/eeprom.rs`,
-  `bus/input.rs`, `bus/io/keypad.rs`, `cpu.rs`, `cpu/registers.rs`,
+- `crates/core/src/cart.rs`, `bus.rs`, `bus/access.rs`, `bus/access_helpers.rs`,
+  `bus/backup.rs`, `bus/eeprom.rs`, `bus/gpio.rs`, `bus/input.rs`,
+  `bus/state.rs`, `bus/io/keypad.rs`, `cpu.rs`, `cpu/registers.rs`,
   `cpu/exception.rs`: header, explicit memory map,
-  SRAM/flash/serial EEPROM device policies, CPU register banks, documented stack
-  initialization and framed SWI/ARM exception entry/return.
+  SRAM/flash/serial EEPROM device policies, opt-in storage-only cartridge GPIO,
+  bus access/state digest, CPU register banks, documented stack initialization
+  and framed SWI/ARM exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure
@@ -37,7 +39,8 @@
   and sealed work-RAM artifacts (`trace.rs`), artifact binding
   (`artifact.rs`), Rust emission (`emit.rs`, `emit_ops.rs`, `emit_mem.rs`,
   `emit_program.rs`, `emit_wasm.rs`), report parsing (`report.rs`),
-  target-profile build/metadata (`target_build.rs`), harness build/run
+  target-profile build/metadata (`target_build.rs`), shared target-neutral
+  `run_program` dispatcher with the opt-in GPIO AOT guard, harness build/run
   (`harness.rs`), the bounded wasm32 module build/metadata/pinned-CLI path
   (`wasm_build.rs`, `wasm_meta.rs`, `wasm_tool.rs`) and tests.
   This package depends on `gba-native-core` under the `gba_native` alias.
@@ -67,7 +70,7 @@
 - `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
   fixtures (including the ARMv4 empty-list PC transfer), the native RAM
   self-modification regression, the target-profile build regression and the
-  native AOT proof.
+  native AOT proof and generated-program GPIO-policy rejection regression.
 - `scripts/short.sh`, `scripts/full.sh`: documented fast and full gates;
   `scripts/native-consistency.sh` is the slow Ratchet counter.
 - `crates/core/src/frontend/`: window-free frontend model shared by the

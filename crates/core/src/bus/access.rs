@@ -9,14 +9,6 @@ use super::*;
 
 const MAX_IGNORED_IO_WRITES: usize = 4096;
 
-/// Serial registers that answer byte-lane accesses (GBATEK `#gba-io-map`).
-fn is_serial_register(addr: u32) -> bool {
-    matches!(
-        addr & !1,
-        SIODATA32_L_ADDR | SIODATA32_H_ADDR | SIOCNT_ADDR | SIODATA8_ADDR | RCNT_ADDR
-    )
-}
-
 /// Work RAM mirrors its bank across a whole 16 MiB window (GBATEK
 /// `#gba-memory-map`): 256 KiB EWRAM over `0x02000000..=0x02FFFFFF` and 32 KiB
 /// IWRAM over `0x03000000..=0x03FFFFFF`. Both lengths are powers of two.
@@ -128,6 +120,9 @@ impl Bus {
             return Ok(self.oam[offset]);
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_read8(addr);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 // The serial EEPROM answers only its documented 16-bit DMA
                 // accesses and the ready-poll LDRH; byte lanes stay explicit.
@@ -210,6 +205,9 @@ impl Bus {
             return Ok(u16::from_le_bytes([self.oam[offset], self.oam[offset + 1]]));
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_read16(addr);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 return self.eeprom_read16(addr);
             }
@@ -256,6 +254,9 @@ impl Bus {
             return Ok(low | (high << 16));
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_read32(addr);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 return Err(Error::UnsupportedSave { addr });
             }
@@ -278,57 +279,6 @@ impl Bus {
             return Ok(low | (high << 16));
         }
         Err(Error::Unmapped { addr })
-    }
-
-    /// Byte lane of a modelled serial register.
-    ///
-    /// GBATEK `#gba-io-map` documents the I/O block as 8/16/32-bit accessible,
-    /// so the modelled serial registers answer byte reads from their halfword
-    /// storage. Only this whitelist is widened; every other I/O byte read keeps
-    /// the existing explicit unsupported-width error.
-    fn serial_read8(&self, addr: u32) -> Option<u8> {
-        if !is_serial_register(addr) {
-            return None;
-        }
-        let value = self.io.read16(addr & !1, self.pressed_keys)?.ok()?;
-        Some(if addr & 1 == 0 {
-            value as u8
-        } else {
-            (value >> 8) as u8
-        })
-    }
-
-    /// Byte lane store into a modelled serial register.
-    ///
-    /// The written byte replaces its lane; the other lane keeps its value.
-    fn serial_write8(&mut self, addr: u32, value: u8) -> Option<Result<()>> {
-        if !is_serial_register(addr) {
-            return None;
-        }
-        let base = addr & !1;
-        let current = self.io.read16(base, self.pressed_keys)?.ok()?;
-        let merged = if addr & 1 == 0 {
-            (current & 0xFF00) | u16::from(value)
-        } else {
-            (current & 0x00FF) | (u16::from(value) << 8)
-        };
-        self.io.write16(base, merged, self.pressed_keys)
-    }
-
-    /// Applies the selected Game Pak ROM write policy to a store there.
-    fn rom_store(&self, addr: u32) -> Result<()> {
-        match self.rom_write_policy {
-            RomWritePolicy::Strict => Err(Error::RomWrite { addr }),
-            RomWritePolicy::Dropped => Ok(()),
-        }
-    }
-
-    /// Applies the selected BIOS write policy to a store into the BIOS range.
-    fn bios_store(&self, addr: u32) -> Result<()> {
-        match self.bios_write_policy {
-            BiosWritePolicy::Strict => Err(Error::BiosAccess { addr }),
-            BiosWritePolicy::RomWritesDropped => Ok(()),
-        }
     }
 
     pub fn write8(&mut self, addr: u32, value: u8) -> Result<()> {
@@ -379,6 +329,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_write8(addr);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 return Err(Error::UnsupportedSave { addr });
             }
@@ -440,6 +393,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_write16(addr, value);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 return self.eeprom_write16(addr, value);
             }
@@ -479,6 +435,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.has_gpio_overlay(addr) {
+                return self.gpio_write32(addr, value);
+            }
             if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
                 return Err(Error::UnsupportedSave { addr });
             }
