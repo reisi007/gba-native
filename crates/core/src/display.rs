@@ -5,8 +5,8 @@
 //! and Mode 2 BG2/BG3 affine + OBJ are composed with windows 0/1, the OBJ
 //! window and BLDCNT alpha/brightness blending. Text/affine BG mosaic and
 //! normal/affine OBJ mosaic plus 1D/2D OBJ
-//! mapping and double-size affine OBJ snapshots are supported. Semi-transparent
-//! OBJ mode remains an explicit error; scanline effects are absent.
+//! mapping, double-size affine OBJ, and bounded semi-transparent OBJ snapshots
+//! are supported. Scanline effects are absent.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};
@@ -401,6 +401,16 @@ fn composite(
     };
     if !effects_allowed {
         return top.color;
+    }
+    if top.semi_transparent {
+        if let Some(next) = layer::next(candidates, top) {
+            if blend.is_second(next.layer) {
+                return blend.alpha(top.color, next.color);
+            }
+        } else if blend.is_second(5) {
+            return blend.alpha(top.color, backdrop);
+        }
+        return blend.brightness(top.layer, top.color);
     }
     if blend.mode() == 1 && blend.is_first(top.layer) {
         if let Some(next) = layer::next(candidates, top) {

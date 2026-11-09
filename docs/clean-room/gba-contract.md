@@ -878,9 +878,17 @@ scanline PPU, frame renderer or timing claim.
   and sample the first in-bounds transformed source coordinate. Public wording
   does not fully pin down expanded-canvas origin/wrap details, so this is a static
   approximation, not hardware validation. The existing offscreen rejection for
-  Y coordinates 160..255 is preserved; this slice adds no Y wrapping. Semi-transparent
-  OBJ remains an explicit unsupported feature. OBJ mode 2 sprites form the
-  OBJ-window mask and are not displayed, as documented.
+  Y coordinates 160..255 is preserved; this slice adds no Y wrapping. For a
+  visible mode-1 OBJ, the topmost OBJ pixel is forced as an alpha first target
+  when color effects are enabled, independent of BLDCNT's OBJ first-target bit.
+  It alpha-blends against only the immediately lower visible layer when that
+  layer is selected as a second target, regardless of BLDCNT effect mode; the
+  backdrop is eligible when no lower layer is visible. If no eligible second
+  target exists, BLDCNT brightness may still apply to OBJ when its first-target
+  bit is set. Only the topmost OBJ
+  participates; OBJ-to-OBJ blending is not modeled. This is static snapshot
+  composition and adds no scanline/timing claim. OBJ mode 2 sprites form the
+  OBJ-window mask and are not displayed, as documented; reserved mode 3 errors.
 - Window 0/1 use their horizontal/vertical registers with inclusive starts and
   exclusive ends. An end beyond 240/160 or a start greater than the end clamps
   the end to the screen limit. WININ low/upper six-bit masks select Window 0/1
@@ -889,7 +897,7 @@ scanline PPU, frame renderer or timing claim.
   pixels are contributed only by nontransparent mode-2 OBJ pixels. Window 1 is
   implemented for Mode 0/1/2; bitmap modes continue rejecting window enables.
   The selected region's effect-enable bit gates alpha/brightness effects.
-- `BLDCNT` mode 1 alpha-blends the first target only when the immediately next
+- `BLDCNT` mode 1 alpha-blends ordinary first targets only when the immediately next
   lower non-transparent layer is a second target; if the next lower layer is
   not a second target, only the top pixel is displayed. With no lower layer,
   the backdrop participates only when its second-target bit is set. `BLDALPHA`

@@ -1,8 +1,9 @@
 //! Static Mode 0 OBJ (sprite) layer for the supported OAM forms.
 //!
 //! Supports normal and affine sprites, 1D/2D tile mapping, 4/8bpp tiles, flips,
-//! per-pixel priority and per-OBJ mosaic. Semi-transparent OBJ mode remains an
-//! explicit error; double-size canvas placement is a static Design policy.
+//! per-pixel priority and per-OBJ mosaic. Semi-transparent OBJ affects only the
+//! selected top OBJ pixel during static composition; double-size canvas placement
+//! is a static Design policy.
 
 use super::layer::{LayerPixel, choose};
 use super::{HEIGHT, WIDTH};
@@ -98,7 +99,7 @@ fn render_entry(
     }
     let mode = (attr0 >> 10) & 0x3;
     let window_mode = mode == 2;
-    if mode == 1 || mode == 3 {
+    if mode == 3 {
         return Err(Error::UnsupportedPpuFeature { dispcnt });
     }
     let mosaic_enabled = attr0 & 0x1000 != 0;
@@ -243,6 +244,7 @@ fn render_entry(
                 color,
                 priority,
                 layer: 4,
+                semi_transparent: mode == 1,
                 order: 0,
             };
             choose(&mut layer.pixels[pixel_index], Some(candidate));

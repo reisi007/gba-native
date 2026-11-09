@@ -6,6 +6,8 @@ pub(super) struct LayerPixel {
     pub priority: u8,
     /// BLDCNT target index: 0..3 = BG0..BG3, 4 = OBJ.
     pub layer: u8,
+    /// OBJ Attr0 mode 1 forces OBJ as a first target for alpha when enabled.
+    pub semi_transparent: bool,
     /// Lower wins a priority tie: OBJ=0, BG0=1, BG1=2, BG2=3, BG3=4.
     pub order: u8,
 }

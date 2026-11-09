@@ -366,8 +366,9 @@ expectations, not from the decoder/interpreter:
 - `crates/core/tests/display_obj_affine.rs` supplies independent color oracles
   for identity double-size placement/clipping, preserved offscreen-Y rejection,
   and a nonidentity, mosaiced expanded canvas. These are synthetic static
-  snapshots, not hardware validation; semi-transparent OBJ remains explicitly
-  unsupported and issue #3 remains open.
+  snapshots, not hardware validation. Semi-transparent OBJ has the bounded
+  static composition coverage recorded in the follow-up below; issue #3 remains
+  open for its other scoped work.
 - Integer nearest scaling, exact 3:2 letterboxing, invalid sizes, and explicit
   rejection of FSR1/temporal-FSR/ML-FSR/DLSS names.
 - PPM header and payload length.
@@ -2105,8 +2106,14 @@ on-device MediaPlayer playback remains outside CI.
   `./scripts/full.sh` passes for this corrected state: Ratchet fast/slow, fmt,
   Clippy, debug/release workspace tests, demo, and synthetic AOT proof
   (`native_vs_reference=match`, 0 fallbacks). Final output: `==> full gate passed`.
-- Semi-transparent OBJ remains fail-closed. This is partial synthetic static
-  snapshot work; issue #3 remains open.
+- Follow-up bounded semi-transparent OBJ static composition is implemented from
+  the cited public GBATEK blend behavior. Independent pixel oracles cover window
+  effect gating, backdrop second-target blending, immediate non-target blocking
+  despite a farther target, transparent texels, ordinary OBJ visibility and
+  priority, brightness fallback, alpha taking priority over brightness, and the
+  reserved mode-3 error. This remains synthetic snapshot behavior only: no
+  scanline/timing or complete PPU claim. Issue #3 remains open for its other
+  scoped items.
 
 ## Round: PSG noise frequency divisor slice (2026-11-09)
 

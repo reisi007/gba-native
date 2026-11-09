@@ -114,6 +114,7 @@ impl<'a> TextBg<'a> {
             color: palette_color(self.bus, color_index)?,
             priority: self.priority,
             layer: self.order - 1,
+            semi_transparent: false,
             order: self.order,
         }))
     }

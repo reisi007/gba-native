@@ -389,11 +389,54 @@ fn mode0_obj_uses_32_byte_tile_units_in_1d_and_2d() {
 }
 
 #[test]
-fn obj_semi_transparent_mode_remains_an_explicit_error() {
+fn obj_semi_transparent_mode_without_eligible_alpha_target_keeps_brightness_fallback() {
     let mut bus = bus();
     bus.write16(OAM_BASE, 0x0400)
         .expect("semi-transparent mode");
     bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D).expect("OBJ");
+    put_obj_palette(&mut bus, 1, 0x001F);
+    put_vram8(&mut bus, 0x1_0000, 1);
+    bus.write16(BLDCNT_ADDR, 0x0090)
+        .expect("OBJ brightness target");
+    bus.write16(BLDY_ADDR, 16).expect("full brighten");
+    let image = display::snapshot(&bus).expect("semi-transparent OBJ snapshot");
+    assert_eq!(image.pixel(0, 0), 0x00FF_FFFF);
+
+    bus.write16(BLDCNT_ADDR, 0x00D0)
+        .expect("OBJ darkness target");
+    let image = display::snapshot(&bus).expect("mode-3 brightness fallback");
+    assert_eq!(image.pixel(0, 0), 0x0000_0000);
+}
+
+#[test]
+fn semi_transparent_obj_forces_alpha_first_target_and_blends_backdrop() {
+    let mut bus = bus();
+    put_palette(&mut bus, 0, 0x03E0); // green backdrop
+    put_obj_palette(&mut bus, 1, 0x001F); // red OBJ
+    for offset in 0..32 {
+        put_vram8(&mut bus, 0x1_0000 + offset, 0x11);
+    }
+    bus.write16(OAM_BASE, 0x0400)
+        .expect("semi-transparent Attr0");
+    bus.write16(BLDCNT_ADDR, 0x2050)
+        .expect("backdrop second target");
+    bus.write16(BLDALPHA_ADDR, 0x0808)
+        .expect("equal alpha coefficients");
+    bus.write16(BLDY_ADDR, 16)
+        .expect("brightness fallback amount");
+    bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D)
+        .expect("OBJ enable");
+
+    let image = display::snapshot(&bus).expect("semi-transparent OBJ snapshot");
+    assert_eq!(image.pixel(0, 0), 0x007F_7F00);
+}
+
+#[test]
+fn reserved_obj_mode_three_remains_an_error() {
+    let mut bus = bus();
+    bus.write16(OAM_BASE, 0x0C00).expect("reserved OBJ mode");
+    bus.write16(DISPCNT_ADDR, OBJ_ON | OBJ_1D)
+        .expect("OBJ enable");
     assert!(matches!(
         display::snapshot(&bus),
         Err(gba_native_core::error::Error::UnsupportedPpuFeature { .. })
