@@ -556,8 +556,24 @@ bits clear their corresponding queues; RegisterRamReset group 6 clears both and
 group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
 automatic audio output. The separate `audio` module renders a bounded PSG mix
-from the register snapshot with a host volume/mute; it does not consume FIFO
-samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
+from the register snapshot with a host volume/mute. Channels 1, 2 and 4 capture
+envelope initial volume, direction and period on trigger writes and advance
+steps on the host's 32768 Hz nominal sample clock; this is host-rendered state,
+not hardware timing. The bus retains one latest trigger snapshot and wrapping
+sequence per channel. Every trigger write increments it, but multiple writes
+between engine observations intentionally coalesce to the latest captured
+parameters. Once triggered, the captured envelope controls rendered volume;
+later envelope-register edits do not rewrite that running host envelope unless
+another trigger is observed. Engines observe independently and do not drain
+events.
+`advance_instruction_bus` observes at every call (including no-sample calls),
+while `advance_bus` observes once per batch call and cannot reproduce
+intermediate writes. Sequence wrap after 2^64 trigger writes between observations
+can alias; no stronger guarantee is claimed. A host engine observes group-6
+reset as envelope-state clearing. Standalone `render_psg` retains stateless
+register-snapshot volume behavior. Wave-channel envelopes, sweep, length
+counters and full PSG/timing behavior remain unsupported. The renderer does not
+consume FIFO samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - The SRAM/flash backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by
   default and only answers under its explicit device policies (see above). The

@@ -343,3 +343,5 @@ fn direct_sound_register_write_changes_the_next_sample() {
         "a Sound enable write must affect the next generated sample"
     );
 }
+
+mod envelope_tests;

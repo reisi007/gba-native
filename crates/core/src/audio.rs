@@ -8,13 +8,21 @@
 //! browser frontend can feed the same samples to WebAudio.
 //!
 //! **Explicit limits.** [`SAMPLE_RATE`] is a fixed host render rate, not a GBA
-//! sample-clock claim. Direct Sound consumes one signed 8-bit FIFO byte per
+//! sample-clock claim. PSG envelope retriggers use bounded latest-event snapshots:
+//! triggers between host observations coalesce, and `advance_bus` observes once
+//! per call. This is an approximation, not hardware timing. Direct Sound consumes one signed 8-bit FIFO byte per
 //! timer-0/1 overflow using the documented
 //! `16.777216 MHz / (prescaler * (65536 - reload))` rate, but the timer model
 //! itself advances on an instruction budget, not hardware cycles. A FIFO
 //! underrun holds the last sample instead of inventing silence.
+//!
+//! The bus-backed engine observes envelope trigger events at each bus-advance
+//! call, even when no sample is due. Its register-only `advance` variants and
+//! stateless [`render_psg`] intentionally retain snapshot-volume behavior and do
+//! not provide trigger-event guarantees.
 
 mod direct_sound;
+mod format;
 
 #[cfg(test)]
 mod tests;
@@ -22,6 +30,7 @@ mod tests;
 use crate::bus::{Bus, INSTRUCTION_CYCLES};
 use crate::error::Result;
 use direct_sound::DirectSound;
+pub use format::{render_tone, wav_bytes};
 
 /// Fixed host render rate. This is not a claim about the GBA sample clock.
 pub const SAMPLE_RATE: u32 = 32_768;
@@ -98,12 +107,18 @@ fn duty_threshold(duty: u16) -> f32 {
     }
 }
 
-fn square_sample(regs: &[u8], h_offset: usize, x_offset: usize, phase: f32) -> f32 {
+fn square_sample(
+    regs: &[u8],
+    h_offset: usize,
+    x_offset: usize,
+    phase: f32,
+    envelope_volume: Option<u8>,
+) -> f32 {
     if square_frequency(regs, x_offset).is_none() {
         return 0.0;
     }
     let control = u16_at(regs, h_offset);
-    let volume = f32::from((control >> 12) & 0xF) / 15.0;
+    let volume = f32::from(envelope_volume.unwrap_or(((control >> 12) & 0xF) as u8)) / 15.0;
     let duty = duty_threshold((control >> 6) & 3);
     if phase < duty { volume } else { -volume }
 }
@@ -141,12 +156,17 @@ fn noise_frequency(regs: &[u8]) -> Option<f32> {
     Some(524_288.0 / ratio / (1_u32 << (shift + 1)) as f32)
 }
 
-fn noise_sample(regs: &[u8], phase: f32, lfsr: &mut u16) -> (f32, f32) {
+fn noise_sample(
+    regs: &[u8],
+    phase: f32,
+    lfsr: &mut u16,
+    envelope_volume: Option<u8>,
+) -> (f32, f32) {
     let Some(frequency) = noise_frequency(regs) else {
         return (0.0, phase);
     };
     let control = u16_at(regs, 0x18);
-    let volume = f32::from((control >> 12) & 0xF) / 15.0;
+    let volume = f32::from(envelope_volume.unwrap_or(((control >> 12) & 0xF) as u8)) / 15.0;
     let advance = phase + frequency / SAMPLE_RATE as f32;
     let steps = advance.floor() as u32;
     for _ in 0..steps {
@@ -162,6 +182,16 @@ fn noise_sample(regs: &[u8], phase: f32, lfsr: &mut u16) -> (f32, f32) {
 struct PsgMixer {
     phases: [f32; 4],
     lfsr: u16,
+    envelopes: [Option<PsgEnvelope>; 3],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PsgEnvelope {
+    sequence: u64,
+    volume: u8,
+    increase: bool,
+    period: u8,
+    elapsed_samples: u32,
 }
 
 impl PsgMixer {
@@ -169,6 +199,7 @@ impl PsgMixer {
         Self {
             phases: [0.0; 4],
             lfsr: 0x7FFF,
+            envelopes: [None; 3],
         }
     }
 
@@ -182,14 +213,14 @@ impl PsgMixer {
         if channel_enabled(regs, 0)
             && let Some(frequency) = square_frequency(regs, 0x04)
         {
-            mixed += square_sample(regs, 0x02, 0x04, self.phases[0]);
+            mixed += square_sample(regs, 0x02, 0x04, self.phases[0], self.envelope_volume(0));
             self.phases[0] = (self.phases[0] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
         if channel_enabled(regs, 1)
             && let Some(frequency) = square_frequency(regs, 0x0C)
         {
-            mixed += square_sample(regs, 0x08, 0x0C, self.phases[1]);
+            mixed += square_sample(regs, 0x08, 0x0C, self.phases[1], self.envelope_volume(1));
             self.phases[1] = (self.phases[1] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
@@ -201,7 +232,9 @@ impl PsgMixer {
             active += 1;
         }
         if channel_enabled(regs, 3) {
-            let (sample, next_phase) = noise_sample(regs, self.phases[3], &mut self.lfsr);
+            let envelope_volume = self.envelope_volume(2);
+            let (sample, next_phase) =
+                noise_sample(regs, self.phases[3], &mut self.lfsr, envelope_volume);
             mixed += sample;
             self.phases[3] = next_phase;
             active += 1;
@@ -230,6 +263,52 @@ impl PsgMixer {
                 mixed / f32::from(active)
             };
             samples.push((value * gain * f32::from(i16::MAX)).clamp(-32768.0, 32767.0) as i16);
+        }
+    }
+
+    fn envelope_volume(&self, index: usize) -> Option<u8> {
+        self.envelopes[index].map(|envelope| envelope.volume)
+    }
+
+    fn observe_envelopes(&mut self, events: [crate::bus::EnvelopeTrigger; 3]) {
+        for (index, event) in events.into_iter().enumerate() {
+            let changed =
+                self.envelopes[index].is_none_or(|state| state.sequence != event.sequence);
+            if !changed {
+                continue;
+            }
+            if !event.triggered {
+                self.envelopes[index] = None;
+                continue;
+            }
+            self.envelopes[index] = Some(PsgEnvelope {
+                sequence: event.sequence,
+                volume: event.initial_volume,
+                increase: event.increase,
+                period: event.period,
+                elapsed_samples: 0,
+            });
+        }
+    }
+
+    fn advance_envelopes(&mut self, frames: usize) {
+        for envelope in self.envelopes.iter_mut().flatten() {
+            if envelope.period == 0 {
+                continue;
+            }
+            let interval = u32::from(envelope.period) * (SAMPLE_RATE / 64);
+            for _ in 0..frames {
+                envelope.elapsed_samples += 1;
+                if envelope.elapsed_samples < interval {
+                    continue;
+                }
+                envelope.elapsed_samples = 0;
+                if envelope.increase {
+                    envelope.volume = envelope.volume.saturating_add(1).min(15);
+                } else {
+                    envelope.volume = envelope.volume.saturating_sub(1);
+                }
+            }
         }
     }
 }
@@ -336,6 +415,7 @@ impl AudioEngine {
     /// and the Sound A/B FIFOs. FIFO samples are consumed at the timer rate and
     /// a sound-timed DMA burst is requested once a FIFO is at most half full.
     pub fn advance_instruction_bus(&mut self, bus: &mut Bus) -> Result<()> {
+        self.psg.observe_envelopes(bus.sound_envelope_triggers());
         let frames = self.due_frames(1);
         self.render_bus(bus, frames)
     }
@@ -346,6 +426,7 @@ impl AudioEngine {
     /// snapshot for several instructions; generated dispatchers call
     /// [`AudioEngine::advance_instruction_bus`] at every instruction boundary.
     pub fn advance_bus(&mut self, bus: &mut Bus, instructions: u64) -> Result<()> {
+        self.psg.observe_envelopes(bus.sound_envelope_triggers());
         let frames = self.due_frames(instructions);
         self.render_bus(bus, frames)
     }
@@ -380,6 +461,7 @@ impl AudioEngine {
             let value = psg * psg_gain + direct;
             self.samples
                 .push((value * f32::from(i16::MAX)).clamp(-32768.0, 32767.0) as i16);
+            self.psg.advance_envelopes(1);
         }
         Ok(())
     }
@@ -403,39 +485,4 @@ impl AudioEngine {
     pub fn wav(&self) -> Vec<u8> {
         wav_bytes(&self.samples, SAMPLE_RATE)
     }
-}
-
-/// Render a fixed square test tone from a synthetic register image.
-#[must_use]
-pub fn render_tone(frequency: f32, frames: usize, settings: AudioSettings) -> Vec<i16> {
-    let mut regs = [0u8; 0x48];
-    let rate = (2048.0 - 131_072.0 / frequency.max(1.0)).round() as u16 & 0x07FF;
-    regs[0x02..0x04].copy_from_slice(&0xF080u16.to_le_bytes());
-    regs[0x04..0x06].copy_from_slice(&(0x8000 | rate).to_le_bytes());
-    regs[0x20..0x22].copy_from_slice(&0x0107u16.to_le_bytes());
-    regs[0x24] = 0x80;
-    render_psg(&regs, frames, settings)
-}
-
-/// Encode mono 16-bit PCM as a canonical RIFF/WAVE file.
-#[must_use]
-pub fn wav_bytes(samples: &[i16], sample_rate: u32) -> Vec<u8> {
-    let data_len = (samples.len() * 2) as u32;
-    let mut bytes = Vec::with_capacity(44 + data_len as usize);
-    bytes.extend_from_slice(b"RIFF");
-    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
-    bytes.extend_from_slice(b"WAVEfmt ");
-    bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
-    bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-    bytes.extend_from_slice(&2u16.to_le_bytes());
-    bytes.extend_from_slice(&16u16.to_le_bytes());
-    bytes.extend_from_slice(b"data");
-    bytes.extend_from_slice(&data_len.to_le_bytes());
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
-    }
-    bytes
 }

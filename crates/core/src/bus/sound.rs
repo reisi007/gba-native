@@ -15,6 +15,18 @@ pub const FIFO_B_ADDR: u32 = 0x0400_00A4;
 const FIFO_CAPACITY: usize = 32;
 const SOUNDCNT_H_ADDR: u32 = 0x0400_0082;
 
+/// Latest bounded trigger observation for one PSG envelope channel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvelopeTrigger {
+    pub sequence: u64,
+    pub triggered: bool,
+    pub initial_volume: u8,
+    pub increase: bool,
+    pub period: u8,
+}
+
+const ENVELOPE_TRIGGER_OFFSETS: [(usize, usize); 3] = [(0x04, 0x02), (0x0C, 0x08), (0x1C, 0x18)];
+
 /// One of the two write-only Direct Sound FIFOs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SoundFifo {
@@ -91,6 +103,7 @@ pub(super) struct SoundState {
     regs: [u8; SOUND_LEN],
     fifo_a: ByteFifo,
     fifo_b: ByteFifo,
+    envelope_triggers: [EnvelopeTrigger; 3],
 }
 
 impl Default for SoundState {
@@ -99,6 +112,7 @@ impl Default for SoundState {
             regs: [0; SOUND_LEN],
             fifo_a: ByteFifo::default(),
             fifo_b: ByteFifo::default(),
+            envelope_triggers: [EnvelopeTrigger::default(); 3],
         }
     }
 }
@@ -150,6 +164,9 @@ impl SoundState {
             }
         }
         self.regs[offset] = value;
+        if offset & 1 == 1 {
+            self.observe_trigger(offset - 1);
+        }
         true
     }
 
@@ -160,6 +177,13 @@ impl SoundState {
         self.regs[0x20..0x22].fill(0); // SOUNDCNT_L
         self.regs[0x22..0x24].copy_from_slice(&0x880Eu16.to_le_bytes()); // SOUNDCNT_H
         self.regs[0x24..0x26].fill(0); // SOUNDCNT_X ends disabled
+        for trigger in &mut self.envelope_triggers {
+            trigger.sequence = trigger.sequence.wrapping_add(1);
+            *trigger = EnvelopeTrigger {
+                sequence: trigger.sequence,
+                ..EnvelopeTrigger::default()
+            };
+        }
         let bias = u16::from_le_bytes([self.regs[0x28], self.regs[0x29]]) & 0x03FF;
         self.regs[0x28..0x2A].copy_from_slice(&bias.to_le_bytes());
         self.regs[0x30..0x40].fill(0); // 16-byte wave-RAM area
@@ -171,6 +195,17 @@ impl SoundState {
         bytes.extend_from_slice(&self.regs);
         self.fifo_a.append_digest(bytes);
         self.fifo_b.append_digest(bytes);
+        // Captured trigger state determines future host PSG output and must
+        // remain part of interpreter/AOT state comparison.
+        for event in self.envelope_triggers {
+            bytes.extend_from_slice(&event.sequence.to_le_bytes());
+            bytes.extend_from_slice(&[
+                u8::from(event.triggered),
+                event.initial_volume,
+                u8::from(event.increase),
+                event.period,
+            ]);
+        }
     }
 
     pub(super) fn write16(&mut self, addr: u32, value: u16) -> bool {
@@ -189,7 +224,35 @@ impl SoundState {
             }
         }
         self.regs[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        self.observe_trigger(offset);
         true
+    }
+
+    fn observe_trigger(&mut self, offset: usize) {
+        for (index, (trigger_offset, envelope_offset)) in
+            ENVELOPE_TRIGGER_OFFSETS.into_iter().enumerate()
+        {
+            if offset != trigger_offset {
+                continue;
+            }
+            let trigger_value =
+                u16::from_le_bytes([self.regs[trigger_offset], self.regs[trigger_offset + 1]]);
+            if trigger_value & 0x8000 == 0 {
+                continue;
+            }
+            let envelope =
+                u16::from_le_bytes([self.regs[envelope_offset], self.regs[envelope_offset + 1]]);
+            let event = &mut self.envelope_triggers[index];
+            event.sequence = event.sequence.wrapping_add(1);
+            event.triggered = true;
+            event.initial_volume = ((envelope >> 12) & 0xF) as u8;
+            event.increase = envelope & 0x0800 != 0;
+            event.period = ((envelope >> 8) & 7) as u8;
+        }
+    }
+
+    pub(super) fn envelope_triggers(&self) -> [EnvelopeTrigger; 3] {
+        self.envelope_triggers
     }
 
     pub(super) fn fifo_for_word_address(addr: u32) -> Option<SoundFifo> {
@@ -276,5 +339,11 @@ impl Bus {
 
     pub(super) fn sound_write16(&mut self, addr: u32, value: u16) -> bool {
         self.io.sound_mut().write16(addr, value)
+    }
+
+    /// Latest sound-envelope trigger records. Each engine observes independently;
+    /// multiple triggers between observations intentionally coalesce to the newest.
+    pub fn sound_envelope_triggers(&self) -> [EnvelopeTrigger; 3] {
+        self.io.sound().envelope_triggers()
     }
 }

@@ -666,6 +666,22 @@ the observed local toolchain outcomes, not general platform support. Automated
 regression tests remain based on synthetic fixtures, and no playability claim
 is made.
 
+### PSG envelope snapshot slice (2026-11-09)
+
+- Core audio unit tests passed (26), including the exact 512-sample envelope
+  boundary assertion; the reset integration target passed (7), including group-6
+  invalidation. The generated native AOT sound-trigger fixture matched the
+  reference bus digest. `cargo test -- --list` reported 669 tests, matching the
+  updated workspace inventory; the workspace contract test passed in debug and
+  release workspace runs. `./scripts/full.sh` passed with a fresh target,
+  including workspace debug/release tests, Ratchet fast/slow, formatting,
+  Clippy, demo and synthetic AOT proof (`native_vs_reference=match`).
+- The maintained-Rust hard 500-line counter and `git diff --check` passed;
+  `audio.rs` is 488 physical lines. This is bounded host-rendered envelope progress only; the
+  coalescing, nominal sample-clock and non-hardware-timing limits are recorded
+  in `gba-contract.md`. No audio completeness, playability, hardware timing or
+  retail compatibility is established; issues #7 and #29 remain open.
+
 ### Output path safety
 
 `src/cli/output.rs` enforces the CLI contract; `tests/cli_output.rs` exercises

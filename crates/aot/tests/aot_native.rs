@@ -251,6 +251,66 @@ fn ldr_literal(rd: u32, instruction_addr: u32, target: u32) -> u32 {
     0xE59F_0000 | (rd << 12) | difference
 }
 
+#[test]
+fn generated_native_sound_trigger_matches_reference_event_state() {
+    let mut rom = vec![0u8; 0x200];
+    let words = [
+        ldr_literal(0, 0x00, 0x40), // sound envelope register
+        ldr_literal(1, 0x04, 0x44), // envelope value
+        0xE1C0_10B0,                // STRH r1,[r0]
+        ldr_literal(0, 0x0C, 0x48), // sound frequency/trigger register
+        ldr_literal(1, 0x10, 0x4C), // trigger value
+        0xE1C0_10B0,                // STRH r1,[r0]
+        0xEAFF_FFFE,                // B .
+    ];
+    for (index, word) in words.iter().enumerate() {
+        rom[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+    }
+    for (offset, value) in [
+        (0x40, 0x0400_0062u32),
+        (0x44, 0x0000_F100),
+        (0x48, 0x0400_0064),
+        (0x4C, 0x0000_8000),
+    ] {
+        rom[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    rom[0xA0..0xA8].copy_from_slice(b"GBA-ENV\0");
+    rom[0xAC..0xB0].copy_from_slice(b"GBAD");
+    rom[0xB0..0xB2].copy_from_slice(b"00");
+    rom[0xB2] = 0x96;
+    let sum = rom[0xA0..=0xBC]
+        .iter()
+        .fold(0u8, |acc, byte| acc.wrapping_add(*byte));
+    rom[0xBD] = 0u8.wrapping_sub(sum).wrapping_sub(0x19);
+    let cart = Cartridge::from_bytes(rom).expect("synthetic envelope fixture");
+    let budget = 7;
+    let artifact = aot::discover(&cart, 0x0800_0000, false, aot::Limits::default())
+        .expect("discover sound trigger fixture");
+    let source = aot::emit_native_module(&cart, &artifact, budget).expect("emit sound fixture");
+    let temp = TempDir::new("sound-trigger");
+    let fixture = temp.path().join("fixture.gba");
+    std::fs::write(&fixture, cart.bytes()).expect("write synthetic fixture");
+    let harness = NativeHarness::build(&source, &temp.path().join("harness"))
+        .expect("build sound-trigger harness");
+    let report = harness.run(&fixture).expect("run sound-trigger harness");
+
+    let mut cpu = Cpu::direct_entry();
+    cpu.initialize_bios_stacks();
+    cpu.set_pc(0x0800_0000);
+    let mut reference_bus = Bus::new(cart.clone());
+    let used = interpret::run_budget(&mut cpu, &mut reference_bus, budget)
+        .expect("reference sound trigger run");
+    assert_eq!(used, budget);
+    assert_eq!(report.budget_used, budget);
+    assert_eq!(
+        report.bus_sha256,
+        sha256::hex(&reference_bus.state_digest()),
+        "generated guest stores must preserve trigger event state"
+    );
+    let events = reference_bus.sound_envelope_triggers();
+    assert_eq!((events[0].sequence, events[0].initial_volume), (1, 15));
+}
+
 /// Independently generated synthetic fixture whose immediates previously fell
 /// into the extra-halfword/multiply classification. It also sets DISPCNT mode 3
 /// through a documented STRH so the generated harness can snapshot an image.

@@ -221,6 +221,7 @@ fn register_ram_reset_group_six_applies_known_sound_effects_only() {
     bios::call(bios::SERVICE_REGISTER_RAM_RESET, &mut cpu, &mut bus).expect("reset sound group");
 
     let (_, mut expected) = fresh();
+    expected.reset_group6_sound();
     expected
         .write16(BG0CNT_ADDR, 0x1234)
         .expect("expected bg0cnt");

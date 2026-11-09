@@ -71,6 +71,13 @@ Relevant anchors actually consulted for this milestone:
 - The Channel 4 noise section was consulted on 2026-11-09 at
   <https://problemkaputt.de/gbatek.htm>; this retrieval was not separately
   retained or hashed.
+- `#gbasoundchannel1squarewave` and `#gbasoundchannel4noise`: SOUND1CNT_H
+  envelope step-time bits encode units of n/64 seconds (1..7; zero means no
+  envelope), bit 11 selects decrease/increase, and bits 12..15 provide initial
+  volume (zero means no sound). Channel 2 follows channel 1 without sweep;
+  channel 3 has no volume envelope. Consulted 2026-11-09 at
+  <https://problemkaputt.de/gbatek.htm>; retrieval not separately retained or
+  hashed. This grounds register fields only, not the host sample-clock policy.
 - `#gba-cart-io-port-gpio`: GPIO data/direction/control registers at ROM-window
   offsets `C4h`/`C6h`/`C8h`, low-four-bit data and direction, control bit 0, and
   the documented 16-/32-bit ROM-store access forms. Consulted at

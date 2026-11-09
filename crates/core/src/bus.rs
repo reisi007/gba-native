@@ -33,7 +33,7 @@ pub use irq::{
     CYCLES_PER_LINE, FRAME_CYCLES, FRAME_INSTRUCTIONS, FRAME_LINES, VBLANK_FIRST_LINE,
     VBLANK_LAST_LINE, instructions_until_line, line_instructions,
 };
-pub use sound::{FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
+pub use sound::{EnvelopeTrigger, FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
 use crate::bios::{AffinePolicy, DecompressionPolicy};
 use crate::cart::{Cartridge, ROM_BASE};
