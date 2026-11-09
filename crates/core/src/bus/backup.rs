@@ -22,18 +22,20 @@ pub const SAVE_LEN_64K: usize = 64 * 1024;
 /// Modelled 128 KiB flash backing length (two 64 KiB banks).
 pub const SAVE_LEN_FLASH: usize = 128 * 1024;
 
-/// Host-selected model for the 64 KiB Game Pak backup window.
+/// Host-selected model for the Game Pak backup devices.
 ///
 /// The strict policy reports every access as [`Error::UnsupportedSave`]. The SRAM opt-ins model byte-accessible storage
 /// that starts erased (`0xFF`), is lost when the process ends, and has no flash
 /// command engine. The flash opt-in models two 64 KiB banks with the documented
-/// autoselect/bank-switch/program/erase subset. Neither model claims general
-/// save-device or flash compatibility.
+/// autoselect/bank-switch/program/erase subset. The EEPROM opt-ins model the
+/// serial 512-byte or 8-KiB part in its documented window inside the ROM address
+/// space. None of the models claims general save-device, flash or EEPROM
+/// compatibility.
 ///
 /// The model itself is volatile; persistence is a host concern through the save
 /// library. The selected policy is host configuration and is excluded from
-/// [`Bus::state_digest`]; only the SRAM contents are guest state and are
-/// hashed.
+/// [`Bus::state_digest`]; only the device contents and serial state are guest
+/// state and are hashed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BackupPolicy {
     /// Fail closed: every backup-window access returns [`Error::UnsupportedSave`].
@@ -45,6 +47,12 @@ pub enum BackupPolicy {
     /// **Experimental opt-in:** volatile 128 KiB flash (two 64 KiB banks)
     /// with the documented autoselect/program/erase command subset.
     Flash128KVolatile,
+    /// **Experimental opt-in:** volatile 512-byte EEPROM with a 6-bit block
+    /// address, reached through the documented serial window.
+    Eeprom512Volatile,
+    /// **Experimental opt-in:** volatile 8-KiB EEPROM with a 14-bit wire
+    /// address (only the lower 10 bits used).
+    Eeprom8KVolatile,
 }
 
 impl BackupPolicy {
@@ -55,6 +63,8 @@ impl BackupPolicy {
             Self::Sram32KVolatile => "sram-32k-volatile",
             Self::Sram64KVolatile => "sram-64k-volatile",
             Self::Flash128KVolatile => "flash-128k-volatile",
+            Self::Eeprom512Volatile => "eeprom-512-volatile",
+            Self::Eeprom8KVolatile => "eeprom-8k-volatile",
         }
     }
 
@@ -64,6 +74,8 @@ impl BackupPolicy {
             Self::Strict | Self::Sram32KVolatile => SAVE_LEN,
             Self::Sram64KVolatile => SAVE_LEN_64K,
             Self::Flash128KVolatile => SAVE_LEN_FLASH,
+            Self::Eeprom512Volatile => 512,
+            Self::Eeprom8KVolatile => 8 * 1024,
         }
     }
 }
@@ -124,7 +136,9 @@ impl Bus {
     /// backup bus is not composed here.
     pub(super) fn save_read(&self, addr: u32, width: usize) -> Result<u32> {
         match self.backup_policy {
-            BackupPolicy::Strict => Err(Error::UnsupportedSave { addr }),
+            BackupPolicy::Strict
+            | BackupPolicy::Eeprom512Volatile
+            | BackupPolicy::Eeprom8KVolatile => Err(Error::UnsupportedSave { addr }),
             BackupPolicy::Sram32KVolatile | BackupPolicy::Sram64KVolatile => {
                 let offset = (addr - SAVE_BASE) as usize;
                 if width != 1 || offset >= self.backup_policy.capacity() {
@@ -139,7 +153,9 @@ impl Bus {
     /// Applies the selected backup-device model to a store in the save window.
     pub(super) fn save_write(&mut self, addr: u32, value: u32, width: usize) -> Result<()> {
         match self.backup_policy {
-            BackupPolicy::Strict => Err(Error::UnsupportedSave { addr }),
+            BackupPolicy::Strict
+            | BackupPolicy::Eeprom512Volatile
+            | BackupPolicy::Eeprom8KVolatile => Err(Error::UnsupportedSave { addr }),
             BackupPolicy::Sram32KVolatile | BackupPolicy::Sram64KVolatile => {
                 let offset = (addr - SAVE_BASE) as usize;
                 if width != 1 || offset >= self.backup_policy.capacity() {

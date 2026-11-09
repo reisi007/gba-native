@@ -128,6 +128,11 @@ impl Bus {
             return Ok(self.oam[offset]);
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                // The serial EEPROM answers only its documented 16-bit DMA
+                // accesses and the ready-poll LDRH; byte lanes stay explicit.
+                return Err(Error::UnsupportedSave { addr });
+            }
             return self.cart.read_u8(addr).ok_or(Error::RomOverread {
                 addr,
                 len: self.cart.len(),
@@ -205,6 +210,9 @@ impl Bus {
             return Ok(u16::from_le_bytes([self.oam[offset], self.oam[offset + 1]]));
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                return self.eeprom_read16(addr);
+            }
             return self.cart.read_u16(addr).ok_or(Error::RomOverread {
                 addr,
                 len: self.cart.len(),
@@ -248,6 +256,9 @@ impl Bus {
             return Ok(low | (high << 16));
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                return Err(Error::UnsupportedSave { addr });
+            }
             return self.cart.read_u32(addr).ok_or(Error::RomOverread {
                 addr,
                 len: self.cart.len(),
@@ -368,6 +379,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                return Err(Error::UnsupportedSave { addr });
+            }
             return self.rom_store(addr);
         }
         if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
@@ -426,6 +440,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                return self.eeprom_write16(addr, value);
+            }
             return self.rom_store(addr);
         }
         if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {
@@ -462,6 +479,9 @@ impl Bus {
             return Ok(());
         }
         if (0x0800_0000..=0x0DFF_FFFF).contains(&addr) {
+            if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+                return Err(Error::UnsupportedSave { addr });
+            }
             return self.rom_store(addr);
         }
         if (SAVE_BASE..SAVE_BASE + SAVE_WINDOW_LEN).contains(&addr) {

@@ -1,16 +1,16 @@
 # Source layout
 
-- `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `cpu.rs`,
-  `cpu/registers.rs`, `cpu/exception.rs`: header, explicit memory map,
-  SRAM/flash device policies, CPU register banks, documented stack
+- `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `bus/eeprom.rs`,
+  `cpu.rs`, `cpu/registers.rs`, `cpu/exception.rs`: header, explicit memory map,
+  SRAM/flash/serial EEPROM device policies, CPU register banks, documented stack
   initialization and framed SWI/ARM exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure
   address/width/sign-extension helpers.
 - `crates/core/src/display.rs`, `display/` (`text.rs`, `affine.rs`, `obj.rs`,
-  `window.rs`, `blend.rs`, `layer.rs`), `render.rs`: static Mode 0/1 and bitmap
-  snapshot compositor, nearest/letterbox, PPM.
+  `window.rs`, `blend.rs`, `layer.rs`), `render.rs`: static Mode 0/1/2 subset
+  and bitmap snapshot compositor, nearest/letterbox, PPM.
 - `crates/core/src/demo.rs`, `demo/input_tester.rs`: entirely synthetic ROM
   fixtures, including the committed Mode 3 input-tester guest (ten KEYINPUT
   bands, deterministic expected frame).
@@ -60,9 +60,9 @@
   `crates/core/tests/input_tester_fixture.rs` checks the generator/digests and
   reference frame; `scripts/input-tester.sh` builds and runs the native AOT
   artifact (visual Playwright comparison with `--visual`).
-- `crates/core/tests/`: header/bus/CPU/display/demo tests, direct BIOS HLE and
-  typed guest SWI decode/execution tests, independent ISA golden vectors and
-  ARM/Thumb single/block/stack memory vectors.
+- `crates/core/tests/`: header/bus/EEPROM/CPU/display/demo tests, direct BIOS HLE
+  and typed guest SWI decode/execution tests, independent ISA golden vectors
+  and ARM/Thumb single/block/stack memory vectors.
 - `crates/aot/tests/`: discovery metadata, PSR/halfword/ALU/memory/block/SWI
   fixtures (including the ARMv4 empty-list PC transfer), the native RAM
   self-modification regression, the target-profile build regression and the

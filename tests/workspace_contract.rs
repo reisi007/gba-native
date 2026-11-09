@@ -189,7 +189,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 631, "full workspace test inventory changed");
+    assert_eq!(total, 639, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -221,6 +221,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("display_mode0", 9),
         ("display_mode2", 2),
         ("display_obj_affine", 3),
+        ("eeprom", 6),
         ("input_tester_fixture", 3),
         ("isa_golden", 4),
         ("irq_dispatch", 6),
@@ -273,7 +274,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("cli_play", 3),
         ("cli_run", 9),
         ("cli_run_input", 4),
-        ("cli_run_options", 4),
+        ("cli_run_options", 5),
         ("cli_save", 2),
         ("quality_counter", 10),
         ("scripts", 7),
@@ -283,7 +284,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
     baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 180);
-    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 31);
+    baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 32);
     baseline += assert_target_count(
         &root,
         &target,
@@ -293,7 +294,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         9,
     );
-    assert_eq!(baseline, 624, "selected package test inventory changed");
+    assert_eq!(baseline, 632, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,

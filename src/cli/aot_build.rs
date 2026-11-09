@@ -80,6 +80,14 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
                 policy.backup = BackupPolicy::Flash128KVolatile;
                 backup_flags += 1;
             }
+            "--synthetic-backup-eeprom512" => {
+                policy.backup = BackupPolicy::Eeprom512Volatile;
+                backup_flags += 1;
+            }
+            "--synthetic-backup-eeprom8k" => {
+                policy.backup = BackupPolicy::Eeprom8KVolatile;
+                backup_flags += 1;
+            }
             "--synthetic-bios-decompress" => policy.decompression = true,
             "--synthetic-bios-affine" => policy.affine = true,
             _ => return Err(Error::Args(format!("unknown aot build option {argument}"))),
@@ -87,7 +95,7 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     }
     if backup_flags > 1 {
         return Err(Error::Args(
-            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k or --synthetic-backup-flash128k".to_string(),
+            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k, --synthetic-backup-flash128k, --synthetic-backup-eeprom512 or --synthetic-backup-eeprom8k".to_string(),
         ));
     }
     let target = target.ok_or_else(|| {

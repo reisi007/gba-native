@@ -79,6 +79,8 @@ fn backup_variant(policy: HarnessPolicy) -> &'static str {
         BackupPolicy::Sram32KVolatile => "Sram32KVolatile",
         BackupPolicy::Sram64KVolatile => "Sram64KVolatile",
         BackupPolicy::Flash128KVolatile => "Flash128KVolatile",
+        BackupPolicy::Eeprom512Volatile => "Eeprom512Volatile",
+        BackupPolicy::Eeprom8KVolatile => "Eeprom8KVolatile",
     }
 }
 
@@ -91,5 +93,22 @@ mod tests {
         let policy = HarnessPolicy::default();
         assert!(policy.is_strict());
         assert_eq!(policy.backup, BackupPolicy::Strict);
+    }
+
+    #[test]
+    fn eeprom_policy_sizes_are_bound_into_generated_harnesses() {
+        for (policy, expected) in [
+            (BackupPolicy::Eeprom512Volatile, "Eeprom512Volatile"),
+            (BackupPolicy::Eeprom8KVolatile, "Eeprom8KVolatile"),
+        ] {
+            let source = bus_setup_source(HarnessPolicy {
+                backup: policy,
+                ..HarnessPolicy::default()
+            });
+            assert!(
+                source.contains(&format!("BackupPolicy::{expected}")),
+                "generated setup is missing BackupPolicy::{expected}: {source}"
+            );
+        }
     }
 }

@@ -123,28 +123,46 @@ documented no-effect store of a ROM-only cartridge. It never writes cartridge
 bytes and does not itself model a flash command engine. The backup window is
 governed by its own device policy, not by this one.
 
-A fourth policy, `BackupPolicy`, covers the 64 KiB Game Pak backup window
-(`0x0E00_0000..=0x0E00_FFFF`). The default `Strict` reports every access there
-as `UnsupportedSave`. Three explicit opt-ins model documented devices: the
-byte-wide, volatile 32 KiB or 64 KiB SRAM (`run --synthetic-backup-sram`,
-`run --synthetic-backup-sram64k`) and a volatile 128 KiB flash
-(`run --synthetic-backup-flash128k`) with two 64 KiB banks and the documented
-autoselect (`0x90`), bank-switch (`0xB0`), program (`0xA0`), sector-erase
-(`0x30`) and chip-erase (`0x10`) subset. Autoselect returns the Sanyo 128K ID
-`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. All three start erased and the device model itself does not write to disk; a
+A fourth policy, `BackupPolicy`, covers the Game Pak backup devices. The default
+`Strict` reports accesses to the SRAM/flash backup window as `UnsupportedSave`.
+The EEPROM address range is also part of the ROM map: without an EEPROM opt-in,
+reads and instruction fetches use ordinary cartridge ROM mapping and stores
+follow `RomWritePolicy`. The two EEPROM choices explicitly overlay the serial
+device on that ROM range. Five explicit opt-ins model documented devices: the
+byte-wide, volatile 32 KiB or 64 KiB SRAM
+(`run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`), a volatile
+128 KiB flash (`run --synthetic-backup-flash128k`) with two 64 KiB banks and the
+documented autoselect (`0x90`), bank-switch (`0xB0`), program (`0xA0`),
+sector-erase (`0x30`) and chip-erase (`0x10`) subset, and the serial EEPROM at
+`0x0DFFFF00..=0x0DFFFFFF` with an explicit 512-byte
+(`run --synthetic-backup-eeprom512`, 6 address bits) or 8-KiB
+(`run --synthetic-backup-eeprom8k`, 14 wire address bits of which the lower 10
+are used) size. Autoselect returns the Sanyo 128K ID
+`1362h`: manufacturer `0x62` at offset 0 and device `0x13` at offset 1. The
+EEPROM follows the documented serial framing: a read request is `11` + address
+bits + `0` and is answered by 68 bits (4 ignored + 64 data), a write request is
+`10` + address bits + 64 data bits + `0` and auto-erases the old 64-bit block.
+Only 16-bit incrementing DMA3 transfers drive the serial chip; manual `STRH` is
+rejected while the documented ready-poll `LDRH` reads bit 0. Incomplete or
+malformed command streams are explicit errors, and the overlaid EEPROM window
+is not executable while the overlay is selected. The model is timing-free: a
+completed write is immediately ready. GBATEK documents no
+autodetection, so the EEPROM size is a host selection. All five start erased and
+the device model itself does not write to disk; a
 host caller may persist or restore the raw image through the save library
 (`core::save::SaveLibrary`, `run --save-dir/--save-slot`, AOT `--save`). Wider
 accesses and the window beyond the selected device capacity stay explicit
 `UnsupportedSave` errors. This is a device model for bounded progress
-experiments, not a save-device compatibility claim; the storage bytes and flash
-command/bank state are guest state included in `Bus::state_digest`, while the
-selected policy is host configuration and is not hashed. Selecting more than one
-backup-device flag is an argument error.
+experiments, not a save-device compatibility claim; the storage bytes, flash
+command/bank state and transient EEPROM serial state are guest state included in
+`Bus::state_digest`, while the selected policy is host configuration and is not
+hashed. Selecting more than one backup-device flag is an argument error.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
 `run --synthetic-backup-sram`, `run --synthetic-backup-sram64k`,
-`run --synthetic-backup-flash128k`, `run --synthetic-bios-decompress` and
+`run --synthetic-backup-flash128k`, `run --synthetic-backup-eeprom512`,
+`run --synthetic-backup-eeprom8k`, `run --synthetic-bios-decompress` and
 `run --synthetic-bios-affine` (all default
 to strict). Successful output prints all six policy values
 (`bios_data_policy`, `bios_write_policy`, `rom_write_policy`, `backup_policy`,
@@ -486,9 +504,13 @@ automatic audio output. The separate `audio` module renders a bounded PSG mix
 from the register snapshot with a host volume/mute; it does not consume FIFO
 samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
-- The backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by default and
-  only answers under the explicit `BackupPolicy::Sram32KVolatile` or
-  `Sram64KVolatile` opt-in (see the backup policy above). BIOS reads/writes and unmapped addresses are errors;
+- The SRAM/flash backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by
+  default and only answers under its explicit device policies (see above). The
+  EEPROM serial overlay (`0x0DFFFF00..=0x0DFFFFFF`) is selected only by
+  `BackupPolicy::Eeprom512Volatile`/`Eeprom8KVolatile`; without either policy,
+  that range keeps ordinary ROM mapping. With the overlay selected, unsupported
+  widths/stores are explicit errors and instruction fetch is non-executable.
+  BIOS reads/writes and unmapped addresses are errors;
   the only exception is the explicit synthetic zero-fill opt-in, which changes
   BIOS **data reads** to zero and leaves BIOS fetch/write errors and every other
   address unchanged.

@@ -2162,3 +2162,36 @@ on-device MediaPlayer playback remains outside CI.
   used.
 - This is a static affine-layer subset, not a scanline PPU or full Mode 2
   implementation. No hardware oracle or ROM was used; issue #3 remains open.
+
+## Round: serial EEPROM device model (2026-11-09)
+
+- Added a bounded EEPROM model for the documented window at
+  `0x0DFFFF00..=0x0DFFFFFF` (the last 256 bytes of the ROM address space). The
+  explicit EEPROM policy overlays this range; without it, ordinary ROM mapping
+  remains in effect. The host selects the 512-byte (6 address bits) or 8-KiB
+  (14 wire address bits, lower 10 used) part because GBATEK documents no
+  autodetection.
+- Serial framing follows the public description: read request `11` + address +
+  `0`, answered by 68 bits (4 ignored + 64 data); write request `10` + address +
+  64 data + `0`, auto-erasing the old 64-bit block. Only 16-bit incrementing
+  DMA3 transfers drive the chip. Manual `STRH` is an explicit error; the
+  documented ready-poll `LDRH` returns bit 0, but cannot consume a pending data
+  stream. Incomplete/malformed commands are explicit errors, and the EEPROM
+  window is not executable. The model is timing-free, so a completed write is
+  immediately ready instead of the documented ~6.5 ms.
+- `crates/core/tests/eeprom.rs` builds every request itself and asserts the
+  independent 64-bit big-endian block contents for both sizes, the lower-10-bit
+  masking, the manual-store rejection, the ready poll, rejected 32-bit/fixed
+  DMA shapes, rejection of non-DMA3 and a transfer crossing into the EEPROM
+  window, ordinary ROM mapping without the opt-in, the untouched SRAM window
+  and policy-independent digest. All six tests pass, including malformed read
+  and write terminators rejected without data effects.
+- Focused `eeprom` target passes 6/6. `cargo test --test workspace_contract`
+  passes with the updated 639-test inventory (632 selected package tests).
+- A fresh-target `./scripts/full.sh` run passes, including debug/release tests,
+  demo, native AOT proof (`native_vs_reference=match`) and Ratchet slow tier.
+- Source grounding: public GBATEK `#gba-cart-backup-eeprom`, retrieved
+  2026-11-09 from <https://problemkaputt.de/gbatek.htm>. No emulator
+  implementation source was used.
+- This is a bounded device model, not a save-device compatibility claim. Issue
+  #8 remains open for RTC/GPIO and broader multi-profile persistence.

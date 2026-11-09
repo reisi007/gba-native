@@ -89,7 +89,45 @@ fn run_synthetic_backup_sram64k_is_explicit_and_reported_once() {
 }
 
 #[test]
-fn run_rejects_both_backup_capacity_flags() {
+fn run_synthetic_eeprom_sizes_are_explicit_and_reported() {
+    let temp = TempDir::new();
+    let cwd = temp.path().join("cwd");
+    std::fs::create_dir(&cwd).expect("create cwd");
+    synthetic_rom(&cwd.join("plain.gba"), &[(0, 0xE3A0_0000)]);
+
+    for (flag, name, capacity) in [
+        (
+            "--synthetic-backup-eeprom512",
+            "eeprom-512-volatile",
+            "512 B",
+        ),
+        ("--synthetic-backup-eeprom8k", "eeprom-8k-volatile", "8 KiB"),
+    ] {
+        let out = format!("output/{name}");
+        let output = cli(
+            &cwd,
+            &["run", "plain.gba", "--budget", "1", flag, "--out", &out],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&format!("backup_policy={name}")),
+            "{stdout}"
+        );
+        assert_eq!(stdout.matches("backup_assumption=").count(), 1, "{stdout}");
+        assert!(stdout.contains(capacity), "{stdout}");
+        assert!(stdout.contains("no autodetection"), "{stdout}");
+        let report =
+            std::fs::read_to_string(cwd.join(&out).join("report.txt")).expect("EEPROM run report");
+        assert!(
+            report.contains(&format!("backup_policy={name}")),
+            "{report}"
+        );
+    }
+}
+
+#[test]
+fn run_and_aot_reject_multiple_backup_device_flags() {
     let temp = TempDir::new();
     let cwd = temp.path().join("cwd");
     std::fs::create_dir(&cwd).expect("create cwd");
@@ -103,7 +141,7 @@ fn run_rejects_both_backup_capacity_flags() {
             "--budget",
             "1",
             "--synthetic-backup-sram",
-            "--synthetic-backup-sram64k",
+            "--synthetic-backup-eeprom8k",
         ],
     );
     assert!(!output.status.success(), "contradictory flags must fail");
@@ -112,6 +150,20 @@ fn run_rejects_both_backup_capacity_flags() {
         "{}",
         stderr(&output)
     );
+
+    let aot = cli(
+        &cwd,
+        &[
+            "aot",
+            "build",
+            "plain.gba",
+            "--synthetic-backup-eeprom512",
+            "--synthetic-backup-eeprom8k",
+        ],
+    );
+    assert!(!aot.status.success(), "contradictory AOT flags must fail");
+    assert!(stderr(&aot).contains("choose only one backup device"));
+    assert!(!cwd.join("output").exists());
 }
 
 #[test]

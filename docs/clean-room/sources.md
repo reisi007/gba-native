@@ -186,6 +186,16 @@ Relevant anchors actually consulted for this milestone:
   absent.
   Both anchors were consulted on 2026-10-29 in the same upstream GBATEK text;
   that retrieval was not separately retained or hashed.
+- `#gba-cart-backup-eeprom`: documents the 512-byte/8-KiB serial EEPROM on
+  data-bus bit 0 at `DFFFF00h..DFFFFFFh`, the `11` + n address + `0` read
+  request with its 68-bit answer (4 ignored + 64 data), the `10` + n address +
+  64 data + `0` write request with auto-erase of the 64-bit block, DMA3-only
+  16-bit incrementing transfers, the ready poll on bit 0 of
+  `LDRH [DFFFF00h]`, the 6/14-bit address widths (lower 10 bits used for
+  8 KiB) and the explicit statement that no autodetection mechanism exists.
+  Retrieved 2026-11-09 from <https://problemkaputt.de/gbatek.htm>. The model is
+  volatile and timing-free; the documented ~6.5 ms program delay is not
+  simulated. No emulator implementation source was used.
 - `#bios-decompression-functions`,
   `#lz77uncompreadnormalwrite8bit-wram---swi-11h-gbands7nds9dsi7dsi9`,
   `#lz77uncompreadnormalwrite16bit-vram---swi-12h-gba`,

@@ -49,7 +49,7 @@ the root workspace lockfile contains only these three internal path packages.
 | BIOS data reads | Fail closed by default; explicit experimental `--synthetic-bios-zero-fill` returns zero for data reads only, never authentic BIOS data, opcodes or executable BIOS |
 | BIOS mask-ROM writes | Fail closed by default; explicit experimental `--synthetic-bios-rom-writes` models the documented no-effect store into `0x00000000..=0x00003FFF` without storing, reading or executing BIOS bytes |
 | Game Pak ROM writes | Fail closed by default; explicit experimental `--synthetic-rom-writes-ignored` models the documented no-effect store of a ROM-only cartridge. No save type or persistence is modelled by this store policy; the backup window is governed by its own device policy below |
-| Game Pak backup window | Fail closed by default; explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model volatile 32/64 KiB SRAM, and `--synthetic-backup-flash128k` models a volatile 128 KiB flash with the documented autoselect/bank/program/erase subset. No persistence; wider accesses stay explicit errors |
+| Game Pak backup window | The SRAM/flash backup window fails closed by default. Explicit experimental `--synthetic-backup-sram` / `--synthetic-backup-sram64k` model volatile 32/64 KiB SRAM; `--synthetic-backup-flash128k` models a volatile 128 KiB flash with the documented autoselect/bank/program/erase subset. The `--synthetic-backup-eeprom512` / `--synthetic-backup-eeprom8k` flags explicitly overlay the serial 512 B or 8 KiB EEPROM on its ROM-space window; without either flag, that address follows ordinary ROM mapping. No persistence; unsupported device accesses stay explicit errors |
 | Serial I/O registers | `SIOCNT`/`RCNT`/`SIODATA*` are documented storage; a transfer with no link partner finishes with SI high and received ones; UART and link transfers stay explicit errors |
 | Display snapshot | Mode 0 BG0-BG3 text + OBJ; Mode 1 BG0/BG1 text + BG2 affine + OBJ; bounded Mode 2 BG2/BG3 affine + OBJ; window 0/1/OBJ window with priority, BG/OBJ mosaic and BLDCNT alpha/brightness; bitmap modes 3/4/5. OBJ supports DISPCNT-selected 1D/2D mapping and double-size affine clipping. Static-snapshot only; no scanline timing, full Mode 2 PPU or semi-transparent OBJ |
 | Typed IR + reference interpreter | Implemented |
@@ -79,7 +79,7 @@ the root workspace lockfile contains only these three internal path packages.
 ```text
 cargo run -- info <rom.gba>
 cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
-cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
+cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k|--synthetic-backup-eeprom512|--synthetic-backup-eeprom8k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
 cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
 cargo run -- save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
@@ -145,7 +145,17 @@ is covered by its host/browser tests and Playwright checks.
   `--synthetic-backup-flash128k` selects the volatile two-bank 128 KiB flash
   model with the documented autoselect/bank/program/erase subset. It is the
   model that lets the unmodified Emerald probe set the boot flag and reach the
-  title sequence. None of the backup models persists data.
+  title sequence.
+  `--synthetic-backup-eeprom512` and `--synthetic-backup-eeprom8k` select the
+  volatile serial EEPROM model in its documented window at
+  `0x0DFFFF00..=0x0DFFFFFF`, overlaid on ROM mapping only when one of those flags
+  is selected. Without EEPROM opt-in, reads/fetches use ordinary cartridge ROM
+  mapping and stores follow the ROM-write policy. The device is driven only by
+  16-bit incrementing DMA3. The size is an explicit host choice because GBATEK
+  documents no autodetection; manual
+  `STRH` is rejected and the ready-poll `LDRH` returns the documented bit 0.
+  The model is timing-free, so a completed write is immediately ready. None of
+  the backup models persists data.
   Without `--out`, it creates no files. With `--out`, after both
   execution and the static bitmap snapshot succeed, it creates a fresh directory
   containing `screen.ppm` and `report.txt`. The report records the ROM and image

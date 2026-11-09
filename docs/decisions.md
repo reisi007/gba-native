@@ -1135,3 +1135,25 @@ VCOUNT/VBlank and timer-register behavior. The change does not add per-instructi
 timing, waitstates, bus arbitration, HBlank/drawing phases, DMA event scheduling
 or cycle-accurate hardware behavior. Issue #4 remains open for those broader
 scheduler and device requirements.
+
+## D40 — Explicit EEPROM size selection and timing-free serial model
+
+Decided 2026-11-09 for the bounded EEPROM slice of issue #8. GBATEK
+`#gba-cart-backup-eeprom` states that the 512-byte and 8-KiB parts have no
+autodetection mechanism and differ in bus width (6 vs 14 address bits). The host
+therefore selects the size with `--synthetic-backup-eeprom512` or
+`--synthetic-backup-eeprom8k`; the model never guesses from the ROM header or
+ROM contents.
+
+The serial framing follows the public description only: read request `11` +
+address bits + `0` answered by 68 bits (4 ignored + 64 data), write request `10`
++ address bits + 64 data bits + `0` with auto-erase of the 64-bit block, DMA3
+only with 16-bit incrementing source and destination, manual `STRH` rejected and
+the ready poll `LDRH` returning bit 0. For the 8-KiB part only the lower 10
+address bits are used. The model is volatile and timing-free: a completed write
+is immediately ready and the documented ~6.5 ms program delay is not simulated.
+
+The device contents and the transient serial state are guest state included in
+`Bus::state_digest`; the selected size is host configuration and is not hashed.
+This does not claim a save-device compatibility result and does not implement
+RTC, GPIO or multi-profile persistence; issue #8 remains open.

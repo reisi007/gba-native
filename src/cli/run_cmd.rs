@@ -29,6 +29,8 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     let mut backup_sram = false;
     let mut backup_sram64k = false;
     let mut backup_flash = false;
+    let mut backup_eeprom512 = false;
+    let mut backup_eeprom8k = false;
     let mut bios_decompress = false;
     let mut bios_affine = false;
     let mut input_script: Option<InputScript> = None;
@@ -91,6 +93,8 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             "--synthetic-backup-sram" => backup_sram = true,
             "--synthetic-backup-sram64k" => backup_sram64k = true,
             "--synthetic-backup-flash128k" => backup_flash = true,
+            "--synthetic-backup-eeprom512" => backup_eeprom512 = true,
+            "--synthetic-backup-eeprom8k" => backup_eeprom8k = true,
             "--synthetic-bios-decompress" => bios_decompress = true,
             "--synthetic-bios-affine" => bios_affine = true,
             "--budget" => {
@@ -115,9 +119,16 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
             "--play needs --audio-out <wav>; nothing was played".to_string(),
         ));
     }
-    if u8::from(backup_sram) + u8::from(backup_sram64k) + u8::from(backup_flash) > 1 {
+    let backup_flags = [
+        backup_sram,
+        backup_sram64k,
+        backup_flash,
+        backup_eeprom512,
+        backup_eeprom8k,
+    ];
+    if backup_flags.iter().filter(|flag| **flag).count() > 1 {
         return Err(Error::Args(
-            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k or --synthetic-backup-flash128k".to_string(),
+            "choose only one backup device: --synthetic-backup-sram, --synthetic-backup-sram64k, --synthetic-backup-flash128k, --synthetic-backup-eeprom512 or --synthetic-backup-eeprom8k".to_string(),
         ));
     }
     let cart = Cartridge::from_path(Path::new(&path))?;
@@ -137,6 +148,10 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     }
     if backup_flash {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Flash128KVolatile);
+    } else if backup_eeprom8k {
+        bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Eeprom8KVolatile);
+    } else if backup_eeprom512 {
+        bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Eeprom512Volatile);
     } else if backup_sram64k {
         bus = bus.with_backup_policy(gba_native::bus::BackupPolicy::Sram64KVolatile);
     } else if backup_sram {
@@ -296,6 +311,12 @@ pub(super) fn run(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     if backup_flash {
         println!(
             "backup_assumption=experimental volatile 128 KiB flash with documented autoselect/bank/program/erase subset; no persistence"
+        );
+    }
+    if backup_eeprom512 || backup_eeprom8k {
+        let capacity = if backup_eeprom8k { "8 KiB" } else { "512 B" };
+        println!(
+            "backup_assumption=experimental volatile {capacity} EEPROM serial model with an explicit host-selected size; no persistence, no timing claim and no autodetection"
         );
     }
     if bios_decompress {

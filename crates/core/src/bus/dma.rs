@@ -169,8 +169,77 @@ impl Bus {
         };
         let source_step = step((control & SOURCE_CONTROL) >> 7, true)?;
         let dest_step = step((control & DEST_CONTROL) >> 5, false)?;
-        let mut source = state.sad;
-        let mut destination = state.dad;
+        // GBATEK `#gba-cart-backup-eeprom`: the serial EEPROM is driven only by
+        // DMA3 with 16-bit transfers and incrementing source and destination.
+        // The window lies inside the ROM address space, so it must be claimed
+        // before the ordinary ROM path.
+        let eeprom_dma = self.eeprom_size().is_some()
+            && Self::transfer_touches_eeprom(
+                state.sad,
+                state.dad,
+                width,
+                units,
+                source_step,
+                dest_step,
+            );
+        if eeprom_dma && channel != 3 {
+            return Err(Error::UnsupportedDma {
+                detail: "EEPROM transfers require DMA3",
+            });
+        }
+        if eeprom_dma && (width != 2 || source_step != 1 || dest_step != 1) {
+            return Err(Error::UnsupportedDma {
+                detail: "EEPROM DMA3 requires 16-bit transfers with incrementing source and destination",
+            });
+        }
+        let previous_eeprom_dma = self.eeprom_dma_active;
+        self.eeprom_dma_active = eeprom_dma;
+        let result =
+            self.transfer_units(width, units, state.sad, state.dad, source_step, dest_step);
+        self.eeprom_dma_active = previous_eeprom_dma;
+        let finish_result = if eeprom_dma {
+            self.eeprom_finish_dma()
+        } else {
+            Ok(())
+        };
+        result?;
+        finish_result?;
+        if control & REPEAT == 0 {
+            self.io.dma_mut().clear_enable(channel);
+        }
+        Ok(())
+    }
+
+    /// Whether any source or destination unit in this transfer touches the
+    /// selected EEPROM overlay, including transfers that begin just outside it.
+    fn transfer_touches_eeprom(
+        source: u32,
+        destination: u32,
+        width: usize,
+        units: u32,
+        source_step: i32,
+        dest_step: i32,
+    ) -> bool {
+        (0..units).any(|unit| {
+            let offset = unit as i32 * width as i32;
+            Self::is_eeprom_window(source.wrapping_add_signed(offset * source_step))
+                || Self::is_eeprom_window(destination.wrapping_add_signed(offset * dest_step))
+        })
+    }
+
+    /// Runs the bounded unit loop for one channel. Split out so the temporary
+    /// EEPROM-DMA flag is cleared even when a unit fails.
+    fn transfer_units(
+        &mut self,
+        width: usize,
+        units: u32,
+        start_source: u32,
+        start_destination: u32,
+        source_step: i32,
+        dest_step: i32,
+    ) -> Result<()> {
+        let mut source = start_source;
+        let mut destination = start_destination;
         for _ in 0..units {
             if width == 4 {
                 let value = self.read32(source)?;
@@ -181,11 +250,8 @@ impl Bus {
             }
             // The step is one data unit, not one byte: a 32-bit transfer
             // advances by four bytes per unit.
-            source = source.wrapping_add_signed(source_step * width);
-            destination = destination.wrapping_add_signed(dest_step * width);
-        }
-        if control & REPEAT == 0 {
-            self.io.dma_mut().clear_enable(channel);
+            source = source.wrapping_add_signed(source_step * width as i32);
+            destination = destination.wrapping_add_signed(dest_step * width as i32);
         }
         Ok(())
     }

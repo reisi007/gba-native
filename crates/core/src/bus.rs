@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 mod access;
 mod backup;
 mod dma;
+mod eeprom;
 mod io;
 mod irq;
 mod sound;
@@ -19,6 +20,7 @@ mod video;
 pub use backup::{
     BackupPolicy, SAVE_BASE, SAVE_LEN, SAVE_LEN_64K, SAVE_LEN_FLASH, SAVE_WINDOW_LEN,
 };
+pub use eeprom::{EEPROM_BLOCK_LEN, EEPROM_WINDOW_BASE, EEPROM_WINDOW_LEN};
 pub use io::{
     KEY_A, KEY_B, KEY_DOWN, KEY_L, KEY_LEFT, KEY_MASK, KEY_R, KEY_RIGHT, KEY_SELECT, KEY_START,
     KEY_UP,
@@ -201,6 +203,8 @@ pub struct Bus {
     affine_policy: AffinePolicy,
     backup: Vec<u8>,
     flash: backup::FlashState,
+    eeprom: eeprom::EepromState,
+    eeprom_dma_active: bool,
     ignored_io_writes: Vec<u32>,
     ignored_io_write_addresses: BTreeSet<u32>,
     ignored_io_write_count: u64,
@@ -244,6 +248,8 @@ impl Bus {
             // accessible capacity, so the guest-state digest is policy-independent.
             backup: vec![0xFF; SAVE_LEN_FLASH],
             flash: backup::FlashState::default(),
+            eeprom: eeprom::EepromState::default(),
+            eeprom_dma_active: false,
             ignored_io_writes: Vec::new(),
             ignored_io_write_addresses: BTreeSet::new(),
             ignored_io_write_count: 0,
@@ -285,16 +291,9 @@ impl Bus {
         self.rom_write_policy
     }
 
-    /// Selects the explicit opt-in for a volatile backup device.
-    ///
-    /// Under [`BackupPolicy::Sram32KVolatile`] the backup window is backed by
-    /// 32 KiB of erased SRAM that lives only in memory; under
-    /// [`BackupPolicy::Sram64KVolatile`] it is backed by the full 64 KiB
-    /// documented window; [`BackupPolicy::Flash128KVolatile`] models a
-    /// two-bank 128 KiB flash with the documented autoselect/bank/program/
-    /// erase subset. No file is written and nothing persists. The backing
-    /// store stays the fixed 128 KiB erased image; the policy selects the
-    /// device model.
+    /// Selects an explicit volatile SRAM, flash, or EEPROM model. EEPROM size
+    /// is host-selected because no autodetection is documented; persistence is
+    /// left to the host save library.
     #[must_use]
     pub fn with_backup_policy(mut self, policy: BackupPolicy) -> Self {
         self.backup_policy = policy;
@@ -380,6 +379,9 @@ impl Bus {
         if !addr.is_multiple_of(2) {
             return Err(Error::UnalignedFetch { addr, thumb: true });
         }
+        if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+            return Err(Error::NonExecutable { addr });
+        }
         if is_rom(addr)
             || access::mirror_offset(addr, EWRAM_BASE, EWRAM_LEN).is_some()
             || access::mirror_offset(addr, IWRAM_BASE, IWRAM_LEN).is_some()
@@ -392,6 +394,9 @@ impl Bus {
     pub fn fetch32(&self, addr: u32) -> Result<u32> {
         if !addr.is_multiple_of(4) {
             return Err(Error::UnalignedFetch { addr, thumb: false });
+        }
+        if self.eeprom_size().is_some() && Self::is_eeprom_window(addr) {
+            return Err(Error::NonExecutable { addr });
         }
         if is_rom(addr)
             || access::mirror_offset(addr, EWRAM_BASE, EWRAM_LEN).is_some()
@@ -435,11 +440,13 @@ impl Bus {
         bytes.extend_from_slice(&self.oam);
         self.io.append_digest(&mut bytes);
         // The backup bytes are guest state only under a selected device model;
-        // under strict they are the constant erased image. Hashing the fixed
-        // image and flash command state keeps the digest policy-independent.
+        // under strict they are the constant erased image. The image stays
+        // fixed-size while flash/EEPROM transient state is hashed separately,
+        // so host-selected device policy itself is not part of the digest.
         bytes.extend_from_slice(&self.backup);
         bytes.push(self.flash.command as u8);
         bytes.push(self.flash.bank);
+        self.eeprom.append_digest(&mut bytes);
         bytes.extend_from_slice(&(KEYINPUT_RELEASED & !self.pressed_keys).to_le_bytes());
         sha256::digest(&bytes)
     }
