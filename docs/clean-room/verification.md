@@ -2354,3 +2354,28 @@ on-device MediaPlayer playback remains outside CI.
   This verifies only native filesystem namespace behavior: browser IndexedDB
   profile isolation and transactional persistence remain unimplemented and
   unverified. Issue #8 remains open.
+
+## Round: browser save profiles and IndexedDB persistence (2026-11-09)
+
+- Rune's browser adapter stores profiles, their raw save images and default-slot
+  markers in IndexedDB. Profile creation, slot create/replace, default changes
+  and deletion use read/write transactions; the UI waits for transaction
+  completion and surfaces storage failures. Browser profile IDs are generated
+  automatically. The browser UI supports switching isolated profiles and
+  reloads their persisted contents.
+- No migration reads or deletes the pre-release `localStorage` save keys; there
+  has been no v1 browser-save release. The import picker's temporary
+  `localStorage` staging key remains separate and is consumed only after the
+  IndexedDB import transaction commits. Quota, private-mode and eviction limits
+  remain visible and are not described as durable-storage guarantees.
+- Browser adapter and shell tests pass 13/13. `scripts/web.sh --ci` passes its
+  WASM check, adapter tests and full headless Chromium run: 16 passed, 8 mobile
+  interaction cases skipped by the configured desktop-only interaction policy;
+  all screenshot/capture cases passed. Chromium interactions cover profile
+  isolation across switching/reload, slot/default controls, import/export and
+  visible IndexedDB-unavailable errors. Quota/abort atomicity is exercised by
+  the adapter transaction test double, not induced in Chromium.
+- This is only Rune's generated synthetic-save UI. It does not finish issue #8's
+  portable versioned cartridge-save format, ROM/profile-bound cartridge data,
+  persistent SRAM/flash/EEPROM integration or cross-environment save
+  compatibility. Issue #8 remains open.

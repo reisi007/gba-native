@@ -1158,3 +1158,13 @@ The device contents and the transient serial state are guest state included in
 `Bus::state_digest`; the selected size is host configuration and is not hashed.
 This does not claim a save-device compatibility result and does not implement
 RTC, GPIO or multi-profile persistence; issue #8 remains open.
+
+## D52 — No pre-release browser-save migration
+
+Decided by the owner on 2026-11-09. Rune's browser saves have not shipped as a
+v1 persistence feature, so the IndexedDB implementation starts with its own
+schema and does not migrate from, read or delete the prior `localStorage` save
+keys. The browser file-import staging key is a separate temporary clipboard and
+may continue to use `localStorage`; it is cleared only after the IndexedDB save
+transaction commits. Any future migration requires a new decision if a versioned
+browser-save release has first made migration necessary.

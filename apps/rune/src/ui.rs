@@ -3,13 +3,19 @@ use rune::{AppSpec, Cx, El, Pixels, ScrollSpec, SurfaceFit, Tx, col, el, row, te
 
 use crate::model::{Page, RuneAppModel};
 
+#[cfg(target_arch = "wasm32")]
+mod browser_saves;
 mod buttons;
 mod input;
 mod keys;
+mod save_actions;
 mod saves_view;
 mod settings_view;
 mod surface;
 use buttons::{accent_foreground, button, state_button};
+use save_actions::{create_save, delete_save, set_default_save};
+#[cfg(any(test, target_arch = "wasm32", target_os = "ios"))]
+use save_actions::{export_save, import_save};
 use surface::{nearest_fit, nearest_scale};
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod parity_tests;
@@ -28,6 +34,8 @@ pub struct AppState {
     save_slots: Vec<gba_native::frontend::saves::SaveSlot>,
     selected_save_slot: usize,
     save_status: Option<String>,
+    #[cfg(target_arch = "wasm32")]
+    browser_saves: browser_saves::BrowserSaveState,
     binding_target: Option<gba_native::input::Button>,
     binding_status: Option<String>,
     fullscreen_bootstrap_done: bool,
@@ -50,6 +58,8 @@ impl Default for AppState {
             save_slots: Vec::new(),
             selected_save_slot: 0,
             save_status: None,
+            #[cfg(target_arch = "wasm32")]
+            browser_saves: browser_saves::BrowserSaveState::default(),
             binding_target: None,
             binding_status: None,
             fullscreen_bootstrap_done: false,
@@ -143,6 +153,7 @@ impl AppState {
         self.model.toggle_details();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn reload_save_slots(&mut self) {
         let selected_name = self
             .save_slots
@@ -212,66 +223,11 @@ fn show_settings(state: &mut AppState) {
 
 fn show_saves(state: &mut AppState) {
     state.select_page(Page::Saves);
-    state.reload_save_slots();
-}
-
-fn create_save(state: &mut AppState) {
-    state.save_status = state.save_store.create().err();
-    if state.save_status.is_none() {
-        state.save_status = Some("created a synthetic save slot".to_owned());
-    }
-    state.reload_save_slots();
-}
-
-#[cfg(any(test, target_arch = "wasm32", target_os = "ios"))]
-fn import_save(state: &mut AppState) {
-    state.save_status = Some(match state.save_store.import_selected() {
-        Ok(status) | Err(status) => status,
-    });
-    state.reload_save_slots();
-}
-
-#[cfg(any(test, target_arch = "wasm32", target_os = "ios"))]
-fn export_save(state: &mut AppState) {
-    state.save_status = state
-        .save_slots
-        .get(state.selected_save_slot)
-        .map(|slot| {
-            state
-                .save_store
-                .export(&slot.name)
-                .unwrap_or_else(|error| error)
-        })
-        .or_else(|| Some("select a save slot first".to_owned()));
-}
-
-fn set_default_save(state: &mut AppState) {
-    state.save_status = state
-        .save_slots
-        .get(state.selected_save_slot)
-        .map(|slot| {
-            state
-                .save_store
-                .set_default(&slot.name)
-                .map(|()| format!("{} is now the default slot", slot.name))
-                .unwrap_or_else(|error| error)
-        })
-        .or_else(|| Some("select a save slot first".to_owned()));
-    state.reload_save_slots();
-}
-
-fn delete_save(state: &mut AppState) {
-    state.save_status = state
-        .save_slots
-        .get(state.selected_save_slot)
-        .map(|slot| {
-            state
-                .save_store
-                .delete(&slot.name)
-                .map(|()| format!("deleted {}", slot.name))
-                .unwrap_or_else(|error| error)
-        })
-        .or_else(|| Some("select a save slot first".to_owned()));
+    #[cfg(target_arch = "wasm32")]
+    state
+        .browser_saves
+        .show(&state.save_store, &mut state.save_status);
+    #[cfg(not(target_arch = "wasm32"))]
     state.reload_save_slots();
 }
 

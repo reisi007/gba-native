@@ -53,12 +53,17 @@ pub(super) fn app_key(state: &mut AppState, event: &KeyEvent, tx: &mut Tx) -> bo
 }
 
 pub(super) fn bootstrap_fullscreen(state: &mut AppState, _elapsed: f64, tx: &mut Tx) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    let mut changed = super::browser_saves::poll(state, tx);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut changed = false;
     if state.fullscreen_bootstrap_done {
-        return false;
+        return changed;
     }
     state.fullscreen_bootstrap_done = true;
     if state.model.settings().fullscreen {
         tx.toggle_full_screen();
+        changed = true;
     }
-    false
+    changed
 }

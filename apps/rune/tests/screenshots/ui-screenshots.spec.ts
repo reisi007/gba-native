@@ -18,29 +18,80 @@ function syntheticSaveHex(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+async function seedIndexedProfile(
+  page: import('@playwright/test').Page,
+  id: string,
+  slots: Record<string, string>,
+  defaultSlot: string | null,
+): Promise<void> {
+  await page.evaluate(async ({ id, slots, defaultSlot }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('gba-native.rune.saves', 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains('profiles')) {
+          request.result.createObjectStore('profiles', { keyPath: 'id' });
+        }
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('profiles', 'readwrite');
+      tx.objectStore('profiles').put({ id, slots, defaultSlot });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  }, { id, slots, defaultSlot });
+}
+
+async function readIndexedProfile(
+  page: import('@playwright/test').Page,
+  id: string,
+): Promise<{ id: string; slots: Record<string, string>; defaultSlot: string | null } | undefined> {
+  return page.evaluate(async (profileId) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('gba-native.rune.saves', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const profile = await new Promise<{ id: string; slots: Record<string, string>; defaultSlot: string | null } | undefined>((resolve, reject) => {
+      const tx = db.transaction('profiles', 'readonly');
+      const request = tx.objectStore('profiles').get(profileId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return profile;
+  }, id);
+}
+
+async function clickCanvasControl(
+  page: import('@playwright/test').Page,
+  control: import('@playwright/test').Locator,
+): Promise<void> {
+  const bounds = await control.boundingBox();
+  if (!bounds) throw new Error('Rune control has no browser geometry');
+  const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.waitForTimeout(100);
+  await page.mouse.click(center.x, center.y);
+}
+
 test.describe('Rune UI review captures', () => {
   for (const route of routes) {
     for (const state of route.states) {
       test(`${route.name} — ${state.id}`, { tag: ['@screenshot'] }, async ({ page }, testInfo) => {
-        await page.addInitScript(({ slots, fixture }) => {
-          for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-            const key = localStorage.key(index);
-            if (key?.startsWith('gba-native.rune.slot.') || key === 'gba-native.rune.default-slot') {
-              localStorage.removeItem(key);
-            }
-          }
-          if (slots === 'filled') {
-            localStorage.setItem('gba-native.rune.slot.slot-1', fixture);
-            localStorage.setItem('gba-native.rune.default-slot', 'slot-1');
-          }
-        }, { slots: state.slots, fixture: syntheticSaveHex() });
-
         await page.goto(route.path, { waitUntil: 'load' });
         await expect(page).toHaveTitle(route.expectedTitle);
         await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
         await expect(page.locator('canvas').first()).toBeVisible({ timeout: 90_000 });
         await page.waitForTimeout(1_000);
 
+        if (state.page === 'saves' && state.slots === 'filled') {
+          await seedIndexedProfile(page, 'default', { 'slot-1': syntheticSaveHex() }, 'slot-1');
+        }
         if (state.page === 'settings') await page.keyboard.press('F1');
         if (state.page === 'saves') await page.keyboard.press('F2');
         if (state.page !== 'demo') await page.waitForTimeout(500);
@@ -135,10 +186,10 @@ test.describe('Rune UI review captures', () => {
     await page.mouse.move(newSlotCenter.x, newSlotCenter.y);
     await page.waitForTimeout(100);
     await page.mouse.click(newSlotCenter.x, newSlotCenter.y);
-    await page.waitForFunction(() => localStorage.getItem('gba-native.rune.slot.slot1') !== null, { timeout: 8_000 });
-    const savedFixture = await page.evaluate(() => localStorage.getItem('gba-native.rune.slot.slot1'));
-    expect(savedFixture).toBe(syntheticSaveHex());
-    expect(await page.evaluate(() => localStorage.getItem('gba-native.rune.default-slot'))).toBe('slot1');
+    await expect.poll(async () => (await readIndexedProfile(page, 'default'))?.slots.slot1)
+      .toBe(syntheticSaveHex());
+    const savedFixture = syntheticSaveHex();
+    expect((await readIndexedProfile(page, 'default'))?.defaultSlot).toBe('slot1');
     await expect(page.getByRole('button', { name: /slot1.*512 bytes/ })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Make default', exact: true })).toBeDisabled();
@@ -146,9 +197,7 @@ test.describe('Rune UI review captures', () => {
     await page.waitForTimeout(1_000); // Let the Rune canvas publish the relaid-out control bounds.
 
     const downloadPromise = page.waitForEvent('download', { timeout: 10_000 });
-    await page.mouse.move(310, 206);
-    await page.waitForTimeout(100);
-    await page.mouse.click(310, 206); // Export after the save-slot row has been laid out.
+    await clickCanvasControl(page, page.getByRole('button', { name: 'Export', exact: true }));
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe('slot1.sav');
     const downloadPath = await download.path();
@@ -169,24 +218,22 @@ test.describe('Rune UI review captures', () => {
     });
     await page.waitForFunction(() => localStorage.getItem('gba-native.rune.save.pending') !== null);
     await importFixture.click(); // Consume the staged exact fixture.
-    await page.waitForFunction(() => localStorage.getItem('gba-native.rune.slot.imported') !== null);
-    expect(await page.evaluate(() => localStorage.getItem('gba-native.rune.slot.imported'))).toBe(savedFixture);
+    await expect.poll(async () => (await readIndexedProfile(page, 'default'))?.slots.imported)
+      .toBe(savedFixture);
     expect(await page.evaluate(() => localStorage.getItem('gba-native.rune.save.pending'))).toBeNull();
   });
 
   test('browser save actions track selected and default slots in the accessibility mirror', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'uses stable desktop accessibility controls');
-    await page.addInitScript((fixture) => {
-      localStorage.clear();
-      localStorage.setItem('gba-native.rune.slot.slot-1', fixture);
-      localStorage.setItem('gba-native.rune.slot.slot-2', fixture);
-      localStorage.setItem('gba-native.rune.default-slot', 'slot-1');
-    }, syntheticSaveHex());
     await page.goto('/');
     await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: 90_000 });
     await page.waitForTimeout(1_000);
+    await seedIndexedProfile(page, 'default', {
+      'slot-1': syntheticSaveHex(),
+      'slot-2': syntheticSaveHex(),
+    }, 'slot-1');
     await canvas.click({ position: { x: 1_200, y: 800 } });
     await page.keyboard.press('F2');
     await expect(page.getByRole('heading', { name: 'Save slots' })).toBeVisible();
@@ -201,12 +248,58 @@ test.describe('Rune UI review captures', () => {
     await expect(page.getByRole('button', { name: /slot-2.*selected/ })).toBeVisible();
     await expect(makeDefault).toBeEnabled();
     await makeDefault.evaluate((button) => button.click());
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('gba-native.rune.default-slot')))
+    await expect.poll(async () => (await readIndexedProfile(page, 'default'))?.defaultSlot)
       .toBe('slot-2');
     await expect(makeDefault).toBeDisabled();
 
     const unselectedSlot1 = page.getByRole('button', { name: /slot-1.*512 bytes/ });
     await unselectedSlot1.evaluate((button) => button.click());
     await expect(makeDefault).toBeEnabled();
+  });
+
+  test('browser profiles isolate saves across switching and reload', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'uses stable desktop accessibility controls');
+    await page.goto('/');
+    await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 90_000 });
+    await page.waitForTimeout(1_000);
+    await seedIndexedProfile(page, 'default', { legacy: syntheticSaveHex() }, 'legacy');
+    await canvas.click({ position: { x: 1_200, y: 800 } });
+    await page.keyboard.press('F2');
+    await expect(page.getByRole('heading', { name: 'Save slots' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /legacy.*default/ })).toBeVisible();
+
+    await clickCanvasControl(page, page.getByRole('button', { name: 'New profile', exact: true }));
+    const profileOne = page.getByRole('button', { name: 'profile-1 · selected', exact: true });
+    await expect(profileOne).toBeVisible();
+    await expect(page.getByText('No host save images yet.')).toBeVisible();
+    await clickCanvasControl(page, page.getByRole('button', { name: 'New synthetic slot', exact: true }));
+    await expect(page.getByRole('button', { name: /slot1.*512 bytes/ })).toBeVisible();
+    expect((await readIndexedProfile(page, 'profile-1'))?.defaultSlot).toBe('slot1');
+
+    await clickCanvasControl(page, page.getByRole('button', { name: 'default', exact: true }));
+    await expect(page.getByRole('button', { name: /legacy.*default.*selected/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /slot1.*512 bytes/ })).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 90_000 });
+    await page.keyboard.press('F2');
+    await expect(page.getByRole('button', { name: 'profile-1', exact: true })).toBeVisible();
+    await clickCanvasControl(page, page.getByRole('button', { name: 'profile-1', exact: true }));
+    await expect(page.getByRole('button', { name: /slot1.*512 bytes/ })).toBeVisible();
+  });
+
+  test('browser persistence failures are shown instead of reported as successful writes', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'uses stable desktop browser runtime');
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'indexedDB', { configurable: true, value: undefined });
+    });
+    await page.goto('/');
+    await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 90_000 });
+    await page.keyboard.press('F2');
+    await expect(page.getByText(/Browser save operation failed: IndexedDB is unavailable/))
+      .toBeVisible();
   });
 });

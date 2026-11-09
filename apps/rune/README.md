@@ -22,7 +22,7 @@ frame or cycle timing.
 | Target | Implemented in this package | Verification limits |
 |---|---|---|
 | Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. This is not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
-| Browser/WASM | Rune WebGPU shell; localStorage settings and synthetic slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | WASM, adapter and Chromium interaction/capture gates passed in run `42470521196`. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
+| Browser/WASM | Rune WebGPU shell; localStorage settings and IndexedDB-backed synthetic save profiles/slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | The current WASM, adapter and Chromium gates passed locally on 2026-11-09. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
 | iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
 
 The Rune-specific host, browser and iOS runtime gates above are separately
@@ -56,6 +56,14 @@ The settings test clicks Rune controls for touch controls, integer scaling,
 mute, volume and the A binding, then checks the shared `Settings` value and
 canonical persisted document. Browser-specific storage behavior is covered by
 Rune's browser-shell and browser-save adapter tests.
+
+Browser save profiles and their slots/default markers are stored together in
+IndexedDB read/write transactions. No migration from the pre-release
+`localStorage` save keys is performed: those keys are neither read nor deleted.
+The import picker uses a separate temporary `localStorage` staging key, which is
+consumed only after the IndexedDB import transaction commits. Browser storage is
+still subject to quota, private-mode restrictions and eviction; IndexedDB does
+not guarantee permanent storage, so export backups for portability.
 
 Growing slot lists land their layout in the same frame
 (`El::instant_changes`), so the action row cannot overlap a just-added row while
