@@ -162,17 +162,25 @@ fn main() {
     cpu.initialize_bios_stacks();
     cpu.set_pc(ENTRY);
     cpu.set_thumb(ENTRY_THUMB);
-    let mut gpio_bus = Bus::new(cart.clone())
-        .with_gpio_policy(gba_native::bus::GpioPolicy::DocumentedStorage);
-    let cpu_before = cpu.state_digest();
-    let bus_before = gpio_bus.state_digest();
-    let input = gba_native::input::InputScript::parse("0:A:1").expect("input script");
-    let mut audio = None;
-    let error = run_program(&mut cpu, &mut gpio_bus, 0, &input, &mut audio)
-        .expect_err("GPIO-enabled bus must be rejected even at zero budget");
-    assert!(matches!(error, gba_native::error::Error::Aot(_)));
-    assert_eq!(cpu.state_digest(), cpu_before, "rejection mutated CPU state");
-    assert_eq!(gpio_bus.state_digest(), bus_before, "rejection mutated bus state");
+    for policy in [
+        gba_native::bus::GpioPolicy::DocumentedStorage,
+        gba_native::bus::GpioPolicy::DocumentedRtc,
+    ] {
+        let mut gpio_cpu = Cpu::direct_entry();
+        gpio_cpu.initialize_bios_stacks();
+        gpio_cpu.set_pc(ENTRY);
+        gpio_cpu.set_thumb(ENTRY_THUMB);
+        let mut gpio_bus = Bus::new(cart.clone()).with_gpio_policy(policy);
+        let cpu_before = gpio_cpu.state_digest();
+        let bus_before = gpio_bus.state_digest();
+        let input = gba_native::input::InputScript::parse("0:A:1").expect("input script");
+        let mut audio = None;
+        let error = run_program(&mut gpio_cpu, &mut gpio_bus, 0, &input, &mut audio)
+            .expect_err("GPIO-enabled bus must be rejected even at zero budget");
+        assert!(matches!(error, gba_native::error::Error::Aot(_)));
+        assert_eq!(gpio_cpu.state_digest(), cpu_before, "rejection mutated CPU state");
+        assert_eq!(gpio_bus.state_digest(), bus_before, "rejection mutated bus state");
+    }
 
     let mut strict_cpu = Cpu::direct_entry();
     strict_cpu.initialize_bios_stacks();

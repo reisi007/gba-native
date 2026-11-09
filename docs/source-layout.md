@@ -1,12 +1,14 @@
 # Source layout
 
 - `crates/core/src/cart.rs`, `bus.rs`, `bus/access.rs`, `bus/access_helpers.rs`,
-  `bus/backup.rs`, `bus/eeprom.rs`, `bus/gpio.rs`, `bus/input.rs`,
-  `bus/state.rs`, `bus/io/keypad.rs`, `cpu.rs`, `cpu/registers.rs`,
+  `bus/backup.rs`, `bus/eeprom.rs`, `bus/gpio.rs`, `bus/gpio_api.rs`,
+  `bus/input.rs`, `bus/rtc.rs`, `bus/state.rs`, `bus/io/keypad.rs`, `cpu.rs`,
+  `cpu/registers.rs`,
   `cpu/exception.rs`: header, explicit memory map,
-  SRAM/flash/serial EEPROM device policies, opt-in storage-only cartridge GPIO,
-  bus access/state digest, CPU register banks, documented stack initialization
-  and framed SWI/ARM exception entry/return.
+  SRAM/flash/serial EEPROM device policies, opt-in storage-only GPIO and the
+  bounded host-clocked S-3511 RTC subset, bus access/state digest, CPU register
+  banks, documented stack initialization and framed SWI/ARM exception
+  entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,
   `memory.rs`: typed IR, independent ARM/Thumb decode (`arm.rs`, `thumb.rs`,
   memory/block submodules, tests), reference semantics and shared pure

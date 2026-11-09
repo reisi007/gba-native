@@ -2236,3 +2236,33 @@ on-device MediaPlayer playback remains outside CI.
 - Supplied nominal cycles remain a design input, not a hardware-timing claim.
   This is a bounded optimization for issue #4; the broader cycle-scheduling and
   peripheral acceptance criteria remain open.
+
+## Round: opt-in cartridge RTC subset (2026-11-09)
+
+- Added a separately selected `GpioPolicy::DocumentedRtc` with a host-supplied
+  date/time snapshot and bounded S-3511 GPIO serial subset. `DocumentedStorage`
+  and strict ROM mapping retain their existing behavior. No guest-cycle or wall-
+  clock progression, persistence, oscillator, alarm, RTC IRQ route or retail
+  compatibility is claimed; issue #8 remains open for multi-profile
+  persistence and broader acceptance.
+- Seven synthetic tests in `crates/core/tests/cart_rtc.rs` drive GPIO registers
+  and serial edges directly. They cover Fwd/Rev commands, BCD date/time reads
+  and writes, 12/24-hour conversion including `00h` midnight/noon with AM/PM
+  and the derived read-only PM flag in 24-hour mode, control masking, validation
+  and atomic failed writes, partial-transaction
+  abort, reset/constant-FF/force-IRQ policy, strict/storage mapping and RTC
+  state digests. `cart_rtc` passes 7/7 and `gpio_overlay` passes 9/9;
+  the focused AOT guard test rejects both non-strict GPIO policies before
+  mutation.
+- `cargo test --test workspace_contract` passes 2/2 with the corrected 677-test
+  workspace / 670-test selected-package inventories.
+- A fresh-target `./scripts/full.sh` passed on this exact RTC source, using pinned
+  Ratchet 0.6.4. Ratchet fast and slow, formatting, Clippy, debug/release
+  workspace tests, demo CLI and synthetic native AOT proof passed; the proof
+  reports `native_vs_reference=match`. The hard 500-line gate and
+  `git diff --check` also passed.
+- Source grounding: public GBATEK `#gba-cart-io-port-gpio`,
+  `#gba-cart-real-time-clock-rtc` and `#ds-real-time-clock-rtc`, retrieved
+  2026-11-09 from <https://problemkaputt.de/gbatek.htm>. No emulator
+  implementation source was used. The host-snapshot clock and incomplete-
+  transaction abort are bounded implementation policies.

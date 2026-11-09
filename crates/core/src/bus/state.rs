@@ -45,6 +45,9 @@ impl Bus {
             self.gpio_control,
             self.gpio_input,
         ]);
+        if self.gpio_policy == super::GpioPolicy::DocumentedRtc && !self.rtc.is_default() {
+            self.rtc.append_digest(&mut bytes);
+        }
         sha256::digest(&bytes)
     }
 

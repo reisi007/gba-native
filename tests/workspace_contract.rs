@@ -189,7 +189,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 670, "full workspace test inventory changed");
+    assert_eq!(total, 677, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -224,6 +224,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         ("display_obj_affine", 3),
         ("eeprom", 6),
         ("gpio_overlay", 9),
+        ("cart_rtc", 7),
         ("input_tester_fixture", 3),
         ("isa_golden", 4),
         ("irq_dispatch", 6),
@@ -297,7 +298,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         9,
     );
-    assert_eq!(baseline, 663, "selected package test inventory changed");
+    assert_eq!(baseline, 670, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,

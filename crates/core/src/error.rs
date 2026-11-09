@@ -28,6 +28,11 @@ pub enum Error {
         width: u8,
         write: bool,
     },
+    RtcPolicyRequired,
+    InvalidRtcDate,
+    InvalidRtcBcd,
+    InvalidRtcCommand(u8),
+    RtcForceIrqUnsupported,
     SaveImage {
         len: usize,
     },
@@ -148,6 +153,16 @@ impl fmt::Display for Error {
                 f,
                 "unsupported {width}-bit cartridge GPIO {} at 0x{addr:08X}",
                 if *write { "write" } else { "read" }
+            ),
+            Error::RtcPolicyRequired => {
+                write!(f, "RTC injection requires DocumentedRtc GPIO policy")
+            }
+            Error::InvalidRtcDate => write!(f, "invalid RTC date or time"),
+            Error::InvalidRtcBcd => write!(f, "invalid BCD value in RTC transaction"),
+            Error::InvalidRtcCommand(raw) => write!(f, "malformed RTC command byte 0x{raw:02X}"),
+            Error::RtcForceIrqUnsupported => write!(
+                f,
+                "RTC force-IRQ command is unsupported: no cartridge IRQ route is modeled"
             ),
             Error::SaveImage { len } => {
                 write!(f, "save image length {len} is not 1..=131072 bytes")

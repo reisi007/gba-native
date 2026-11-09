@@ -14,9 +14,11 @@ mod backup;
 mod dma;
 mod eeprom;
 mod gpio;
+mod gpio_api;
 mod input;
 mod io;
 mod irq;
+mod rtc;
 mod sound;
 mod state;
 mod timer;
@@ -33,6 +35,7 @@ pub use irq::{
     CYCLES_PER_LINE, FRAME_CYCLES, FRAME_INSTRUCTIONS, FRAME_LINES, VBLANK_FIRST_LINE,
     VBLANK_LAST_LINE, instructions_until_line, line_instructions,
 };
+pub use rtc::RtcDateTime;
 pub use sound::{EnvelopeTrigger, FIFO_A_ADDR, FIFO_B_ADDR, SoundFifo};
 
 use crate::bios::{AffinePolicy, DecompressionPolicy};
@@ -180,12 +183,13 @@ pub enum RomWritePolicy {
     Dropped,
 }
 
-/// Host-selected, volatile GPIO register overlay at the documented first ROM
-/// window offsets. This models storage/input only, not a cartridge protocol.
+/// Host-selected, volatile GPIO overlay at the documented first ROM window
+/// offsets. `DocumentedRtc` additionally enables a bounded host-clocked RTC.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GpioPolicy {
     Strict,
     DocumentedStorage,
+    DocumentedRtc,
 }
 
 impl RomWritePolicy {
@@ -218,6 +222,7 @@ pub struct Bus {
     gpio_direction: u8,
     gpio_control: u8,
     gpio_input: u8,
+    rtc: rtc::RtcState,
     backup: Vec<u8>,
     flash: backup::FlashState,
     eeprom: eeprom::EepromState,
@@ -266,6 +271,7 @@ impl Bus {
             gpio_direction: 0,
             gpio_control: 0,
             gpio_input: 0,
+            rtc: rtc::RtcState::default(),
             // Fixed 128 KiB erased image: the selected policy only gates the
             // accessible capacity, so the guest-state digest is policy-independent.
             backup: vec![0xFF; SAVE_LEN_FLASH],
@@ -311,29 +317,6 @@ impl Bus {
 
     pub fn rom_write_policy(&self) -> RomWritePolicy {
         self.rom_write_policy
-    }
-
-    /// Opts in to storage-only GPIO at 0x080000C4..=0x080000C9.
-    #[must_use]
-    pub fn with_gpio_policy(mut self, policy: GpioPolicy) -> Self {
-        self.gpio_policy = policy;
-        self
-    }
-
-    pub fn gpio_policy(&self) -> GpioPolicy {
-        self.gpio_policy
-    }
-
-    /// Injects the externally supplied levels of GPIO pins 0..3. No clock,
-    /// protocol, or automatic sampling is implied.
-    pub fn set_gpio_input(&mut self, input: u8) {
-        self.gpio_input = input & 0x0F;
-    }
-
-    /// Returns the low four data bits, including output latch levels and the
-    /// explicitly injected levels on input-configured pins.
-    pub fn gpio_data(&self) -> u8 {
-        ((self.gpio_data & self.gpio_direction) | (self.gpio_input & !self.gpio_direction)) & 0x0F
     }
 
     /// Selects an explicit volatile SRAM, flash, or EEPROM model. EEPROM size

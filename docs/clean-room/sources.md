@@ -82,7 +82,17 @@ Relevant anchors actually consulted for this milestone:
   offsets `C4h`/`C6h`/`C8h`, low-four-bit data and direction, control bit 0, and
   the documented 16-/32-bit ROM-store access forms. Consulted at
   <https://problemkaputt.de/gbatek.htm> on 2026-11-09; retrieval not separately
-  retained or hashed. No protocol or RTC material was used.
+  retained or hashed. For the separately opt-in bounded S-3511 RTC subset, also
+  consulted `#gba-cart-real-time-clock-rtc` and `#ds-real-time-clock-rtc` at
+  <https://problemkaputt.de/gbatek.htm> on 2026-11-09; retrieval not separately
+  retained or hashed. Consulted material includes the SCK/SIO/CS wiring, Fwd/Rev
+  command encoding, register/payload sizes, BCD date/time layout, GBA 12-hour
+  values `00h..11h` with hour-bit-7 AM/PM distinction, control bit 6 12/24-hour
+  selection, the read-only 24-hour PM flag derived from hours `12h..23h`,
+  force-reset values,
+  constant-FF registers and force-IRQ route. This is public behavior-only
+  documentation, not emulator implementation or game material; host-snapshot
+  time and transaction abort behavior are implementation policies.
 - `#using-r15-pc` and `#reading-from-r15`: ARM PC+8 versus PC+12 for
   register-specified shifts, and PC write behavior.
 - `#mis-aligned-pcr15-branch-opcodes-or-movaluldr-with-rdr15`: forced PC

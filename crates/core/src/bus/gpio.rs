@@ -5,8 +5,10 @@ pub(super) const GPIO_BASE: u32 = 0x0800_00C4;
 
 impl Bus {
     pub(super) fn has_gpio_overlay(&self, addr: u32) -> bool {
-        self.gpio_policy == GpioPolicy::DocumentedStorage
-            && (GPIO_BASE..=GPIO_BASE + 5).contains(&addr)
+        matches!(
+            self.gpio_policy,
+            GpioPolicy::DocumentedStorage | GpioPolicy::DocumentedRtc
+        ) && (GPIO_BASE..=GPIO_BASE + 5).contains(&addr)
     }
 
     pub(super) fn gpio_read8(&self, addr: u32) -> Result<u8> {
@@ -64,8 +66,23 @@ impl Bus {
 
     pub(super) fn gpio_write16(&mut self, addr: u32, value: u16) -> Result<()> {
         match addr {
-            0x0800_00C4 => self.gpio_data = value as u8 & 0x0F,
-            0x0800_00C6 => self.gpio_direction = value as u8 & 0x0F,
+            0x0800_00C4 => {
+                let next = value as u8 & 0x0F;
+                if self.gpio_policy == GpioPolicy::DocumentedRtc {
+                    let pins =
+                        (next & self.gpio_direction) | (self.gpio_input & !self.gpio_direction);
+                    self.rtc.pins(pins)?;
+                }
+                self.gpio_data = next;
+            }
+            0x0800_00C6 => {
+                let next = value as u8 & 0x0F;
+                if self.gpio_policy == GpioPolicy::DocumentedRtc {
+                    let pins = (self.gpio_data & next) | (self.gpio_input & !next);
+                    self.rtc.pins(pins)?;
+                }
+                self.gpio_direction = next;
+            }
             0x0800_00C8 => self.gpio_control = value as u8 & 1,
             _ => {
                 return Err(Error::UnsupportedCartGpio {

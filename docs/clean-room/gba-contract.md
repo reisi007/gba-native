@@ -179,19 +179,44 @@ write policy after its low control halfword has been applied. Such composed
 stores are not atomic. Stores never change cartridge bytes. Byte GPIO accesses
 are explicit errors when the overlay is enabled. Unaligned halfword/word
 accesses retain the bus alignment errors.
-Addresses outside these three registers are not GPIO: no alternate windows,
-mirrors, serial protocol, RTC, analog input, timing, IRQ, or persistence is
-implemented or claimed. GPIO register and injected-input values are included
-in `Bus::state_digest`; policy selection is host configuration and excluded.
-This storage/input foundation is not a GPIO peripheral or cartridge protocol
-implementation.
-The opt-in is reference-interpreter-only: the shared generated AOT
+For `DocumentedStorage`, addresses outside these three registers are not GPIO:
+no alternate windows, mirrors, serial protocol, RTC, analog input, timing, IRQ,
+or persistence is implemented or claimed. This storage/input foundation alone
+is not a GPIO peripheral or cartridge protocol implementation.
+
+`GpioPolicy::DocumentedRtc` is a separate opt-in that retains the same GPIO
+register mapping and additionally models a bounded S-3511 serial RTC subset on
+GPIO bit 0 (SCK), bit 1 (SIO) and bit 2 (CS). It accepts the documented Fwd/Rev
+command forms and LSB-first parameter bytes. Host
+`Bus::set_rtc_datetime(RtcDateTime { ... })` injects a validated 2000..=2099
+date/time snapshot (`weekday` 0..=6, 24-hour time); no wall clock or guest
+nominal cycles advance the RTC. Datetime/time reads and writes
+use BCD, with GBA hour bit 7 as AM/PM in 12-hour mode and control bit 6 selecting
+24-hour mode. In 12-hour mode the hour payload is `00h..11h`; `00h` represents
+both midnight and noon, distinguished by the AM/PM bit. In 24-hour mode, bit 7
+is a read-only PM indicator derived from the BCD hour (`1` for 12:00..23:59).
+A completed write commits only after its full documented payload;
+CS deassertion aborts an incomplete write (bounded transaction policy).
+
+The supported commands are force reset (registers reset to zero except
+month/day=1), the one-byte control register, seven-byte datetime and three-byte
+time. The documented always-FF registers return `FFh` and their writes are
+discarded. Malformed commands and invalid BCD/date/time data return explicit
+errors. The force-IRQ command also returns an explicit unsupported error because
+there is no cartridge IRQ route. Control bits are stored under their documented
+mask, but alarms/per-minute IRQ behavior, the power-off/battery-loss flag,
+oscillator progression, persistence and peripheral timing are not implemented.
+This behavior-only subset is not an RTC hardware-compatibility claim. RTC/GPIO
+guest state is included in `Bus::state_digest`; policy selection is host
+configuration and excluded.
+
+Both GPIO opt-ins are reference-interpreter-only: the shared generated AOT
 `run_program` rejects any bus whose GPIO policy is not `Strict`, before guest
 state mutation, including when the instruction budget is zero. Translated ROM
 blocks may span GPIO offsets and execute without bus fetches, so matching ROM
 bytes at discovery time is insufficient to establish safety with a mutable
-overlay. This restriction applies to native and WASM AOT callers of the shared
-program module; it does not change reference fetch semantics.
+overlay or serial device. This restriction applies to native and WASM AOT callers
+of the shared program module; it does not change reference fetch semantics.
 
 The CLI surfaces are `run --synthetic-bios-zero-fill`,
 `run --synthetic-bios-rom-writes`, `run --synthetic-rom-writes-ignored`,
