@@ -3,8 +3,8 @@
 //! The synthetic apps never execute a ROM, so slots are keyed by the same
 //! synthetic "save-tester" digest the browser panel uses. Bytes are raw backup
 //! images; named slots, the default marker, validation and atomic writes come
-//! from [`crate::save::SaveLibrary`]. The browser keeps the same fields in
-//! `localStorage`, so the feature set is equal on every target.
+//! from [`crate::save::SaveLibrary`]. The browser adapter stores corresponding
+//! profile and slot fields transactionally in IndexedDB.
 
 use std::path::PathBuf;
 
@@ -39,6 +39,13 @@ impl SaveSlots {
         Self {
             library: SaveLibrary::new(root),
         }
+    }
+
+    /// Directory-backed slots isolated in a validated named save profile.
+    pub fn for_profile(root: impl Into<PathBuf>, profile_id: &str) -> SaveResult<Self> {
+        Ok(Self {
+            library: SaveLibrary::for_profile(root, profile_id)?,
+        })
     }
 
     /// Existing slots with length and default marker, sorted by name.

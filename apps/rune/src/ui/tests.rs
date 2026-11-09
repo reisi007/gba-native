@@ -401,7 +401,7 @@ fn empty_save_page_disables_actions_that_need_a_selected_slot() {
         );
     }
     let accessibility = runtime.accessibility_json().to_string();
-    assert_eq!(accessibility.matches("disabled").count(), 3);
+    assert_eq!(accessibility.matches("disabled").count(), 4);
 
     for key in [
         "button-save-export",

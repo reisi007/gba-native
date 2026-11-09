@@ -3,7 +3,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use gba_native::frontend::saves::{MAX_SAVE_BYTES, SYNTHETIC_ROM_SHA, SaveSlot, SaveSlots};
 #[cfg(not(target_arch = "wasm32"))]
-use gba_native::save::SaveLibrary;
+use gba_native::save::{SaveError, SaveLibrary};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Read;
 
@@ -16,14 +16,20 @@ mod browser;
 #[derive(Debug)]
 pub(crate) struct SaveStore {
     #[cfg(not(target_arch = "wasm32"))]
-    library: Option<SaveSlots>,
+    root: Option<std::path::PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    profile: String,
 }
 
 impl Default for SaveStore {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = crate::storage::saves_root();
         Self {
             #[cfg(not(target_arch = "wasm32"))]
-            library: crate::storage::saves_root().map(SaveSlots::new),
+            root,
+            #[cfg(not(target_arch = "wasm32"))]
+            profile: "default".to_owned(),
         }
     }
 }
@@ -32,8 +38,67 @@ impl SaveStore {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn at(root: PathBuf) -> Self {
         Self {
-            library: Some(SaveSlots::new(root)),
+            root: Some(root),
+            profile: "default".to_owned(),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn profiles(&self) -> Result<Vec<String>, String> {
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| "no save directory is available".to_owned())?;
+        SaveLibrary::new(root)
+            .profiles(SYNTHETIC_ROM_SHA)
+            .map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn active_profile(&self) -> &str {
+        &self.profile
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn select_profile(&mut self, id: &str) -> Result<(), String> {
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| "no save directory is available".to_owned())?
+            .clone();
+        if id != "default" && !self.profiles()?.iter().any(|profile| profile == id) {
+            return Err(format!("unknown or unowned save profile: {id}"));
+        }
+        SaveLibrary::for_profile(root, id).map_err(|e| e.to_string())?;
+        self.profile = id.to_owned();
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn create_profile(&mut self) -> Result<String, String> {
+        let used = self.profiles()?;
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| "no save directory is available".to_owned())?
+            .clone();
+        for number in 1..=1024 {
+            let id = format!("profile{number}");
+            if used.contains(&id) {
+                continue;
+            }
+            let result = SaveLibrary::for_profile(&root, &id)
+                .and_then(|library| library.initialize_profile(SYNTHETIC_ROM_SHA));
+            match result {
+                Ok(()) => {
+                    self.select_profile(&id)?;
+                    return Ok(id);
+                }
+                Err(SaveError::UnownedDirectory) => continue,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err("no unused native save profile id is available".to_owned())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -54,13 +119,7 @@ impl SaveStore {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn slots(&self) -> Result<Vec<SaveSlot>, String> {
-        let root = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .root()
-            .to_path_buf();
-        let library = SaveLibrary::new(root);
+        let library = self.native_library()?;
         let names = library
             .list(SYNTHETIC_ROM_SHA)
             .map_err(|error| error.to_string())?;
@@ -87,13 +146,7 @@ impl SaveStore {
     pub(crate) fn create(&self) -> Result<(), String> {
         // Keep the desktop count-based name and seed when available, but never
         // replace a hidden or corrupt existing file.
-        let root = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .root()
-            .to_path_buf();
-        let library = SaveLibrary::new(root);
+        let library = self.native_library()?;
         let existing = library
             .list(SYNTHETIC_ROM_SHA)
             .map_err(|error| error.to_string())?;
@@ -116,29 +169,22 @@ impl SaveStore {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn delete(&self, name: &str) -> Result<(), String> {
-        self.library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .delete(name)
+        self.native_library()?
+            .delete(SYNTHETIC_ROM_SHA, name)
             .map_err(|error| error.to_string())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_default(&self, name: &str) -> Result<(), String> {
-        self.library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .set_default(name)
+        self.native_library()?
+            .set_default(SYNTHETIC_ROM_SHA, name)
             .map_err(|error| error.to_string())
     }
 
     #[cfg(all(any(test, target_os = "ios"), not(target_arch = "wasm32")))]
     pub(crate) fn export(&self, name: &str) -> Result<String, String> {
         let bytes = self.native_bytes(name)?;
-        let library = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?;
+        let library = self.native_library()?;
         let path = library.root().join(format!("export-{name}.sav"));
         std::fs::write(&path, bytes)
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
@@ -147,14 +193,10 @@ impl SaveStore {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn import_path(&self, path: &std::path::Path) -> Result<String, String> {
-        let library = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?;
         let bytes = read_bounded(path)?;
         validate_synthetic_image(&bytes)?;
-        library
-            .import("imported", &bytes)
+        self.native_library()?
+            .store(SYNTHETIC_ROM_SHA, "imported", &bytes)
             .map_err(|error| error.to_string())?;
         Ok(format!(
             "imported synthetic fixture from {}",
@@ -172,10 +214,7 @@ impl SaveStore {
 
     #[cfg(all(any(test, target_os = "ios"), not(target_arch = "wasm32")))]
     pub(crate) fn import_selected(&self) -> Result<String, String> {
-        let library = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?;
+        let library = self.native_library()?;
         let path = library
             .root()
             .join(gba_native::frontend::saves::IMPORT_FILE);
@@ -205,10 +244,8 @@ impl SaveStore {
             return Err(format!("invalid save slot name: {name}"));
         }
         validate_synthetic_image(bytes)?;
-        self.library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .store(name, bytes)
+        self.native_library()?
+            .store(SYNTHETIC_ROM_SHA, name, bytes)
             .map_err(|error| error.to_string())
     }
 
@@ -218,13 +255,20 @@ impl SaveStore {
             return Err(format!("invalid save slot name: {name}"));
         }
         let bytes = self
-            .library
-            .as_ref()
-            .ok_or_else(|| "no save directory is available".to_owned())?
-            .load(name)
+            .native_library()?
+            .load(SYNTHETIC_ROM_SHA, name)
             .map_err(|error| error.to_string())?;
         validate_raw_image(&bytes)?;
         Ok(bytes)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_library(&self) -> Result<SaveLibrary, String> {
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| "no save directory is available".to_owned())?;
+        SaveLibrary::for_profile(root, &self.profile).map_err(|error| error.to_string())
     }
 }
 

@@ -14,6 +14,50 @@ fn owner_profile_marker(digest: &str, id: &str) -> String {
 }
 
 impl SaveLibrary {
+    /// Enumerate only profile directories whose ownership marker exactly matches this ROM.
+    pub fn profiles(&self, digest: &str) -> SaveResult<Vec<String>> {
+        let rom = self.rom_dir(digest)?;
+        let profiles = rom.join("profiles");
+        match fs::symlink_metadata(&rom) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+            Ok(m) if !m.file_type().is_dir() => return Err(SaveError::UnownedDirectory),
+            Ok(_) => self.require_owned(digest)?,
+        }
+        match fs::symlink_metadata(&profiles) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+            Ok(m) if !m.file_type().is_dir() => return Err(SaveError::UnownedDirectory),
+            _ => {}
+        }
+        let mut found = Vec::new();
+        for entry in fs::read_dir(profiles)? {
+            let entry = entry?;
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if !super::valid_slot_name(&id) || id == "default" {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                match require(&rom, digest, &id) {
+                    Ok(()) => found.push(id),
+                    Err(SaveError::UnownedDirectory) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        found.sort();
+        Ok(found)
+    }
+
+    /// Safely create an empty, owned profile namespace. Existing owned profiles are retained.
+    pub fn initialize_profile(&self, digest: &str) -> SaveResult<()> {
+        let id = self.profile.as_deref().ok_or(SaveError::InvalidProfileId)?;
+        fs::create_dir_all(&self.root)?;
+        let _mutation_lock = self.mutation_lock(digest)?;
+        self.claim_for_store(digest)?;
+        ensure(&self.rom_dir(digest)?, digest, id)
+    }
+
     /// Select a profile namespace; `default` preserves the legacy save paths.
     pub fn for_profile(root: impl Into<PathBuf>, profile_id: &str) -> SaveResult<Self> {
         if !super::valid_slot_name(profile_id) {

@@ -21,7 +21,7 @@ frame or cycle timing.
 
 | Target | Implemented in this package | Verification limits |
 |---|---|---|
-| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. This is not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
+| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots and isolated named profiles; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. This is not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
 | Browser/WASM | Rune WebGPU shell; localStorage settings and IndexedDB-backed synthetic save profiles/slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | The current WASM, adapter and Chromium gates passed locally on 2026-11-09. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
 | iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
 
@@ -45,6 +45,13 @@ claim. Native imports read at most 128 KiB plus one rejection byte; the browser
 picker rejects oversized files before reading their payload; core save loads
 use the same bounded-read policy. The iOS picker accepts `.sav` documents only,
 and Rune applies the same exact-fixture restriction after selection.
+
+Native desktop/iOS profiles use marker-validated directories under the existing
+per-fixture save root. New safe IDs are initialized only in absent namespaces;
+unowned and symlinked directories are refused. The default profile keeps its
+legacy path, and startup selects it while named profile slots remain registered
+for later selection. This is host persistence only, not cartridge-save
+completion or retail save compatibility. Browser profile behavior is unchanged.
 
 Executable Rune UI contract coverage is in `apps/rune/src/ui/parity_tests.rs`.
 It checks Rune-only save creation, default selection, export/delete and

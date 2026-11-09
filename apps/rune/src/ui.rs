@@ -34,6 +34,8 @@ pub struct AppState {
     save_slots: Vec<gba_native::frontend::saves::SaveSlot>,
     selected_save_slot: usize,
     save_status: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    save_profiles: Vec<String>,
     #[cfg(target_arch = "wasm32")]
     browser_saves: browser_saves::BrowserSaveState,
     binding_target: Option<gba_native::input::Button>,
@@ -58,6 +60,8 @@ impl Default for AppState {
             save_slots: Vec::new(),
             selected_save_slot: 0,
             save_status: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            save_profiles: vec!["default".to_owned()],
             #[cfg(target_arch = "wasm32")]
             browser_saves: browser_saves::BrowserSaveState::default(),
             binding_target: None,
@@ -155,6 +159,11 @@ impl AppState {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn reload_save_slots(&mut self) {
+        self.save_profiles = vec!["default".to_owned()];
+        match self.save_store.profiles() {
+            Ok(profiles) => self.save_profiles.extend(profiles),
+            Err(error) => self.save_status = Some(error),
+        }
         let selected_name = self
             .save_slots
             .get(self.selected_save_slot)

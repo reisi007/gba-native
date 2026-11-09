@@ -244,16 +244,16 @@ test.describe('Rune UI review captures', () => {
     await expect(slot1).toBeVisible();
     await expect(makeDefault).toBeDisabled();
 
-    await slot2.evaluate((button) => button.click());
+    await clickCanvasControl(page, slot2);
     await expect(page.getByRole('button', { name: /slot-2.*selected/ })).toBeVisible();
     await expect(makeDefault).toBeEnabled();
-    await makeDefault.evaluate((button) => button.click());
+    await clickCanvasControl(page, makeDefault);
     await expect.poll(async () => (await readIndexedProfile(page, 'default'))?.defaultSlot)
       .toBe('slot-2');
     await expect(makeDefault).toBeDisabled();
 
     const unselectedSlot1 = page.getByRole('button', { name: /slot-1.*512 bytes/ });
-    await unselectedSlot1.evaluate((button) => button.click());
+    await clickCanvasControl(page, unselectedSlot1);
     await expect(makeDefault).toBeEnabled();
   });
 
@@ -298,7 +298,7 @@ test.describe('Rune UI review captures', () => {
     await page.goto('/');
     await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
     await expect(page.locator('canvas').first()).toBeVisible({ timeout: 90_000 });
-    await page.keyboard.press('F2');
+    await clickCanvasControl(page, page.getByRole('button', { name: 'Saves', exact: true }));
     await expect(page.getByText(/Browser save operation failed: IndexedDB is unavailable/))
       .toBeVisible();
   });

@@ -98,6 +98,14 @@ marker, and atomic same-directory save replacement never removes a destination
 as fallback. Unit tests cover unowned save/sentinel preservation, initial claim
 and replacement after restart, plus rename-failure cleanup and recovery.
 
+Named native Rune profiles use `SaveLibrary::for_profile` below the same save
+root. Enumeration includes only directories with an exact ROM/profile ownership
+marker; initialization refuses unowned directories and symlinked paths. Native
+Rune can create and switch profiles; slots/defaults are isolated and retained
+across restart. This is host-side persistence for the generated synthetic
+fixture, not cartridge-save emulation or save-device compatibility. Browser
+IndexedDB profile behavior is unchanged.
+
 - 192-byte minimum and 32 MiB maximum accepted; 191 bytes and 32 MiB + 1 rejected
   without panicking.
 - The path loader consults metadata first and rejects an oversized/sparse file
@@ -2379,3 +2387,23 @@ on-device MediaPlayer playback remains outside CI.
   portable versioned cartridge-save format, ROM/profile-bound cartridge data,
   persistent SRAM/flash/EEPROM integration or cross-environment save
   compatibility. Issue #8 remains open.
+
+## Round: native Rune profile selection (2026-11-09)
+
+- Native Rune now lists only marker-validated named profiles for its synthetic
+  fixture, creates safe profile IDs, switches between isolated namespaces, and
+  keeps the legacy `default` paths unchanged. Slot creation, deletion, default
+  selection, import and export use the active profile. Unowned or symlinked
+  profile paths fail closed and are not adopted.
+- Focused core save tests pass 14/14; Rune host tests pass 42/42. The canonical
+  `scripts/frontend.sh` gate passes. `scripts/web.sh --ci` passes the WASM,
+  browser-adapter and Chromium checks (16 passed; 8 mobile interaction cases
+  skipped by the configured desktop-only policy). The browser adapter itself is
+  unchanged; its screenshot controls were made to click Rune's canvas controls
+  rather than dispatching synthetic DOM clicks.
+- A fresh-target `scripts/full.sh` passes, including hard source-size limit,
+  Ratchet fast/slow, formatting, Clippy, debug/release workspace tests, demo and
+  synthetic native proof (`native_vs_reference=match`). This remains synthetic
+  host-side save persistence, not the portable versioned cartridge-save format,
+  persistent SRAM/flash/EEPROM integration or cross-environment cartridge data
+  compatibility required by issue #8. Issue #8 remains open.

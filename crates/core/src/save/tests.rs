@@ -84,6 +84,47 @@ fn named_profiles_isolate_slots_defaults_and_restart() {
 }
 
 #[test]
+fn profile_enumeration_is_marker_validated_and_initialization_is_safe() {
+    let root = temp_root("profile-enumeration");
+    let alice = SaveLibrary::for_profile(&root, "alice").unwrap();
+    alice.initialize_profile(DIGEST).unwrap();
+    assert_eq!(SaveLibrary::new(&root).profiles(DIGEST).unwrap(), ["alice"]);
+    let dir = root.join(DIGEST).join("profiles/bob");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("sentinel"), b"keep").unwrap();
+    assert_eq!(SaveLibrary::new(&root).profiles(DIGEST).unwrap(), ["alice"]);
+    assert!(matches!(
+        SaveLibrary::for_profile(&root, "bob")
+            .unwrap()
+            .initialize_profile(DIGEST),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert_eq!(fs::read(dir.join("sentinel")).unwrap(), b"keep");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn profile_enumeration_rejects_an_unowned_rom_directory() {
+    let root = temp_root("unowned-profile-parent");
+    let profiles = root.join(DIGEST).join("profiles");
+    fs::create_dir_all(&profiles).unwrap();
+    let dir = profiles.join("alice");
+    fs::create_dir(&dir).unwrap();
+    fs::write(
+        dir.join(".gba-native-profile-owner"),
+        format!(
+            "gba-native-save-profile-owner-v1\nrom-sha256={DIGEST}\nprofile-id=alice\nsave-format=raw-backup-v1\n"
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        SaveLibrary::new(&root).profiles(DIGEST),
+        Err(SaveError::UnownedDirectory)
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn wrong_profile_marker_fails_closed_without_changing_profile_data() {
     let root = temp_root("wrong-profile");
     let lib = SaveLibrary::for_profile(&root, "alice").unwrap();

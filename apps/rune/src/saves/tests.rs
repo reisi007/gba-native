@@ -155,3 +155,50 @@ fn native_import_bounds_reads_before_validating_the_fixture() {
     assert!(store.slots().unwrap().is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn native_profiles_isolate_slots_and_reload_registered_profiles() {
+    let root = temp_root("profiles");
+    let mut store = SaveStore::at(root.clone());
+    store.create().unwrap();
+    store.select_profile("default").unwrap();
+    assert_eq!(store.slots().unwrap().len(), 1);
+
+    let occupied = root
+        .join(gba_native::frontend::saves::SYNTHETIC_ROM_SHA)
+        .join("profiles/profile1");
+    std::fs::create_dir_all(&occupied).unwrap();
+    std::fs::write(occupied.join("sentinel"), b"keep").unwrap();
+    let id = store.create_profile().unwrap();
+    assert_eq!(id, "profile2");
+    assert_eq!(std::fs::read(occupied.join("sentinel")).unwrap(), b"keep");
+    store.create().unwrap();
+    assert_eq!(store.slots().unwrap().len(), 1);
+    assert_eq!(
+        store.profiles().unwrap().as_slice(),
+        std::slice::from_ref(&id)
+    );
+
+    let imported = SaveSlots::synthetic_image(7);
+    let import_path = root.join("profile-import.sav");
+    std::fs::write(&import_path, &imported).unwrap();
+    store.import_path(&import_path).unwrap();
+    let exported = root.join("profile-export.sav");
+    store.export_path("imported", &exported).unwrap();
+    assert_eq!(std::fs::read(&exported).unwrap(), imported);
+    assert_eq!(store.slots().unwrap().len(), 2);
+
+    store.select_profile("default").unwrap();
+    assert_eq!(store.slots().unwrap().len(), 1);
+    store.select_profile(&id).unwrap();
+    assert_eq!(store.slots().unwrap().len(), 2);
+
+    let profile_dir = root
+        .join(gba_native::frontend::saves::SYNTHETIC_ROM_SHA)
+        .join(format!("profiles/{id}"));
+    assert_eq!(
+        std::fs::read(profile_dir.join("imported.sav")).unwrap(),
+        imported
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

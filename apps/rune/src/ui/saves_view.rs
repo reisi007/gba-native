@@ -14,7 +14,7 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     #[cfg(target_arch = "wasm32")]
     let profiles = browser_profiles(state, dark, compact);
     #[cfg(not(target_arch = "wasm32"))]
-    let profiles = el();
+    let profiles = native_profiles(state, dark, compact);
     let mut slots = col().key("save-slot-list").w_full().gap(8.0);
     if state.save_slots.is_empty() {
         slots = slots.child(text("No host save images yet.").color(theme.text_secondary));
@@ -134,6 +134,72 @@ pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
                 .wrap_anywhere()
                 .font(type_::BODY)
                 .color(theme.text_secondary),
+        )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_profiles(state: &AppState, dark: bool, compact: bool) -> El {
+    let active = state.save_store.active_profile();
+    let mut choices = if compact {
+        rune::col().w_full().gap(6.0)
+    } else {
+        row().w_full().gap(6.0)
+    };
+    for profile in &state.save_profiles {
+        let id = profile.clone();
+        let selected = id == active;
+        let label = if selected {
+            format!("{id} · selected")
+        } else {
+            id.clone()
+        };
+        let theme = tok::theme(dark);
+        let button = el()
+            .key(format!("native-profile-{id}"))
+            .role("button")
+            .label(label.clone())
+            .focusable(!selected)
+            .disabled(selected)
+            .on_physical_input(input::physical_input)
+            .h(40.0)
+            .px(12.0)
+            .center()
+            .radius(8.0)
+            .fill(if selected {
+                tok::accent(0, true)
+            } else {
+                theme.card
+            })
+            .child(text(label).font(type_::LABEL).color(if selected {
+                super::accent_foreground()
+            } else {
+                theme.text
+            }));
+        choices = choices.child(if selected {
+            button
+        } else {
+            button.on_press(move |state: &mut AppState| {
+                state.save_status = state.save_store.select_profile(&id).err();
+                state.reload_save_slots();
+            })
+        });
+    }
+    col()
+        .key("native-save-profiles")
+        .w_full()
+        .gap(6.0)
+        .child(text("Profiles · stored on this device").font(type_::BODY))
+        .child(choices)
+        .child(
+            super::buttons::button_base("native-profile-new", "New profile", true, dark).on_press(
+                |state: &mut AppState| {
+                    state.save_status = match state.save_store.create_profile() {
+                        Ok(id) => Some(format!("created and selected {id}")),
+                        Err(error) => Some(error),
+                    };
+                    state.reload_save_slots();
+                },
+            ),
         )
 }
 

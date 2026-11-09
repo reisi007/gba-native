@@ -110,6 +110,43 @@ fn rune_new_slot_skips_an_occupied_count_based_name_after_deletion() {
 }
 
 #[test]
+fn native_profile_controls_keep_slots_isolated_and_reloadable() {
+    let root = temp_root("native-profile-controls");
+    let mut rune = rune_runtime(root.clone());
+    click(&mut rune, "button-saves");
+    click(&mut rune, "button-native-profile-new");
+    assert_eq!(rune.state.save_store.active_profile(), "profile1");
+    click(&mut rune, "button-save-new");
+    assert_eq!(rune_slots(&rune), vec![("slot1".to_owned(), 512, true)]);
+
+    let profile_slot = root
+        .join(gba_native::frontend::saves::SYNTHETIC_ROM_SHA)
+        .join("profiles/profile1/slot1.sav");
+    assert_eq!(
+        std::fs::read(profile_slot).unwrap(),
+        SaveSlots::synthetic_image(0)
+    );
+    assert!(
+        !root
+            .join(gba_native::frontend::saves::SYNTHETIC_ROM_SHA)
+            .join("slot1.sav")
+            .exists()
+    );
+
+    click(&mut rune, "native-profile-default");
+    assert_eq!(rune.state.save_store.active_profile(), "default");
+    assert!(rune_slots(&rune).is_empty());
+    click(&mut rune, "native-profile-profile1");
+    assert_eq!(rune_slots(&rune), vec![("slot1".to_owned(), 512, true)]);
+
+    let mut restarted = SaveStore::at(root.clone());
+    assert_eq!(restarted.profiles().unwrap(), ["profile1"]);
+    restarted.select_profile("profile1").unwrap();
+    assert_eq!(restarted.slots().unwrap()[0].name, "slot1");
+    std::fs::remove_dir_all(root).expect("remove test-owned save directory");
+}
+
+#[test]
 fn rune_settings_transitions_match_the_shared_settings_contract() {
     use rune::{Mods, PhysicalInput, PhysicalKeyCode};
 
