@@ -88,6 +88,16 @@ implementations have only dated historical evidence below.
 
 ### Cartridge
 
+### Host save ownership
+
+`crates/core/src/save.rs` uses a versioned `.gba-native-owner` marker bound to
+the ROM SHA-256 and raw-backup format. A digest directory is claimed only when
+new or empty; non-empty unmarked legacy directories remain readable/listable
+but all mutations fail closed. `create_new` prevents replacing an existing
+marker, and atomic same-directory save replacement never removes a destination
+as fallback. Unit tests cover unowned save/sentinel preservation, initial claim
+and replacement after restart, plus rename-failure cleanup and recovery.
+
 - 192-byte minimum and 32 MiB maximum accepted; 191 bytes and 32 MiB + 1 rejected
   without panicking.
 - The path loader consults metadata first and rejects an oversized/sparse file
@@ -2266,3 +2276,62 @@ on-device MediaPlayer playback remains outside CI.
   2026-11-09 from <https://problemkaputt.de/gbatek.htm>. No emulator
   implementation source was used. The host-snapshot clock and incomplete-
   transaction abort are bounded implementation policies.
+
+## Round: safe native atomic save replacement (2026-11-09)
+
+- `SaveLibrary` writes to a uniquely named, exclusively created temporary file
+  beside the destination, syncs its contents, then replaces the destination via
+  `std::fs::rename` without an unlink gap. Failed writes, syncs or renames clean
+  up the temporary file. Unix and supported Windows/filesystem rename semantics
+  replace atomically; unsupported replacement fails closed, preserving the old
+  file. The containing directory is not synced, so crash durability of the
+  directory entry is not claimed.
+- Save tests cover successful replacement, injected rename failure while
+  checking the old bytes remain in place, actual rename failure and temp cleanup,
+  and successful retry. `cargo test -p gba-native-core save::tests` passes 7/7.
+  The workspace inventory is updated to 679 total tests / 672 selected-package
+  tests (192 core library tests).
+- A fresh-target `./scripts/full.sh` passes, including hard source size limit,
+  Ratchet fast/slow, formatting, Clippy, debug/release workspace tests, demo and
+  synthetic AOT proof (`native_vs_reference=match`).
+
+## Round: owned native save locations (2026-11-09)
+
+- Native `SaveLibrary` mutations now require a `.gba-native-owner` marker bound
+  to the normalized ROM SHA-256 and `raw-backup-v1`. A digest directory is
+  claimed only when newly created; all pre-existing unmarked data stays
+  readable/listable/exportable but cannot be overwritten, made default or
+  deleted. Digest-directory symlinks and malformed markers fail closed; marker
+  reads are bounded. Owner markers are staged, synced and installed with a
+  create-if-absent hard link, so failed staging/install leaves no partial marker
+  and cannot replace another marker. Filesystems without hard-link support fail
+  closed. All native mutations hold a per-ROM OS file lock in the save root;
+  this serializes cooperating `SaveLibrary` instances across processes and the
+  OS releases it when the handle closes. Direct external filesystem changes
+  during an active mutation are outside this path-based API's coordination
+  contract. Atomic slot replacement still retains the prior file on failure.
+- Tests cover unowned slot/sentinel preservation across store/default/delete,
+  digest case normalization, oversized malformed marker rejection, initial
+  rejection of pre-existing empty directories, new-directory claim and
+  replacement after restart, symlink rejection on Unix, marker-install cleanup,
+  bounded temp-name exhaustion, plus rename-failure cleanup and recovery. Save
+  tests pass 9/9; the
+  workspace contract passes 2/2 with 681 total / 674 selected tests (194 core
+  library tests).
+- A fresh-target `./scripts/full.sh` passes on this ownership change: hard
+  source-size gate, Ratchet fast/slow, formatting, Clippy, debug/release tests,
+  demo and synthetic AOT proof (`native_vs_reference=match`). Direct Ratchet
+  check also passes 9/9 rules. This slice does not complete issue #8's remaining
+  multi-profile and transactional browser persistence criteria.
+- After review corrections that reject all pre-existing unmarked directories,
+  stage owner markers before create-if-absent hard-link installation, and bound
+  temporary-name retries, a second fresh-target `./scripts/full.sh` passed with
+  the same gates and `native_vs_reference=match`.
+- A third review identified path replacement between `create_dir` and marker
+  installation. Mutations now hold one OS file lock per normalized ROM digest
+  across ownership checks and all related slot/default operations; stale lock
+  files are harmless, and the OS releases locks when handles close. A focused
+  lock contention test, save tests (9/9), workspace contract (2/2), formatting,
+  Clippy and Ratchet (9/9) pass. A third fresh-target `./scripts/full.sh` also
+  passes all gates, including debug/release tests and the synthetic AOT proof
+  (`native_vs_reference=match`).

@@ -110,7 +110,10 @@ is covered by its host/browser tests and Playwright checks.
   backup image through the host save library; without a slot it uses the stored
   default, creating `default` on the first save. `save list/import/export/use/
   default/delete` manages multiple slots per ROM SHA-256. Device writes still
-  require one explicit `--synthetic-backup-*` opt-in.
+  require one explicit `--synthetic-backup-*` opt-in. Mutations require a
+  digest-bound owner marker in a directory newly created by the save library;
+  pre-existing unmarked data remains readable/listable/exportable but cannot be
+  overwritten, made default or deleted.
 - `fixture input-tester` writes our own 4 KiB synthetic ROM. The committed
   fixture, input script and expected frame live under `tests/roms/synthetic/`;
   `scripts/input-tester.sh --visual` builds the native AOT artifact and compares

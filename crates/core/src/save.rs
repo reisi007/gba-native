@@ -3,20 +3,26 @@
 //! Saves are stored outside the cartridge as raw backup images under
 //! `<root>/<rom-sha256>/<slot>.sav`. The ROM SHA-256 is the only cartridge
 //! identity; no ROM bytes are copied. A `<root>/<rom-sha256>/default` text file
-//! records the preferred slot. The format is deliberately plain and
-//! dependency-free so native and browser frontends can share the same model.
+//! records the preferred slot. Mutations require a versioned owner marker; a
+//! pre-existing unmarked directories are legacy/unowned and are never adopted.
+//! Their contents remain readable/listable/exportable. The format is
+//! deliberately plain and dependency-free so native and browser frontends can
+//! share the same model.
 //!
 //! This is persistence for the explicitly selected backup-device models. It is
 //! not a save-device compatibility claim and it does not embed retail save data.
 
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Maximum accepted backup image length (the documented flash size).
 pub const MAX_SAVE_LEN: usize = 128 * 1024;
 /// Maximum slot-name length.
 pub const MAX_SLOT_NAME: usize = 32;
+const OWNER_FILE: &str = ".gba-native-owner";
+const MAX_TEMP_ATTEMPTS: usize = 128;
 
 /// Save-library failures.
 #[derive(Debug)]
@@ -26,6 +32,7 @@ pub enum SaveError {
     InvalidSlotName,
     InvalidSaveLength(usize),
     UnknownSlot(String),
+    UnownedDirectory,
 }
 
 impl std::fmt::Display for SaveError {
@@ -44,6 +51,9 @@ impl std::fmt::Display for SaveError {
                 "save image length {len} is not 1..={MAX_SAVE_LEN} bytes"
             ),
             Self::UnknownSlot(slot) => write!(formatter, "unknown save slot {slot:?}"),
+            Self::UnownedDirectory => {
+                write!(formatter, "save directory is not owned by this application")
+            }
         }
     }
 }
@@ -118,6 +128,99 @@ impl SaveLibrary {
         Ok(self.rom_dir(digest)?.join("default"))
     }
 
+    fn mutation_lock(&self, digest: &str) -> SaveResult<fs::File> {
+        self.rom_dir(digest)?;
+        if !fs::metadata(&self.root).is_ok_and(|metadata| metadata.is_dir()) {
+            return Err(SaveError::UnownedDirectory);
+        }
+        let file = self.open_mutation_lock_file(digest)?;
+        file.lock()?;
+        Ok(file)
+    }
+
+    fn open_mutation_lock_file(&self, digest: &str) -> SaveResult<fs::File> {
+        let path = self.root.join(format!(
+            ".gba-native-mutation-{}.lock",
+            digest.to_ascii_lowercase()
+        ));
+        match fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => Ok(file),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let metadata = fs::symlink_metadata(&path)?;
+                if !metadata.file_type().is_file() {
+                    return Err(SaveError::UnownedDirectory);
+                }
+                Ok(fs::OpenOptions::new().read(true).write(true).open(path)?)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn claim_for_store(&self, digest: &str) -> SaveResult<PathBuf> {
+        let dir = self.rom_dir(digest)?;
+        match fs::create_dir(&dir) {
+            Ok(()) => {
+                let dir = self.real_rom_dir(digest)?;
+                if let Err(error) = write_owner_marker(&dir.join(OWNER_FILE), digest) {
+                    // Remove only the newly created directory, and only when
+                    // still empty; any concurrent unrelated entry is retained.
+                    let _ = fs::remove_dir(&dir);
+                    return Err(error);
+                }
+                Ok(dir)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                self.require_owned(digest)?;
+                Ok(dir)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn require_owned(&self, digest: &str) -> SaveResult<()> {
+        let dir = self.real_rom_dir(digest)?;
+        let marker = dir.join(OWNER_FILE);
+        let metadata = match fs::symlink_metadata(&marker) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(SaveError::UnownedDirectory);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_file() {
+            return Err(SaveError::UnownedDirectory);
+        }
+        let expected = owner_marker(digest);
+        let mut content = Vec::with_capacity(expected.len() + 1);
+        fs::File::open(&marker)?
+            .take((expected.len() + 1) as u64)
+            .read_to_end(&mut content)?;
+        if content != expected.as_bytes() {
+            return Err(SaveError::UnownedDirectory);
+        }
+        Ok(())
+    }
+
+    fn real_rom_dir(&self, digest: &str) -> SaveResult<PathBuf> {
+        let dir = self.rom_dir(digest)?;
+        let metadata = match fs::symlink_metadata(&dir) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(SaveError::UnownedDirectory);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir() {
+            return Err(SaveError::UnownedDirectory);
+        }
+        Ok(dir)
+    }
+
     /// Existing slots, sorted by name.
     pub fn list(&self, digest: &str) -> SaveResult<Vec<String>> {
         let dir = self.rom_dir(digest)?;
@@ -173,18 +276,20 @@ impl SaveLibrary {
             return Err(SaveError::InvalidSaveLength(bytes.len()));
         }
         let path = self.slot_path(digest, slot)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        fs::create_dir_all(&self.root)?;
+        let _mutation_lock = self.mutation_lock(digest)?;
+        self.claim_for_store(digest)?;
         write_atomic(&path, bytes)?;
         if self.default_slot(digest)?.is_none() {
-            self.set_default(digest, slot)?;
+            self.set_default_unlocked(digest, slot)?;
         }
         Ok(())
     }
 
     pub fn delete(&self, digest: &str, slot: &str) -> SaveResult<()> {
         let path = self.slot_path(digest, slot)?;
+        let _mutation_lock = self.mutation_lock(digest)?;
+        self.require_owned(digest)?;
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -195,13 +300,20 @@ impl SaveLibrary {
         if self.default_slot(digest)?.is_none() {
             let _ = fs::remove_file(self.default_path(digest)?);
             if let Some(next) = self.list(digest)?.first() {
-                self.set_default(digest, next)?;
+                self.set_default_unlocked(digest, next)?;
             }
         }
         Ok(())
     }
 
     pub fn set_default(&self, digest: &str, slot: &str) -> SaveResult<()> {
+        self.slot_path(digest, slot)?;
+        let _mutation_lock = self.mutation_lock(digest)?;
+        self.set_default_unlocked(digest, slot)
+    }
+
+    fn set_default_unlocked(&self, digest: &str, slot: &str) -> SaveResult<()> {
+        self.require_owned(digest)?;
         if !self.exists(digest, slot)? {
             return Err(SaveError::UnknownSlot(slot.to_owned()));
         }
@@ -243,136 +355,121 @@ impl SaveLibrary {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> SaveResult<()> {
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, bytes)?;
-    // Windows rename fails when the destination exists; remove first. The
-    // caller owns the save directory and no other process should write there.
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    fs::rename(&temporary, path)?;
+fn owner_marker(digest: &str) -> String {
+    format!(
+        "gba-native-save-owner-v1\nrom-sha256={}\nsave-format=raw-backup-v1\n",
+        digest.to_ascii_lowercase()
+    )
+}
+
+fn write_owner_marker(path: &Path, digest: &str) -> SaveResult<()> {
+    let content = owner_marker(digest);
+    write_owner_marker_with(path, content.as_bytes(), |temporary, marker| {
+        fs::hard_link(temporary, marker)
+    })
+}
+
+fn write_owner_marker_with(
+    path: &Path,
+    content: &[u8],
+    install: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> SaveResult<()> {
+    let (temporary, mut file) = create_temporary_file(path)?;
+    file.write_all(content)?;
+    file.sync_all()?;
+    drop(file);
+    install(&temporary.path, path)?;
+    // Drop removes only the private staged file. The marker itself appears in
+    // one create-if-absent hard-link operation, never partially written.
+    drop(temporary);
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn write_atomic(path: &Path, bytes: &[u8]) -> SaveResult<()> {
+    write_atomic_with(path, bytes, |from, to| fs::rename(from, to))
+}
 
-    fn temp_root(tag: &str) -> PathBuf {
-        let unique = format!(
-            "gba-native-save-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        let path = std::env::temp_dir().join(unique);
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
+fn write_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    rename: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> SaveResult<()> {
+    let (mut temporary, mut file) = create_temporary_file(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
 
-    const DIGEST: &str = "8a7667d43d9ec0333a5a7c0a032837919e101ca1c1893bdf5f95f51b27555539";
-    const OTHER: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+    // Same-directory rename replaces files atomically on Unix and supported
+    // Windows/filesystems; elsewhere it fails closed, preserving the old save.
+    // Never remove the destination as a fallback: that would expose a gap.
+    rename(&temporary.path, path)?;
+    temporary.disarm();
+    Ok(())
+}
 
-    #[test]
-    fn multiple_slots_are_independent_and_default_is_tracked() {
-        let root = temp_root("slots");
-        let library = SaveLibrary::new(&root);
-        assert_eq!(library.list(DIGEST).unwrap(), Vec::<String>::new());
-        library.store(DIGEST, "first", &[0x47, 0x53]).unwrap();
-        library.store(DIGEST, "second", &[0x41, 0x56]).unwrap();
-        assert_eq!(library.list(DIGEST).unwrap(), ["first", "second"]);
-        assert_eq!(library.load(DIGEST, "first").unwrap(), [0x47, 0x53]);
-        assert_eq!(library.load(DIGEST, "second").unwrap(), [0x41, 0x56]);
-        assert_eq!(
-            library.default_slot(DIGEST).unwrap().as_deref(),
-            Some("first")
-        );
-        library.set_default(DIGEST, "second").unwrap();
-        assert_eq!(
-            library.default_slot(DIGEST).unwrap().as_deref(),
-            Some("second")
-        );
-        assert_eq!(
-            library.resolve(DIGEST, None).unwrap().as_deref(),
-            Some("second")
-        );
-        assert_eq!(
-            library.resolve(DIGEST, Some("first")).unwrap().as_deref(),
-            Some("first")
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
+fn create_temporary_file(path: &Path) -> io::Result<(TemporaryFile, fs::File)> {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    create_temporary_file_with(path, || NEXT_ID.fetch_add(1, Ordering::Relaxed))
+}
 
-    #[test]
-    fn deleting_the_default_falls_back_to_another_slot() {
-        let root = temp_root("delete");
-        let library = SaveLibrary::new(&root);
-        library.store(DIGEST, "alpha", &[1]).unwrap();
-        library.store(DIGEST, "beta", &[2]).unwrap();
-        library.delete(DIGEST, "alpha").unwrap();
-        assert_eq!(
-            library.default_slot(DIGEST).unwrap().as_deref(),
-            Some("beta")
-        );
-        assert!(library.load(DIGEST, "alpha").is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn digests_are_separate_and_names_cannot_escape_the_root() {
-        let root = temp_root("names");
-        let library = SaveLibrary::new(&root);
-        library.store(DIGEST, "slot", &[1]).unwrap();
-        library.store(OTHER, "slot", &[2]).unwrap();
-        assert_eq!(library.load(DIGEST, "slot").unwrap(), [1]);
-        assert_eq!(library.load(OTHER, "slot").unwrap(), [2]);
-        for bad in ["", ".", "..", "../x", "a/b", "a\\b", &"x".repeat(33)] {
-            assert!(matches!(
-                library.store(DIGEST, bad, &[1]),
-                Err(SaveError::InvalidSlotName)
-            ));
+fn create_temporary_file_with(
+    path: &Path,
+    mut next_id: impl FnMut() -> u64,
+) -> io::Result<(TemporaryFile, fs::File)> {
+    for _ in 0..MAX_TEMP_ATTEMPTS {
+        let temporary_path = temporary_path(path, next_id())?;
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => {
+                return Ok((
+                    TemporaryFile {
+                        path: temporary_path,
+                        remove_on_drop: true,
+                    },
+                    file,
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
         }
-        assert!(matches!(
-            library.list("../x"),
-            Err(SaveError::InvalidRomDigest)
-        ));
-        fs::remove_dir_all(root).unwrap();
     }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not create a unique temporary save file",
+    ))
+}
 
-    #[test]
-    fn rejected_images_do_not_create_a_slot() {
-        let root = temp_root("length");
-        let library = SaveLibrary::new(&root);
-        assert!(matches!(
-            library.store(DIGEST, "slot", &[]),
-            Err(SaveError::InvalidSaveLength(0))
-        ));
-        let too_big = vec![0; MAX_SAVE_LEN + 1];
-        assert!(matches!(
-            library.store(DIGEST, "slot", &too_big),
-            Err(SaveError::InvalidSaveLength(_))
-        ));
-        assert!(library.list(DIGEST).unwrap().is_empty());
-        fs::remove_dir_all(root).unwrap();
-    }
+fn temporary_path(path: &Path, id: u64) -> io::Result<PathBuf> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "save path has no file name"))?;
+    let mut temporary_name = std::ffi::OsString::from(".");
+    temporary_name.push(name);
+    temporary_name.push(format!(".{}.{}.tmp", std::process::id(), id));
+    Ok(path.with_file_name(temporary_name))
+}
 
-    #[test]
-    fn loading_an_oversized_file_reads_only_the_rejection_byte() {
-        let root = temp_root("oversized-load");
-        let path = root.join(DIGEST).join("large.sav");
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::File::create(&path)
-            .unwrap()
-            .set_len((MAX_SAVE_LEN + 1) as u64)
-            .unwrap();
+struct TemporaryFile {
+    path: PathBuf,
+    remove_on_drop: bool,
+}
 
-        assert!(matches!(
-            SaveLibrary::new(&root).load(DIGEST, "large"),
-            Err(SaveError::InvalidSaveLength(len)) if len == MAX_SAVE_LEN + 1
-        ));
-        fs::remove_dir_all(root).unwrap();
+impl TemporaryFile {
+    fn disarm(&mut self) {
+        self.remove_on_drop = false;
     }
 }
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        if self.remove_on_drop {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

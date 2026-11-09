@@ -24,8 +24,9 @@
   persisted settings text format and instruction-indexed input scripts.
 - `crates/core/src/perf.rs`: wall-time, guest instructions/second and the stated
   real-time factor against the documented GBA clock.
-- `crates/core/src/save.rs`: host save library with multiple named slots per ROM
-  SHA-256, a default marker and path-safe slot names; `Bus::backup_image` /
+- `crates/core/src/save.rs`, `save/tests.rs`: host save library with multiple
+  named slots per ROM SHA-256, a digest-bound versioned ownership marker,
+  default marker and path-safe slot names; `Bus::backup_image` /
   `Bus::load_backup` move raw backup images in and out of the device model.
 - `crates/core/src/audio.rs`, `audio/` (`direct_sound.rs`, `format.rs`,
   `tests.rs`, `tests/envelope_tests.rs`): dependency-free PSG mixer plus
