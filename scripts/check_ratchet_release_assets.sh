@@ -10,9 +10,9 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$ROOT"
 
-ASSETS="$RUNNER_TEMP/ratchet-release/v0.6.3"
+ASSETS="$RUNNER_TEMP/ratchet-release/v0.6.4"
 mkdir -p "$ASSETS"
-RELEASE_JSON="$RUNNER_TEMP/ratchet-v0.6.3-release.json"
+RELEASE_JSON="$RUNNER_TEMP/ratchet-v0.6.4-release.json"
 NETRC="$RUNNER_TEMP/ratchet-github.netrc"
 
 # Keep the job token scoped to api.github.com; curl's netrc matching prevents
@@ -31,7 +31,7 @@ curl --fail --silent --show-error --location \
   --netrc-file "$NETRC" \
   -H 'Accept: application/vnd.github+json' \
   -H 'X-GitHub-Api-Version: 2022-11-28' \
-  'https://api.github.com/repos/all-the-rest/ratchet-cli/releases/tags/v0.6.3' \
+  'https://api.github.com/repos/all-the-rest/ratchet-cli/releases/tags/v0.6.4' \
   --output "$RELEASE_JSON"
 
 python3 - "$RELEASE_JSON" "$ASSETS" "$NETRC" <<'PY'
@@ -42,14 +42,14 @@ from pathlib import Path
 
 release_path, assets_path = map(Path, sys.argv[1:3])
 release = json.loads(release_path.read_text(encoding="utf-8"))
-if release.get("tag_name") != "v0.6.3":
-    raise SystemExit(f"expected Ratchet release v0.6.3, got {release.get('tag_name')!r}")
+if release.get("tag_name") != "v0.6.4":
+    raise SystemExit(f"expected Ratchet release v0.6.4, got {release.get('tag_name')!r}")
 
-required = {"checksums.txt", "ratchet-0.6.3-linux-x86_64"}
+required = {"checksums.txt", "ratchet-0.6.4-linux-x86_64"}
 assets = {asset["name"]: asset for asset in release["assets"]}
 missing = required - assets.keys()
 if missing:
-    raise SystemExit(f"Ratchet v0.6.3 release is missing assets: {sorted(missing)}")
+    raise SystemExit(f"Ratchet v0.6.4 release is missing assets: {sorted(missing)}")
 
 api_prefix = "https://api.github.com/repos/all-the-rest/ratchet-cli/releases/assets/"
 for name in sorted(required):
