@@ -2,10 +2,11 @@
 //!
 //! This is not a scanline PPU: it reads the current DISPCNT/VRAM/palette state
 //! once. Mode 0 BG0-BG3 text + OBJ and Mode 1 BG0/BG1 text + BG2 affine + OBJ
-//! are composed with windows 0/1, the OBJ window and BLDCNT alpha/brightness
-//! blending. Text/affine BG mosaic and normal/affine OBJ mosaic plus 1D/2D OBJ
+//! and Mode 2 BG2/BG3 affine + OBJ are composed with windows 0/1, the OBJ
+//! window and BLDCNT alpha/brightness blending. Text/affine BG mosaic and
+//! normal/affine OBJ mosaic plus 1D/2D OBJ
 //! mapping and double-size affine OBJ snapshots are supported. Semi-transparent
-//! OBJ mode remains an explicit error; Mode 2 and scanline effects are absent.
+//! OBJ mode remains an explicit error; scanline effects are absent.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};
@@ -28,6 +29,8 @@ const BITMAP_UNSUPPORTED_DISPCNT_MASK: u16 =
 const MODE0_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008;
 /// Mode 1 uses BG0/BG1 text, BG2 affine and OBJ; BG3 is rejected.
 const MODE1_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x0800;
+/// Mode 2 uses only affine BG2/BG3 and OBJ; BG0/BG1 and reserved bit 3 are rejected.
+const MODE2_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x0100 | 0x0200;
 const BG_VRAM_LEN: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +78,7 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
     let unsupported_mask = match mode {
         0 => MODE0_UNSUPPORTED_DISPCNT_MASK,
         1 => MODE1_UNSUPPORTED_DISPCNT_MASK,
+        2 => MODE2_UNSUPPORTED_DISPCNT_MASK,
         _ => BITMAP_UNSUPPORTED_DISPCNT_MASK,
     };
     if dispcnt & unsupported_mask != 0 {
@@ -113,6 +117,13 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
                 Ok(solid(backdrop))
             } else {
                 render_mode1(bus, dispcnt, backdrop, &window, &blend)
+            }
+        }
+        2 => {
+            if dispcnt & 0x1C00 == 0 && dispcnt & 0xE000 == 0 {
+                Ok(solid(backdrop))
+            } else {
+                render_mode2(bus, dispcnt, backdrop, &window, &blend)
             }
         }
         3 => {
@@ -229,6 +240,62 @@ fn render_mode1(
                 && window.allows(x as u32, y as u32, 2, obj_pixel)
             {
                 candidates[2] = affine.pixel(x, y)?;
+            }
+            if let Some(objects) = &objects
+                && window.allows(x as u32, y as u32, 4, obj_pixel)
+            {
+                candidates[4] = objects.pixels[y * WIDTH as usize + x];
+            }
+            let effects_allowed = window.color_effects_allowed(x as u32, y as u32, obj_pixel);
+            pixels.push(composite(&candidates, backdrop, blend, effects_allowed));
+        }
+    }
+    Ok(Image {
+        width: WIDTH,
+        height: HEIGHT,
+        pixels,
+    })
+}
+
+fn render_mode2(
+    bus: &Bus,
+    dispcnt: u16,
+    backdrop: u32,
+    window: &window::Window,
+    blend: &blend::Blend,
+) -> Result<Image> {
+    let backgrounds = [
+        (
+            2u8,
+            (dispcnt & 0x0400 != 0)
+                .then(|| affine::AffineBg::new(bus, 2))
+                .transpose()?,
+        ),
+        (
+            3u8,
+            (dispcnt & 0x0800 != 0)
+                .then(|| affine::AffineBg::new(bus, 3))
+                .transpose()?,
+        ),
+    ];
+    let objects = if dispcnt & 0x1000 != 0 {
+        Some(obj::render(bus, dispcnt)?)
+    } else {
+        None
+    };
+    let mut pixels = Vec::with_capacity((WIDTH * HEIGHT) as usize);
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            let obj_pixel = objects
+                .as_ref()
+                .is_some_and(|o| o.window[y * WIDTH as usize + x]);
+            let mut candidates: [Option<layer::LayerPixel>; 5] = [None; 5];
+            for (index, background) in &backgrounds {
+                if let Some(background) = background
+                    && window.allows(x as u32, y as u32, *index, obj_pixel)
+                {
+                    candidates[*index as usize] = background.pixel(x, y)?;
+                }
             }
             if let Some(objects) = &objects
                 && window.allows(x as u32, y as u32, 4, obj_pixel)

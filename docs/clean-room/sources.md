@@ -253,6 +253,15 @@ other consoles; their opcodes/features must not accidentally enter the GBA core.
 The implemented subset is deliberately narrower than the document; see
 `gba-contract.md`.
 
+Mode 2 affine BG support is grounded in `#lcd-io-display-control` (mode and
+layer enables), `#lcd-io-bg-control` (BG2/BG3 mode availability, 8bpp affine
+controls, size and wrap), `#lcd-io-bg-rotationscaling` (BG2/BG3 matrix and
+reference registers), `#lcd-vram-overview` and
+`#lcd-vram-bg-screen-data-format-bg-map` (tile/map storage model). Retrieved
+2026-11-09 from <https://problemkaputt.de/gbatek.htm>; not separately hashed.
+This supports the public interface contract, not implementation behavior or
+hardware validation.
+
 ## S6 — ARM7TDMI Technical Reference Manual
 
 URL: <https://ww1.microchip.com/downloads/en/DeviceDoc/DDI0029G_7TDMI_R3_trm.pdf>

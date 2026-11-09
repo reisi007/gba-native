@@ -236,10 +236,10 @@ fn mode0_rejects_reserved_bgcnt_and_unimplemented_layers() {
             .expect("implemented layer");
         display::snapshot(&bus).expect("implemented layer snapshot");
     }
-    bus.write16(DISPCNT_ADDR, 2).expect("unsupported mode");
+    bus.write16(DISPCNT_ADDR, 6).expect("unsupported mode");
     assert!(matches!(
         display::snapshot(&bus),
-        Err(Error::UnsupportedDisplayMode { mode: 2 })
+        Err(Error::UnsupportedDisplayMode { mode: 6 })
     ));
 }
 

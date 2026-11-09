@@ -84,10 +84,18 @@ fn mode5_is_160x128_with_backdrop_outside() {
 #[test]
 fn unsupported_modes_and_layers_are_explicit_errors() {
     let mut bus = bus();
-    bus.write16(DISPCNT_ADDR, 0x0002).expect("mode 2");
+    for dispcnt in [0x0102, 0x0202, 0x000A] {
+        bus.write16(DISPCNT_ADDR, dispcnt)
+            .expect("unsupported Mode 2 layer/control");
+        assert!(matches!(
+            display::snapshot(&bus),
+            Err(Error::UnsupportedPpuFeature { .. })
+        ));
+    }
+    bus.write16(DISPCNT_ADDR, 0x0006).expect("mode 6");
     assert!(matches!(
         display::snapshot(&bus),
-        Err(Error::UnsupportedDisplayMode { mode: 2 })
+        Err(Error::UnsupportedDisplayMode { mode: 6 })
     ));
     bus.write16(DISPCNT_ADDR, 0x1403).expect("OBJ layer");
     assert!(matches!(

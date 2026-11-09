@@ -1,4 +1,4 @@
-//! Pixel oracles for Mode 0 BG1-BG3/OBJ and Mode 1 affine/window/blend layers.
+//! Pixel oracles for Mode 0 BG1-BG3/OBJ and Mode 1/2 affine/window/blend layers.
 
 use gba_native_core::bus::{
     BG0CNT_ADDR, BG1CNT_ADDR, BG2CNT_ADDR, BG2PA_ADDR, BG2PB_ADDR, BG2PC_ADDR, BG2PD_ADDR,

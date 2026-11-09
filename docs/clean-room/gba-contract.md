@@ -784,10 +784,10 @@ Native image is 240x160, converted from RGB555 to RGB888 by bit replication
 scanline PPU, frame renderer or timing claim.
 
 - Mode 0 composes BG0-BG3 text backgrounds and OBJ sprites. Mode 1 composes
-  BG0/BG1 text backgrounds, the BG2 affine background and OBJ sprites. Both
-  modes implement window 0, the OBJ window and BLDCNT alpha/brightness
-  blending. Mode 2 remains `UnsupportedDisplayMode`; Modes 3-5 retain the
-  bitmap paths below.
+  BG0/BG1 text backgrounds, BG2 affine and OBJ; Mode 2 composes enabled BG2/BG3
+  affine layers and OBJ. Modes 0-2 implement window 0/1, OBJ window and BLDCNT
+  alpha/brightness blending. Mode 2 rejects BG0/BG1 enables and reserved bit 3;
+  Modes 3-5 retain the bitmap paths below.
 - Layer priority is the documented low-number-wins rule; equal priorities are
   ordered OBJ > BG0 > BG1 > BG2 > BG3. Disabled layers and transparent pixels
   reveal the next layer or the backdrop (BG palette entry 0).
@@ -802,10 +802,13 @@ scanline PPU, frame renderer or timing claim.
   BG applies scroll and affine BG applies its matrix/reference transform to that
   group origin. Each BG enables mosaic independently. Reserved bits and a 4bpp
   affine BG fail explicitly.
-- The BG2 affine layer is 8bpp only. Its 8-bit map and 8bpp tiles use the
+- Affine BG2/BG3 layers are 8bpp only. Their 8-bit maps and 8bpp tiles use the
   documented character/screen bases; size selects 128, 256, 512 or 1024 pixels
-  per axis; bit 13 enables wrapping. `BG2PA`..`BG2PD` and `BG2X`/`BG2Y` are
-  8.8 fixed point and sample the map for the current static state.
+  per axis; bit 13 enables wrapping. Each affine layer's `BGxPA`..`BGxPD` matrix
+  and `BGxX`/`BGxY` reference point are 8.8 fixed point and sample the map for
+  the current static state. Mode 1 uses BG2; Mode 2 may use BG2 and BG3
+  concurrently. This bounded Mode 2 slice is not a scanline PPU or full Mode 2
+  implementation; issue #3 remains open.
 - OBJ supports normal and affine sprites with DISPCNT-selected 1D/2D character
   mapping and 4/8bpp tiles. 1D uses
   `tile_base + tile_step * ((source_y / 8) * (obj_width / 8) + source_x / 8)`;
@@ -842,7 +845,7 @@ scanline PPU, frame renderer or timing claim.
   BG0-BG3/OBJ/effect visibility; WINOUT low/upper masks select outside/OBJ-window
   visibility. Priority is Window 0 > Window 1 > OBJ Window > outside; OBJ-window
   pixels are contributed only by nontransparent mode-2 OBJ pixels. Window 1 is
-  implemented only for Mode 0/1; bitmap modes continue rejecting window enables.
+  implemented for Mode 0/1/2; bitmap modes continue rejecting window enables.
   The selected region's effect-enable bit gates alpha/brightness effects.
 - `BLDCNT` mode 1 alpha-blends the first target only when the immediately next
   lower non-transparent layer is a second target; if the next lower layer is

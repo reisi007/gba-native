@@ -1,4 +1,4 @@
-//! Static Mode 1 affine BG2/BG3 layer.
+//! Static Mode 1/2 affine BG2/BG3 layer.
 
 use super::layer::LayerPixel;
 use super::{palette_color, read_bg8};

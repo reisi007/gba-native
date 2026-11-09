@@ -357,8 +357,12 @@ expectations, not from the decoder/interpreter:
   conversion. The synthetic guest image is asserted over every pixel.
 - Mode 4 palette index and frame page; mode 5 160x128 bounds/backdrop; forced
   blank white; BG2-disabled backdrop.
-- Mode 1/2 remain unsupported; unsupported OBJ/BG/window/CGB features are
-  rejected. Mode 3/4/5 bitmap behavior remains covered by the existing tests.
+- Mode 2 composes BG2/BG3 affine layers with independent matrix/reference
+  registers, distinct map/character bases, concurrent priority and transparent
+  top-layer fallback. It remains a static affine-layer subset, not a scanline
+  PPU or full Mode 2 implementation; issue #3 remains open. Unsupported
+  OBJ/BG/window/CGB features are rejected, and Mode 3/4/5 bitmap behavior
+  remains covered by the existing tests.
 - `crates/core/tests/display_obj_affine.rs` supplies independent color oracles
   for identity double-size placement/clipping, preserved offscreen-Y rejection,
   and a nonidentity, mosaiced expanded canvas. These are synthetic static
@@ -2136,3 +2140,25 @@ on-device MediaPlayer playback remains outside CI.
 - This is one bounded audio slice; issue #29 remains open for its remaining
   acceptance work. Host-rate sample generation remains approximate, not hardware
   cycle/timing or retail-audio validation.
+
+## Round: Mode 2 static affine BG slice (2026-11-09)
+
+- Added a bounded static Mode 2 compositor that reuses `AffineBg` for BG2 and
+  BG3. Each layer uses its own `BGxPA`..`BGxPD` matrix and `BGxX`/`BGxY`
+  reference registers, so the two affine backgrounds can run concurrently.
+  Mode 2 rejects BG0/BG1 enables and reserved DISPCNT bit 3; OBJ, window 0/1,
+  the OBJ window and BLDCNT effects are reused from the Mode 0/1 path.
+- `crates/core/tests/display_mode2.rs` adds two synthetic pixel oracles:
+  BG3 with distinct screen/character bases and its own reference point, and
+  concurrent BG2/BG3 composition with a transparent top layer falling through
+  to the lower affine layer. The existing unsupported-mode tests now use Mode 6.
+- Focused `display`, `display_layers`, `display_mode0` and `display_mode2`
+  integration targets pass. `cargo test --test workspace_contract` passes with
+  the updated 631-test inventory (624 selected package tests).
+- Source grounding: public GBATEK `#lcd-io-display-control`,
+  `#lcd-io-bg-control`, `#lcd-io-bg-rotationscaling`, `#lcd-vram-overview` and
+  `#lcd-vram-bg-screen-data-format-bg-map`, retrieved 2026-11-09 from
+  <https://problemkaputt.de/gbatek.htm>. No emulator implementation source was
+  used.
+- This is a static affine-layer subset, not a scanline PPU or full Mode 2
+  implementation. No hardware oracle or ROM was used; issue #3 remains open.
