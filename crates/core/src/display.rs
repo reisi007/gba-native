@@ -2,10 +2,10 @@
 //!
 //! This is not a scanline PPU: it reads the current DISPCNT/VRAM/palette state
 //! once. Mode 0 BG0-BG3 text + OBJ and Mode 1 BG0/BG1 text + BG2 affine + OBJ
-//! are composed with window 0, the OBJ window and BLDCNT alpha/brightness
-//! blending. BG mosaic is supported for text backgrounds; 2D OBJ mapping,
-//! semi-transparent OBJ mode, double-size affine OBJ, affine/OBJ mosaic, window
-//! 1 and Mode 2 are explicit errors, never silent approximations.
+//! are composed with windows 0/1, the OBJ window and BLDCNT alpha/brightness
+//! blending. Text/affine BG mosaic and normal/affine OBJ mosaic plus 1D/2D OBJ
+//! mapping are supported. Double-size affine OBJ, semi-transparent OBJ mode,
+//! Mode 2 and scanline effects remain explicit errors or absent.
 
 use crate::bus::{Bus, PALETTE_BASE, VRAM_BASE};
 use crate::error::{Error, Result};
@@ -24,12 +24,10 @@ pub const HEIGHT: u32 = 160;
 /// Unsupported layers/features in bitmap modes. Bits 5 and 6 do not affect this subset.
 const BITMAP_UNSUPPORTED_DISPCNT_MASK: u16 =
     0x0008 | 0x0100 | 0x0200 | 0x0800 | 0x1000 | 0x2000 | 0x4000 | 0x8000;
-/// Mode 0 rejects the reserved bit and the window-1 enable. Window 0 and the
-/// OBJ window are implemented.
-const MODE0_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x4000;
-/// Mode 1 uses BG0/BG1 text, BG2 affine and OBJ; BG3 and the two later windows
-/// are rejected explicitly.
-const MODE1_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x0800 | 0x4000;
+/// Mode 0 rejects the reserved bit; Window 0/1 and OBJ window are implemented.
+const MODE0_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008;
+/// Mode 1 uses BG0/BG1 text, BG2 affine and OBJ; BG3 is rejected.
+const MODE1_UNSUPPORTED_DISPCNT_MASK: u16 = 0x0008 | 0x0800;
 const BG_VRAM_LEN: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,19 +97,19 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
     }
 
     let blend = blend::Blend::new(bus)?;
-    let window = window::Window::new(bus, dispcnt)?;
+    let window = window::Window::new(bus, dispcnt);
     let backdrop = palette_color(bus, 0)?;
 
     match mode {
         0 => {
-            if dispcnt & 0x1F00 == 0 {
+            if dispcnt & 0x1F00 == 0 && dispcnt & 0xE000 == 0 {
                 Ok(solid(backdrop))
             } else {
                 render_mode0(bus, dispcnt, backdrop, &window, &blend)
             }
         }
         1 => {
-            if dispcnt & 0x1700 == 0 {
+            if dispcnt & 0x1700 == 0 && dispcnt & 0xE000 == 0 {
                 Ok(solid(backdrop))
             } else {
                 render_mode1(bus, dispcnt, backdrop, &window, &blend)
@@ -179,7 +177,8 @@ fn render_mode0(
             {
                 candidates[4] = objects.pixels[y * WIDTH as usize + x];
             }
-            pixels.push(composite(&candidates, backdrop, blend));
+            let effects_allowed = window.color_effects_allowed(x as u32, y as u32, obj_pixel);
+            pixels.push(composite(&candidates, backdrop, blend, effects_allowed));
         }
     }
     Ok(Image {
@@ -236,7 +235,8 @@ fn render_mode1(
             {
                 candidates[4] = objects.pixels[y * WIDTH as usize + x];
             }
-            pixels.push(composite(&candidates, backdrop, blend));
+            let effects_allowed = window.color_effects_allowed(x as u32, y as u32, obj_pixel);
+            pixels.push(composite(&candidates, backdrop, blend, effects_allowed));
         }
     }
     Ok(Image {
@@ -323,10 +323,18 @@ fn composite(
     candidates: &[Option<layer::LayerPixel>; 5],
     backdrop: u32,
     blend: &blend::Blend,
+    effects_allowed: bool,
 ) -> u32 {
     let Some(top) = layer::best(candidates) else {
-        return blend.brightness(5, backdrop);
+        return if effects_allowed {
+            blend.brightness(5, backdrop)
+        } else {
+            backdrop
+        };
     };
+    if !effects_allowed {
+        return top.color;
+    }
     if blend.mode() == 1 && blend.is_first(top.layer) {
         if let Some(next) = layer::next(candidates, top) {
             // GBATEK: blend only when the immediately next lower

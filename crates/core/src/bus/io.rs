@@ -138,6 +138,11 @@ impl IoState {
         (self.win0h, self.win0v, self.winin, self.winout)
     }
 
+    /// Window 1 horizontal and vertical ranges.
+    pub(super) fn window1(&self) -> (u16, u16) {
+        (self.win1h, self.win1v)
+    }
+
     pub(super) fn read16(&self, addr: u32, pressed_keys: u16) -> Option<Result<u16>> {
         Some(match addr {
             DISPCNT_ADDR => Ok(self.dispcnt),

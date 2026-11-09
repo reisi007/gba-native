@@ -827,10 +827,14 @@ scanline PPU, frame renderer or timing claim.
   or hardware validation.
   Double-size affine sprites are explicit errors. OBJ mode 2
   sprites form the OBJ-window mask and are not displayed, as documented.
-- Window 0 uses `WIN0H`/`WIN0V` with the documented garbage-clamping rules and
-  selects BG/OBJ visibility from `WININ`; outside pixels use `WINOUT`. The OBJ
-  window uses the upper `WINOUT` bits. Window 1 is not implemented and is an
-  explicit error.
+- Window 0/1 use their horizontal/vertical registers with inclusive starts and
+  exclusive ends. An end beyond 240/160 or a start greater than the end clamps
+  the end to the screen limit. WININ low/upper six-bit masks select Window 0/1
+  BG0-BG3/OBJ/effect visibility; WINOUT low/upper masks select outside/OBJ-window
+  visibility. Priority is Window 0 > Window 1 > OBJ Window > outside; OBJ-window
+  pixels are contributed only by nontransparent mode-2 OBJ pixels. Window 1 is
+  implemented only for Mode 0/1; bitmap modes continue rejecting window enables.
+  The selected region's effect-enable bit gates alpha/brightness effects.
 - `BLDCNT` mode 1 alpha-blends the first target only when the immediately next
   lower non-transparent layer is a second target; if the next lower layer is
   not a second target, only the top pixel is displayed. With no lower layer,
@@ -840,16 +844,17 @@ scanline PPU, frame renderer or timing claim.
   channels as a stated **Design** approximation of the 5-bit hardware channels
   and clamps at 255.
 - Mode 0/1 BG maps and tile data are restricted to the first 64 KiB of VRAM;
-  OBJ data uses the documented `0x06010000` 1D allocation and is bounds-checked
-  against the 96 KiB VRAM size. Out-of-range reads return `BgVramOutOfRange`.
+  OBJ data uses the character base at `0x06010000`, with 1D/2D allocation
+  selected by DISPCNT, and is bounds-checked against the 96 KiB VRAM size.
+  Out-of-range reads return `BgVramOutOfRange`.
 - Modes 3, 4 and 5 retain the existing bitmap paths: Mode 3 is 240x160 direct
   RGB555 at VRAM offset 0; Mode 4 is 240x160 palette indices with frame 0 at 0
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
   In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
-- OBJ double-size affine sprites, window 1, nonidentity
-  bitmap/affine combinations and scanline effects remain absent. Unsupported
-  registers or layers fail explicitly rather than being treated as no-ops.
+- OBJ double-size affine sprites, nonidentity bitmap/affine combinations and
+  scanline effects remain absent. Unsupported registers or layers fail
+  explicitly rather than being treated as no-ops.
 
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output

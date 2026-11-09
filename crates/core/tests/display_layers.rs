@@ -3,7 +3,8 @@
 use gba_native_core::bus::{
     BG0CNT_ADDR, BG1CNT_ADDR, BG2CNT_ADDR, BG2PA_ADDR, BG2PB_ADDR, BG2PC_ADDR, BG2PD_ADDR,
     BG2X_ADDR, BG2Y_ADDR, BLDALPHA_ADDR, BLDCNT_ADDR, BLDY_ADDR, Bus, DISPCNT_ADDR, MOSAIC_ADDR,
-    OAM_BASE, PALETTE_BASE, VRAM_BASE, WIN0H_ADDR, WIN0V_ADDR, WININ_ADDR, WINOUT_ADDR,
+    OAM_BASE, PALETTE_BASE, VRAM_BASE, WIN0H_ADDR, WIN0V_ADDR, WIN1H_ADDR, WIN1V_ADDR, WININ_ADDR,
+    WINOUT_ADDR,
 };
 use gba_native_core::cart::Cartridge;
 use gba_native_core::display;
@@ -13,6 +14,8 @@ const BG2_ON: u16 = 0x0400;
 const OBJ_ON: u16 = 0x1000;
 const OBJ_1D: u16 = 0x0040;
 const WINDOW0: u16 = 0x2000;
+const WINDOW1: u16 = 0x4000;
+const OBJ_WINDOW: u16 = 0x8000;
 
 fn bus() -> Bus {
     Bus::new(Cartridge::from_bytes(vec![0; 0x200]).expect("synthetic cart"))
@@ -233,6 +236,76 @@ fn window0_clips_layers_and_uses_the_backdrop_outside() {
     let image = display::snapshot(&bus).expect("window snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_0000);
     assert_eq!(image.pixel(10, 0), 0x0000_00FF);
+
+    // Window 0 wins its overlap with Window 1; Window 1 wins over OBJ window.
+    // Distinct BG palette indices make each selected mask observable.
+    put_palette(&mut bus, 0, 0x7C00);
+    put_palette(&mut bus, 2, 0x03E0);
+    put_palette(&mut bus, 3, 0x7FFF);
+    put_tile_4bpp(&mut bus, 2, 2);
+    put_tile_4bpp(&mut bus, 3, 3);
+    bus.write16(VRAM_BASE, 0x0001).expect("BG tile 1");
+    bus.write16(VRAM_BASE + 2, 0x0002).expect("BG tile 2");
+    bus.write16(VRAM_BASE + 4, 0x0003).expect("BG tile 3");
+    bus.write16(WIN0H_ADDR, 0x0408).expect("WIN0H");
+    bus.write16(WIN1H_ADDR, 0x040C).expect("WIN1H");
+    bus.write16(WIN0V_ADDR, 0x0008).expect("WIN0V");
+    bus.write16(WIN1V_ADDR, 0x0008).expect("WIN1V");
+    bus.write16(WININ_ADDR, 0x0001)
+        .expect("Window 0 BG0, Window 1 none");
+    bus.write16(WINOUT_ADDR, 0x0101)
+        .expect("outside and OBJ window BG0");
+    put_tile_4bpp(&mut bus, 0x0800, 1);
+    bus.write16(OAM_BASE, 0x0800).expect("OBJ window mode");
+    bus.write16(OAM_BASE + 2, 8).expect("OBJ window position");
+    bus.write16(OAM_BASE + 4, 0).expect("OBJ window tile");
+    bus.write16(
+        DISPCNT_ADDR,
+        0x0100 | OBJ_ON | WINDOW0 | WINDOW1 | OBJ_WINDOW,
+    )
+    .expect("all windows");
+    let image = display::snapshot(&bus).expect("combined window snapshot");
+    assert_eq!(image.pixel(2, 0), 0x00FF_0000); // outside
+    assert_eq!(image.pixel(6, 0), 0x00FF_0000); // WIN0 > WIN1
+    assert_eq!(image.pixel(10, 0), 0x0000_00FF); // WIN1 > OBJ window; backdrop
+    assert_eq!(image.pixel(14, 0), 0x0000_FF00); // OBJ-window-only mask
+
+    // Window masks independently control whether color effects are applied.
+    bus.write16(WININ_ADDR, 0x0101)
+        .expect("Window 0/1 BG0 masks");
+    bus.write16(WINOUT_ADDR, 0x0121)
+        .expect("outside effects enabled");
+    bus.write16(BLDCNT_ADDR, 0x0081)
+        .expect("brightness-up on BG0");
+    bus.write16(BLDY_ADDR, 16).expect("maximum brightness");
+    let image = display::snapshot(&bus).expect("window effect masks");
+    assert_eq!(image.pixel(2, 0), 0x00FF_FFFF); // outside effects enabled
+    assert_eq!(image.pixel(6, 0), 0x00FF_0000); // Window 0 effects disabled
+    assert_eq!(image.pixel(10, 0), 0x0000_FF00); // Window 1 effects disabled
+    assert_eq!(image.pixel(14, 0), 0x0000_FF00); // OBJ-window effects disabled
+
+    // Window 1 is shared by the Mode 1 text/affine compositor as well.
+    bus.write16(BG0CNT_ADDR, 0).expect("Mode 1 BG0CNT");
+    bus.write16(WININ_ADDR, 0x0100).expect("Window 1 BG0 only");
+    bus.write16(WINOUT_ADDR, 0).expect("outside disabled");
+    bus.write16(DISPCNT_ADDR, 0x0001 | 0x0100 | WINDOW1)
+        .expect("Mode 1 Window 1");
+    let image = display::snapshot(&bus).expect("Mode 1 Window 1 snapshot");
+    assert_eq!(image.pixel(2, 0), 0x0000_00FF); // outside backdrop
+    assert_eq!(image.pixel(6, 0), 0x00FF_0000); // Window 1 BG0
+
+    // With no BG/OBJ enabled, windows still gate effects on the backdrop.
+    bus.write16(WININ_ADDR, 0)
+        .expect("Window 1 effects disabled");
+    bus.write16(WINOUT_ADDR, 0x0020)
+        .expect("outside backdrop effects enabled");
+    bus.write16(BLDCNT_ADDR, 0x00A0)
+        .expect("brightness-up on backdrop");
+    bus.write16(DISPCNT_ADDR, WINDOW1)
+        .expect("Mode 0 Window 1 backdrop");
+    let image = display::snapshot(&bus).expect("windowed backdrop effects");
+    assert_eq!(image.pixel(2, 0), 0x00FF_FFFF); // outside effect enabled
+    assert_eq!(image.pixel(6, 0), 0x0000_00FF); // Window 1 effect disabled
 }
 
 #[test]

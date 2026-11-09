@@ -221,14 +221,14 @@ fn mode0_rejects_reserved_bgcnt_and_unimplemented_layers() {
         ));
     }
     set_mode0(&mut bus, 0);
-    for dispcnt in [BG0_ON | 0x0008, BG0_ON | 0x4000] {
-        bus.write16(DISPCNT_ADDR, dispcnt)
-            .expect("unsupported layer");
-        assert!(matches!(
-            display::snapshot(&bus),
-            Err(Error::UnsupportedPpuFeature { .. })
-        ));
-    }
+    bus.write16(DISPCNT_ADDR, BG0_ON | 0x0008)
+        .expect("reserved DISPCNT bit");
+    assert!(matches!(
+        display::snapshot(&bus),
+        Err(Error::UnsupportedPpuFeature { .. })
+    ));
+    // Window 1 is supported in Mode 0 and its clipping/priority are covered
+    // by the combined window pixel oracle in `display_layers`.
     // BG1-BG3 and OBJ are now implemented; with no data they fall through to
     // the backdrop instead of being rejected as unknown layers.
     for layer in [0x0200, 0x0400, 0x0800, 0x1040] {

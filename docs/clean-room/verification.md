@@ -2048,3 +2048,29 @@ on-device MediaPlayer playback remains outside CI.
 - This is a bounded static snapshot change, not hardware validation or full
   issue #3 completion. Double-size affine OBJ and scanline/render timing remain
   unsupported; #3 stays open.
+
+## Round: Window 1 clipping/priority snapshot slice (2026-11-08)
+
+- Implemented static Window 1 coordinates, exclusive ends, documented garbage
+  clamping, WININ/WINOUT region masks and Window 0 > Window 1 > OBJ Window >
+  outside priority for Mode 0/1. The selected region's effect-enable bit gates
+  alpha/brightness effects. Bitmap-mode window enables remain explicit errors.
+- Source grounding: public GBATEK `#lcd-io-window-feature`, retrieved
+  2026-11-08 from <https://problemkaputt.de/gbatek.htm>. No emulator
+  implementation source was used.
+- The extended existing `display_layers` target covers all four region choices,
+  overlapping Window 0/1 and Window 1/OBJ-window priority, effect masks, and
+  Mode 1 Window 1 dispatch. Focused result: 9/9 tests passed.
+- Fresh-target `./scripts/full.sh` passed with
+  `CARGO_TARGET_DIR=/projects/gba-native/target/window1-final2.3iTgqH`:
+  hard 500-line check, Ratchet fast tier, formatting, Clippy, debug and release
+  workspace tests, demo, synthetic native AOT proof (`native_vs_reference=match`,
+  0 fallbacks), and Ratchet slow tier. Final output: `==> full gate passed`.
+- The final isolated `ratchet check` passed all 9 of 9 rules; `git diff --check`
+  also passed.
+- Independent review of the full unpushed range was approved with zero findings.
+  The reviewer could not rerun focused tests because Cargo was unavailable on
+  that review environment's PATH; the full gate above did run them on this code.
+- This remains static snapshot software-test evidence, not hardware validation
+  or scanline behavior; remaining issue #3 acceptance work is incomplete and
+  #3 stays open.

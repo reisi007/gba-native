@@ -41,4 +41,8 @@ impl Bus {
     pub(crate) fn window0(&self) -> (u16, u16, u16, u16) {
         self.io.window0()
     }
+
+    pub(crate) fn window1(&self) -> (u16, u16) {
+        self.io.window1()
+    }
 }

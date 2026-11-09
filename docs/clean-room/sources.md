@@ -214,14 +214,21 @@ Relevant anchors actually consulted for this milestone:
   affine BG control/scroll, BG2/BG3 affine matrix/reference registers, OAM
   normal/affine attributes, 1D/2D OBJ tile mapping, window ranges/masks and
   BLDCNT/BLDALPHA/BLDY blending modes. Only the static snapshot subset described
-  in `gba-contract.md` is implemented; double-size affine OBJ and window 1
-  remain absent. The 2D mapping slice was retrieved 2026-11-08 from the public
-  page at <https://problemkaputt.de/gbatek.htm>: DISPCNT bit 6 selects
-  1D/2D, and the 2D 32x32 matrix has a 32-unit row stride (16 physical 8bpp
+  in `gba-contract.md` is implemented; double-size affine OBJ remains absent.
+  The 2D mapping slice was retrieved 2026-11-08 from the public page at
+  <https://problemkaputt.de/gbatek.htm>: DISPCNT bit 6 selects 1D/2D, and the
+  2D 32x32 matrix has a 32-unit row stride (16 physical 8bpp
   tiles). No emulator implementation source was used. Earlier anchors were
   consulted on 2026-10-29 in the S1 rendering at
   <https://mgba-emu.github.io/gbatek/>; that retrieval was not separately
   retained or hashed.
+
+- `#lcd-io-window-feature`: retrieved 2026-11-08 from the public page at
+  <https://problemkaputt.de/gbatek.htm>. Consulted for DISPCNT Window 1 enable,
+  WIN1H/WIN1V coordinate byte order, exclusive end/clamping rules, WININ Window 1
+  region layer/effect masks, WINOUT outside/OBJ-window layer/effect masks and
+  Window 0 > Window 1 > OBJ Window > outside priority. No emulator
+  implementation source was used.
 
 - `#lcd-io-mosaic-function`: MOSAIC BG horizontal/vertical sizes are encoded as
   size minus one; bits 8..15 separately encode OBJ horizontal/vertical sizes;
