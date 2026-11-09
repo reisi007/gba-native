@@ -9,10 +9,12 @@ use super::{
     BG2HOFS_ADDR, BG2PA_ADDR, BG2PB_ADDR, BG2PC_ADDR, BG2PD_ADDR, BG2VOFS_ADDR, BG2X_ADDR,
     BG2Y_ADDR, BG3CNT_ADDR, BG3HOFS_ADDR, BG3PA_ADDR, BG3PB_ADDR, BG3PC_ADDR, BG3PD_ADDR,
     BG3VOFS_ADDR, BG3X_ADDR, BG3Y_ADDR, BLDALPHA_ADDR, BLDCNT_ADDR, BLDY_ADDR, DISPCNT_ADDR,
-    KEYINPUT_ADDR, KEYINPUT_RELEASED, MOSAIC_ADDR, RCNT_ADDR, SIOCNT_ADDR, SIODATA8_ADDR,
-    SIODATA32_H_ADDR, SIODATA32_L_ADDR, WAITCNT_ADDR, WIN0H_ADDR, WIN0V_ADDR, WIN1H_ADDR,
-    WIN1V_ADDR, WININ_ADDR, WINOUT_ADDR,
+    KEYCNT_ADDR, KEYINPUT_ADDR, KEYINPUT_RELEASED, MOSAIC_ADDR, RCNT_ADDR, SIOCNT_ADDR,
+    SIODATA8_ADDR, SIODATA32_H_ADDR, SIODATA32_L_ADDR, WAITCNT_ADDR, WIN0H_ADDR, WIN0V_ADDR,
+    WIN1H_ADDR, WIN1V_ADDR, WININ_ADDR, WINOUT_ADDR,
 };
+
+pub(super) mod keypad;
 
 pub const KEY_A: u16 = 1 << 0;
 pub const KEY_B: u16 = 1 << 1;
@@ -88,6 +90,7 @@ pub(super) struct IoState {
     irq: IrqState,
     sound: SoundState,
     timer: TimerState,
+    keycnt: u16,
 }
 
 impl IoState {
@@ -187,6 +190,7 @@ impl IoState {
             BLDY_ADDR => Ok(self.bldy),
             WAITCNT_ADDR => Ok(self.waitcnt),
             KEYINPUT_ADDR => Ok(KEYINPUT_RELEASED & !pressed_keys),
+            KEYCNT_ADDR => Ok(self.keycnt),
             SIODATA32_L_ADDR => Ok(self.siodata_l),
             SIODATA32_H_ADDR => Ok(self.siodata_h),
             SIOCNT_ADDR => Ok(self.siocnt | SIOCNT_SI_HIGH),
@@ -196,7 +200,12 @@ impl IoState {
         })
     }
 
-    pub(super) fn write16(&mut self, addr: u32, value: u16) -> Option<Result<()>> {
+    pub(super) fn write16(
+        &mut self,
+        addr: u32,
+        value: u16,
+        pressed_keys: u16,
+    ) -> Option<Result<()>> {
         Some(match addr {
             DISPCNT_ADDR => {
                 self.dispcnt = value;
@@ -321,6 +330,10 @@ impl IoState {
             }
             // KEYINPUT is read-only on hardware: the write has no effect.
             KEYINPUT_ADDR => Ok(()),
+            KEYCNT_ADDR => {
+                keypad::write(self, value, pressed_keys);
+                Ok(())
+            }
             // Serial data registers keep their documented storage value.
             SIODATA32_L_ADDR => {
                 self.siodata_l = value;
@@ -411,6 +424,7 @@ impl IoState {
     }
 
     pub(super) fn reset_group7(&mut self) {
+        self.keycnt = 0;
         self.bgcnt = [0; 4];
         self.bghofs = [0; 4];
         self.bgvofs = [0; 4];
@@ -472,6 +486,7 @@ impl IoState {
             }
         }
         bytes.extend_from_slice(&self.waitcnt.to_le_bytes());
+        bytes.extend_from_slice(&self.keycnt.to_le_bytes());
         bytes.extend_from_slice(&self.siodata_l.to_le_bytes());
         bytes.extend_from_slice(&self.siodata_h.to_le_bytes());
         bytes.extend_from_slice(&self.siocnt.to_le_bytes());

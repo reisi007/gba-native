@@ -1,7 +1,8 @@
 # Source layout
 
 - `crates/core/src/cart.rs`, `bus.rs`, `bus/backup.rs`, `bus/eeprom.rs`,
-  `cpu.rs`, `cpu/registers.rs`, `cpu/exception.rs`: header, explicit memory map,
+  `bus/input.rs`, `bus/io/keypad.rs`, `cpu.rs`, `cpu/registers.rs`,
+  `cpu/exception.rs`: header, explicit memory map,
   SRAM/flash/serial EEPROM device policies, CPU register banks, documented stack
   initialization and framed SWI/ARM exception entry/return.
 - `crates/core/src/ir.rs`, `ir/`, `decode/`, `interpret.rs`, `interpret/`,

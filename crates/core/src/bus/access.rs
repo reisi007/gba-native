@@ -312,7 +312,7 @@ impl Bus {
         } else {
             (current & 0x00FF) | (u16::from(value) << 8)
         };
-        self.io.write16(base, merged)
+        self.io.write16(base, merged, self.pressed_keys)
     }
 
     /// Applies the selected Game Pak ROM write policy to a store there.
@@ -421,7 +421,7 @@ impl Bus {
             if self.timer_write16(addr, value).is_some() {
                 return Ok(());
             }
-            if let Some(result) = self.io.write16(addr, value) {
+            if let Some(result) = self.io.write16(addr, value, self.pressed_keys) {
                 return result;
             }
             self.record_ignored_io_write(addr);

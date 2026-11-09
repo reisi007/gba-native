@@ -289,11 +289,14 @@ Entry consumes no guest instruction budget; guest-handler instructions and the
 modeled epilogue each consume one.
 
 This behavior-only model follows the public BIOS interrupt-handling contract;
-it is not BIOS execution or a claim to reproduce BIOS bytes. Three request
+it is not BIOS execution or a claim to reproduce BIOS bytes. Four request
 sources are generated: the VBlank request once per frame at the modelled
 line-160 transition, modelled timer overflow requests on `IF` bits 3..6, and the
 V-Counter match request on `IF` bit 2 (see the `VCOUNT` model below). The
-`0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/keypad/DMA IRQs,
+KEYCNT condition below can also latch the keypad request on `IF` bit 12, as
+documented in GBATEK's GBA Keypad Input and Interrupt Control sections; this
+model evaluates it only at the bounded input/control events described below.
+`0x03007FF8` interrupt-check flag, IRQ nesting, FIQ, serial/DMA IRQs,
 HBlank IRQs, hardware-accurate cycle timing and BIOS boot remain unsupported.
 Do not interpret this as general GBA interrupt compatibility.
 
@@ -336,16 +339,26 @@ Implemented regions and widths:
   BG2/BG3 affine `PA`..`PD` halfword read/write and `X`/`Y` 32-bit read/write;
   `WIN0H`/`WIN1H`/`WIN0V`/`WIN1V`/`WININ`/`WINOUT`/`MOSAIC` and
   `BLDCNT`/`BLDALPHA`/`BLDY` halfword read/write; KEYINPUT halfword read
-  (`0x04000130`); WAITCNT (`0x04000204`) halfword read/write, retaining only
+  (`0x04000130`) and KEYCNT halfword read/write (`0x04000132`, reserved bits
+  masked; GBATEK GBA Keypad Input); WAITCNT (`0x04000204`) halfword read/write, retaining only
   documented bits 0..13; and the four DMA channels `0x040000B0..0x040000DF`
   (see below). BG scroll registers are write-only; guest reads remain
   `UnsupportedIoRead`. The host injects a `u16`
   pressed mask through `Bus::set_pressed_keys`: bits 0..9 are A, B, Select,
   Start, Right, Left, Up, Down, R and L, respectively; unused bits are ignored.
   Guest reads see active-low KEYINPUT (`0x03FF` by default, all released), while
-  guest writes have no effect. This host setter provides no frame scheduler,
-  sampling guarantee or timing claim. The std-only `input` module adds the host
-  button/key-binding model, an 800x600 landscape and a portrait normalised touch
+  guest writes have no effect. KEYCNT selects keys in bits 0..9, enables IRQ in
+  bit 14 and selects OR/AND matching in bit 15; a match latches `IF` bit 12
+  (GBATEK GBA Interrupt Control). **Bounded event model (Design):**
+  evaluate on KEYCNT writes and changes to the host pressed mask; a match with
+  IRQ enabled latches IF bit 12. Repeating an identical host mask creates no
+  event, and clearing IF does not relatch while the condition remains true unless
+  a control write or key-state change occurs. No selected keys means no match in
+  either mode (Design choice, not a hardware claim). This is not polling,
+  frame/scan sampling, or a claim about IRQ cadence or hardware timing; the host
+  setter provides no frame scheduler or sampling guarantee. The std-only `input`
+  module adds the host button/key-binding model, an 800x600 landscape and a
+  portrait normalised touch
   layout, the persisted settings document and instruction-indexed input
    scripts. Rune and Android use that model for keyboard/touch buttons,
    fullscreen and settings. These are synthetic-only UIs: they do not accept a

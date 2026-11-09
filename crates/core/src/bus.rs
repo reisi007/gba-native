@@ -12,6 +12,7 @@ mod access;
 mod backup;
 mod dma;
 mod eeprom;
+mod input;
 mod io;
 mod irq;
 mod sound;
@@ -86,6 +87,7 @@ pub const BLDALPHA_ADDR: u32 = 0x0400_0052;
 pub const BLDY_ADDR: u32 = 0x0400_0054;
 pub const WAITCNT_ADDR: u32 = 0x0400_0204;
 pub const KEYINPUT_ADDR: u32 = 0x0400_0130;
+pub const KEYCNT_ADDR: u32 = 0x0400_0132;
 pub const KEYINPUT_RELEASED: u16 = 0x03FF;
 
 /// Serial I/O data and control registers, modelled as documented storage only.
@@ -336,15 +338,6 @@ impl Bus {
 
     pub fn affine_policy(&self) -> AffinePolicy {
         self.affine_policy
-    }
-
-    /// Sets the host-injected GBA key mask, where one means pressed.
-    ///
-    /// KEYINPUT reads expose this state active-low. Bits outside [`KEY_MASK`]
-    /// are ignored. This does not provide frame-synchronous sampling or a
-    /// timing guarantee.
-    pub fn set_pressed_keys(&mut self, pressed: u16) {
-        self.pressed_keys = pressed & KEY_MASK;
     }
 
     /// Snapshot of the write-only PSG register file at `0x04000060`.
