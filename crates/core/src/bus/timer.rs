@@ -164,37 +164,41 @@ impl TimerState {
     /// Returns the latched timer IRQ request bits (`IF` bits 3..6).
     pub(super) fn advance_cycles(&mut self, cycles: u32) -> u16 {
         let mut requests = 0u16;
-        for _ in 0..cycles {
-            let mut previous_overflow = false;
-            for index in 0..TIMER_COUNT {
-                let timer = &mut self.timers[index];
-                if !timer.running() {
-                    timer.prescaler_cycles = 0;
-                    previous_overflow = false;
-                    continue;
-                }
-                let increment = if index > 0 && timer.count_up() {
-                    previous_overflow
-                } else {
-                    timer.prescaler_cycles += 1;
-                    if timer.prescaler_cycles >= timer.prescaler() {
-                        timer.prescaler_cycles = 0;
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if !increment {
-                    previous_overflow = false;
-                    continue;
-                }
-                let (next, overflow) = timer.counter.overflowing_add(1);
-                timer.counter = if overflow { timer.reload } else { next };
-                if overflow && timer.control & CONTROL_IRQ != 0 {
+        let mut previous_overflows = 0u64;
+        // Timer order preserves same-batch cascades; the overflow count replaces
+        // the former per-cycle boolean without losing repeated reload events.
+        for (index, timer) in self.timers.iter_mut().enumerate() {
+            if !timer.running() {
+                timer.prescaler_cycles = 0;
+                previous_overflows = 0;
+                continue;
+            }
+            let increments = if index > 0 && timer.count_up() {
+                previous_overflows
+            } else {
+                let total = u64::from(timer.prescaler_cycles) + u64::from(cycles);
+                let divisor = u64::from(timer.prescaler());
+                timer.prescaler_cycles = (total % divisor) as u32;
+                total / divisor
+            };
+            let distance = 65_536 - u64::from(timer.counter);
+            // The first overflow reaches 0x10000; each subsequent period starts
+            // at the reload latch rather than at zero.
+            let overflows = if increments < distance {
+                0
+            } else {
+                1 + (increments - distance) / (65_536 - u64::from(timer.reload))
+            };
+            if overflows != 0 {
+                let remainder = (increments - distance) % (65_536 - u64::from(timer.reload));
+                timer.counter = timer.reload.wrapping_add(remainder as u16);
+                if timer.control & CONTROL_IRQ != 0 {
                     requests |= 1 << (index as u16 + TIMER_IRQ_FIRST_BIT);
                 }
-                previous_overflow = overflow;
+            } else {
+                timer.counter = timer.counter.wrapping_add(increments as u16);
             }
+            previous_overflows = overflows;
         }
         requests
     }

@@ -418,3 +418,32 @@ fn nominal_frame_budget_still_matches_the_documented_cycle_total() {
     assert_ne!(TIMER0_IRQ, 1);
     assert_ne!(TIMER1_IRQ, 1);
 }
+
+#[test]
+fn large_cycle_batch_matches_independently_calculated_cascade_state() {
+    let mut bus = bus();
+    write(&mut bus, TM0_L, 0xFFFC);
+    write(&mut bus, TM0_H, 0x00C1); // F/64 with IRQ
+    write(&mut bus, TM1_L, 0xFFFE);
+    write(&mut bus, TM1_H, 0x00C4); // count-up with IRQ
+    write(&mut bus, TM2_L, 0xFFFD);
+    write(&mut bus, TM2_H, 0x00C4);
+    write(&mut bus, 0x0400_010C, 0xFFFC);
+    write(&mut bus, TM3_H, 0x00C4);
+    bus.tick_cycles(17); // preserve a partial prescaler phase
+    bus.tick_cycles(u32::MAX);
+
+    // The combined batch yields 67,108,864 Timer 0 ticks and 16,777,216
+    // overflows. The cascade then produces 8,388,608 Timer 1 overflows,
+    // 2,796,202 Timer 2 overflows, and a final Timer 3 count of 0xFFFE.
+    assert_eq!(read(&bus, TM0_L), 0xFFFC);
+    assert_eq!(read(&bus, TM1_L), 0xFFFE);
+    assert_eq!(read(&bus, TM2_L), 0xFFFF);
+    assert_eq!(read(&bus, 0x0400_010C), 0xFFFE);
+    assert_eq!(read(&bus, IF) & 0x0078, 0x0078);
+
+    bus.tick_cycles(47);
+    assert_eq!(read(&bus, TM0_L), 0xFFFC, "16+47 cycles are still partial");
+    bus.tick_cycles(1);
+    assert_eq!(read(&bus, TM0_L), 0xFFFD, "the preserved phase reaches 64");
+}

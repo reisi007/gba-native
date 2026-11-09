@@ -2218,3 +2218,21 @@ on-device MediaPlayer playback remains outside CI.
   implementation source was used.
 - This is a bounded device model, not a save-device compatibility claim. Issue
   #8 remains open for RTC/GPIO and broader multi-profile persistence.
+
+## Round: batched timer advancement (2026-11-09)
+
+- Replaced per-nominal-cycle timer iteration with fixed-size arithmetic over the
+  four timers. Prescaler remainder, repeated reload overflow counts, same-batch
+  cascades, disabled timers and sticky IRQ requests retain their prior model
+  semantics; this is an optimization, not a timing-model expansion.
+- The large-batch boundary test preserves a partial prescaler phase, advances
+  `u32::MAX` additional cycles through all four timers, and checks independently
+  calculated counters and IRQ bits. The timer model target passes 18/18 and the
+  workspace contract target passes 2/2 with the updated test inventory.
+- A fresh-target `./scripts/full.sh` passed, including debug/release workspace
+  tests, Ratchet fast/slow, formatting, Clippy, demo and synthetic AOT proof
+  (`native_vs_reference=match`). The hard 500-line source limit and
+  `git diff --check` passed.
+- Supplied nominal cycles remain a design input, not a hardware-timing claim.
+  This is a bounded optimization for issue #4; the broader cycle-scheduling and
+  peripheral acceptance criteria remain open.
