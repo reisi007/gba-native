@@ -14,6 +14,148 @@ fn temp_root(tag: &str) -> PathBuf {
     path
 }
 
+#[test]
+fn named_profiles_isolate_slots_defaults_and_restart() {
+    let root = temp_root("profiles");
+    let a = SaveLibrary::for_profile(&root, "alice").unwrap();
+    let b = SaveLibrary::for_profile(&root, "bob").unwrap();
+    let legacy = SaveLibrary::new(&root);
+    legacy.store(DIGEST, "compat", b"legacy").unwrap();
+    assert_eq!(
+        SaveLibrary::for_profile(&root, "default")
+            .unwrap()
+            .load(DIGEST, "compat")
+            .unwrap(),
+        b"legacy"
+    );
+    assert_eq!(
+        fs::read(root.join(DIGEST).join("compat.sav")).unwrap(),
+        b"legacy"
+    );
+    assert_eq!(
+        fs::read(root.join(DIGEST).join(OWNER_FILE)).unwrap(),
+        owner_marker(DIGEST).as_bytes()
+    );
+    SaveLibrary::for_profile(&root, "default")
+        .unwrap()
+        .store(DIGEST, "default-write", b"same path")
+        .unwrap();
+    assert_eq!(legacy.load(DIGEST, "default-write").unwrap(), b"same path");
+    a.store(DIGEST, "one", b"a").unwrap();
+    b.store(DIGEST, "one", b"b").unwrap();
+    assert_eq!(
+        fs::read_to_string(
+            root.join(DIGEST)
+                .join("profiles/alice/.gba-native-profile-owner")
+        )
+        .unwrap(),
+        format!(
+            "gba-native-save-profile-owner-v1\nrom-sha256={DIGEST}\nprofile-id=alice\nsave-format=raw-backup-v1\n"
+        )
+    );
+    assert_eq!(a.load(DIGEST, "one").unwrap(), b"a");
+    assert_eq!(b.load(DIGEST, "one").unwrap(), b"b");
+    assert_eq!(a.list(DIGEST).unwrap(), ["one"]);
+    a.set_default(DIGEST, "one").unwrap();
+    b.store(DIGEST, "two", b"c").unwrap();
+    assert_eq!(b.list(DIGEST).unwrap(), ["one", "two"]);
+    b.set_default(DIGEST, "two").unwrap();
+    a.delete(DIGEST, "one").unwrap();
+    assert_eq!(b.default_slot(DIGEST).unwrap().as_deref(), Some("two"));
+    assert_eq!(
+        SaveLibrary::for_profile(&root, "bob")
+            .unwrap()
+            .load(DIGEST, "one")
+            .unwrap(),
+        b"b"
+    );
+    assert_eq!(legacy.list(DIGEST).unwrap(), ["compat", "default-write"]);
+    assert_eq!(
+        SaveLibrary::for_profile(&root, "default").unwrap().root(),
+        root
+    );
+    for invalid in ["", "..", "../x", "a/b", "x".repeat(33).as_str()] {
+        assert!(matches!(
+            SaveLibrary::for_profile(&root, invalid),
+            Err(SaveError::InvalidProfileId)
+        ));
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn wrong_profile_marker_fails_closed_without_changing_profile_data() {
+    let root = temp_root("wrong-profile");
+    let lib = SaveLibrary::for_profile(&root, "alice").unwrap();
+    lib.store(DIGEST, "slot", b"keep").unwrap();
+    let dir = root.join(DIGEST).join("profiles/alice");
+    let marker = dir.join(".gba-native-profile-owner");
+    fs::write(
+        &marker,
+        b"gba-native-save-profile-owner-v1\nrom-sha256=wrong\nprofile-id=bob\n",
+    )
+    .unwrap();
+    for result in [
+        lib.store(DIGEST, "slot", b"change"),
+        lib.delete(DIGEST, "slot"),
+        lib.set_default(DIGEST, "slot"),
+    ] {
+        assert!(matches!(result, Err(SaveError::UnownedDirectory)));
+    }
+    assert_eq!(fs::read(dir.join("slot.sav")).unwrap(), b"keep");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_namespace_symlinks_are_rejected_for_reads_and_writes() {
+    let root = temp_root("profile-symlink");
+    let lib = SaveLibrary::for_profile(&root, "alice").unwrap();
+    lib.store(DIGEST, "slot", b"safe").unwrap();
+    let outside = root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::remove_dir_all(root.join(DIGEST).join("profiles")).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(DIGEST).join("profiles")).unwrap();
+    assert!(matches!(lib.list(DIGEST), Err(SaveError::UnownedDirectory)));
+    assert!(matches!(
+        lib.load(DIGEST, "slot"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert!(matches!(
+        lib.store(DIGEST, "slot", b"changed"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    fs::remove_file(root.join(DIGEST).join("profiles")).unwrap();
+    let profiles = root.join(DIGEST).join("profiles");
+    fs::create_dir(&profiles).unwrap();
+    std::os::unix::fs::symlink(&outside, profiles.join("alice")).unwrap();
+    assert!(matches!(lib.list(DIGEST), Err(SaveError::UnownedDirectory)));
+    assert!(matches!(
+        lib.load(DIGEST, "slot"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert!(matches!(
+        lib.store(DIGEST, "slot", b"changed"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    fs::remove_dir_all(root.join(DIGEST)).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(DIGEST)).unwrap();
+    assert!(matches!(lib.list(DIGEST), Err(SaveError::UnownedDirectory)));
+    assert!(matches!(
+        lib.load(DIGEST, "slot"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert!(matches!(
+        lib.store(DIGEST, "slot", b"changed"),
+        Err(SaveError::UnownedDirectory)
+    ));
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    fs::remove_file(root.join(DIGEST)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
 const DIGEST: &str = "8a7667d43d9ec0333a5a7c0a032837919e101ca1c1893bdf5f95f51b27555539";
 const OTHER: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 

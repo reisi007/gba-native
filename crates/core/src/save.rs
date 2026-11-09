@@ -22,6 +22,7 @@ pub const MAX_SAVE_LEN: usize = 128 * 1024;
 /// Maximum slot-name length.
 pub const MAX_SLOT_NAME: usize = 32;
 const OWNER_FILE: &str = ".gba-native-owner";
+mod profile;
 const MAX_TEMP_ATTEMPTS: usize = 128;
 
 /// Save-library failures.
@@ -30,6 +31,7 @@ pub enum SaveError {
     Io(io::Error),
     InvalidRomDigest,
     InvalidSlotName,
+    InvalidProfileId,
     InvalidSaveLength(usize),
     UnknownSlot(String),
     UnownedDirectory,
@@ -46,6 +48,9 @@ impl std::fmt::Display for SaveError {
                 formatter,
                 "slot name must be 1..={MAX_SLOT_NAME} chars of A-Z, a-z, 0-9, '.', '_' or '-'"
             ),
+            Self::InvalidProfileId => {
+                write!(formatter, "profile id must be a safe slot-style name")
+            }
             Self::InvalidSaveLength(len) => write!(
                 formatter,
                 "save image length {len} is not 1..={MAX_SAVE_LEN} bytes"
@@ -98,11 +103,15 @@ pub fn valid_slot_name(name: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct SaveLibrary {
     root: PathBuf,
+    profile: Option<String>,
 }
 
 impl SaveLibrary {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            profile: None,
+        }
     }
 
     #[must_use]
@@ -121,11 +130,11 @@ impl SaveLibrary {
         if !valid_slot_name(slot) {
             return Err(SaveError::InvalidSlotName);
         }
-        Ok(self.rom_dir(digest)?.join(format!("{slot}.sav")))
+        Ok(self.data_dir(digest)?.join(format!("{slot}.sav")))
     }
 
     fn default_path(&self, digest: &str) -> SaveResult<PathBuf> {
-        Ok(self.rom_dir(digest)?.join("default"))
+        Ok(self.data_dir(digest)?.join("default"))
     }
 
     fn mutation_lock(&self, digest: &str) -> SaveResult<fs::File> {
@@ -223,7 +232,9 @@ impl SaveLibrary {
 
     /// Existing slots, sorted by name.
     pub fn list(&self, digest: &str) -> SaveResult<Vec<String>> {
-        let dir = self.rom_dir(digest)?;
+        let Some(dir) = profile::read_dir(&self.rom_dir(digest)?, self.profile.as_deref())? else {
+            return Ok(Vec::new());
+        };
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -247,11 +258,14 @@ impl SaveLibrary {
     }
 
     pub fn exists(&self, digest: &str, slot: &str) -> SaveResult<bool> {
-        Ok(self.slot_path(digest, slot)?.is_file())
+        let path = self.slot_path(digest, slot)?;
+        self.check_read_profile(digest)?;
+        Ok(path.is_file())
     }
 
     pub fn load(&self, digest: &str, slot: &str) -> SaveResult<Vec<u8>> {
         let path = self.slot_path(digest, slot)?;
+        self.check_read_profile(digest)?;
         let file = match fs::File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -279,6 +293,7 @@ impl SaveLibrary {
         fs::create_dir_all(&self.root)?;
         let _mutation_lock = self.mutation_lock(digest)?;
         self.claim_for_store(digest)?;
+        self.ensure_profile(digest)?;
         write_atomic(&path, bytes)?;
         if self.default_slot(digest)?.is_none() {
             self.set_default_unlocked(digest, slot)?;
@@ -290,6 +305,7 @@ impl SaveLibrary {
         let path = self.slot_path(digest, slot)?;
         let _mutation_lock = self.mutation_lock(digest)?;
         self.require_owned(digest)?;
+        self.require_profile(digest)?;
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -314,18 +330,19 @@ impl SaveLibrary {
 
     fn set_default_unlocked(&self, digest: &str, slot: &str) -> SaveResult<()> {
         self.require_owned(digest)?;
+        self.require_profile(digest)?;
         if !self.exists(digest, slot)? {
             return Err(SaveError::UnknownSlot(slot.to_owned()));
         }
         let path = self.default_path(digest)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         write_atomic(&path, slot.as_bytes())
     }
 
     pub fn default_slot(&self, digest: &str) -> SaveResult<Option<String>> {
         let path = self.default_path(digest)?;
+        if !self.check_read_profile(digest)? {
+            return Ok(None);
+        }
         match fs::read_to_string(&path) {
             Ok(text) => {
                 let slot = text.trim();

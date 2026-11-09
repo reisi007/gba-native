@@ -2335,3 +2335,22 @@ on-device MediaPlayer playback remains outside CI.
   Clippy and Ratchet (9/9) pass. A third fresh-target `./scripts/full.sh` also
   passes all gates, including debug/release tests and the synthetic AOT proof
   (`native_vs_reference=match`).
+
+## Round: native save profiles (2026-11-09)
+
+- `SaveLibrary::for_profile` adds isolated native slots/defaults under
+  `<root>/<rom-sha256>/profiles/<profile-id>/`. Profile markers bind the ROM
+  digest, profile ID and `raw-backup-v1`; the default profile keeps the existing
+  save paths and `.gba-native-owner` marker. Unsafe or symlinked profile path
+  components fail closed, and named-profile mutations retain the per-ROM lock.
+- Focused tests cover profile isolation, defaults/deletion, reload, legacy-path
+  compatibility, invalid IDs, wrong-marker preservation and symlink rejection.
+  `cargo test -p gba-native-core save::tests` passes 12/12; the workspace
+  contract passes 2/2 with 684 total / 677 selected tests (197 core library
+  tests). Formatting, `git diff --check` and the 500-line source limit pass.
+  A fresh-target `./scripts/full.sh` also passes: hard size limit, Ratchet fast
+  and slow, formatting, Clippy, debug/release tests, demo and the synthetic AOT
+  proof (`native_vs_reference=match`).
+  This verifies only native filesystem namespace behavior: browser IndexedDB
+  profile isolation and transactional persistence remain unimplemented and
+  unverified. Issue #8 remains open.
