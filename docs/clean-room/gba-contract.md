@@ -853,7 +853,7 @@ is not officially defined as predictable.
 | Add/subtract | `ADD`/`SUB` register and 3-bit immediate, flags set | — |
 | Immediate | `MOV`, `CMP`, `ADD`, `SUB` with 8-bit immediate | — |
 | ALU | `AND`, `EOR`, `LSL`, `LSR`, `ASR`, `ADC`, `SBC`, `ROR`, `TST`, `NEG`, `CMP`, `CMN`, `ORR`, `BIC`, `MVN`, `MUL`; shift amount from register low byte | — |
-| High register | documented high-register `ADD`, `CMP`, `MOV` (at least one of `Rd`/`Rs` high) and `BX` including PC; low/low `MOV`/`CMP` as an explicit **Design** extension | low/low `ADD` (documented reserved encoding), ARMv5 `BLX` register |
+| High register | documented high-register `ADD`, `CMP`, `MOV` (at least one of `Rd`/`Rs` high) and `BX` including PC; low/low `MOV`/`CMP` as an explicit **Design** extension | low/low `ADD` (documented reserved encoding), BX with nonzero unused bits 2-0, ARMv5 `BLX` register |
 | Address | `ADR`, `ADD Rd,PC,#imm`, `ADD Rd,SP,#imm`, `ADD`/`SUB SP,#imm`; SP-relative word `LDR`/`STR` | — |
 | PC-relative | `LDR` literal | — |
 | Word/byte | register-offset `LDR`/`STR`/`LDRB`/`STRB`; immediate-offset word/byte forms | — |

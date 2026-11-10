@@ -2427,3 +2427,13 @@ on-device MediaPlayer playback remains outside CI.
   Android multitouch interaction was tested. Rune still uses the pinned
   runtime's primary-finger touch path, and browser/mobile touch evidence remains
   open. Issue #25 remains open.
+
+## Round: ARMv4T Thumb decoder space audit (2026-11-10)
+
+- S1's documented ARMv4T Thumb formats are covered; remaining explicit rejects
+  are reserved/undefined forms, ARMv5 BLX, and bounded empty PUSH/POP. Halfword
+  multiply is ARMv5TE and UMAAL is ARMv6, so neither is an ARMv4T gap.
+- `crates/core/tests/thumb_encoding_space.rs` checks all 65,536 halfwords
+  against an independent format classifier and validates rejection metadata,
+  including BX's unused destination bits.
+  This is decoder-space, not hardware-conformance evidence; issue #5 remains open.

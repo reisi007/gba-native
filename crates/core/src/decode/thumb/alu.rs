@@ -163,6 +163,14 @@ pub(super) fn decode_hi_register(addr: u32, raw: u32) -> DecodeResult {
                     "Thumb BLX register (ARMv5) is not implemented",
                 ));
             }
+            if raw & 0x0007 != 0 {
+                return Err(unsupported(
+                    addr,
+                    true,
+                    raw,
+                    "Thumb BX requires its unused destination bits [2:0] to be zero",
+                ));
+            }
             Ok(make(addr, raw, Op::Bx { rm: rs }))
         }
     }

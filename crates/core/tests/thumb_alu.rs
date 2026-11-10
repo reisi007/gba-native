@@ -311,11 +311,13 @@ fn high_register_operations_read_pc_plus_4_and_never_set_flags_for_add_mov() {
 }
 
 #[test]
-fn low_low_add_is_reserved_and_blx_register_is_armv5() {
+fn reserved_high_register_and_exchange_encodings_are_rejected() {
     let error = decode_thumb(0, 0x4400).expect_err("low/low ADD reserved");
     assert!(format!("{error}").contains("reserved"), "{error}");
     let error = decode_thumb(0, 0x4780).expect_err("BLX register");
     assert!(format!("{error}").contains("BLX"), "{error}");
+    let error = decode_thumb(0, 0x4771).expect_err("BX fixed destination bits");
+    assert!(format!("{error}").contains("bits [2:0]"), "{error}");
 }
 
 #[test]
