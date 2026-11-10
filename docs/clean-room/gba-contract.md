@@ -624,8 +624,16 @@ independently of routing, and retains the synthetic active state after the bit
 is cleared. This is bounded host state, not hardware audio evidence. Standalone
 `render_psg` retains stateless
 register-snapshot volume behavior. Channel 3 dual-bank/64-digit playback and
-wave-RAM bank access, wave-channel envelopes, sweep, length counters and full
-PSG/timing behavior remain unsupported. The renderer does not
+wave-RAM bank access, wave-channel envelopes, length counters and full PSG/timing
+behavior remain unsupported. Channel 1 has only a sample-quantized sweep
+approximation: NR10 period units map to 256 samples each on the fixed host
+32,768-Hz sample clock, and the documented integer formula updates raw frequency
+setting `n` before the existing square pitch conversion. This is not hardware
+sweep timing or exact register mutation. Distinct later frequency-register
+values rebase the mixer state, but same-value writes are invisible to snapshots.
+As a host design policy, an update above 2047 disables modeled Channel 1 rather
+than wrapping; this is not a hardware overflow claim. Length behavior remains
+unsupported; Channel 2 has no sweep. The renderer does not
 consume FIFO samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - The SRAM/flash backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by

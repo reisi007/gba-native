@@ -8,24 +8,18 @@
 //! browser frontend can feed the same samples to WebAudio.
 //!
 //! **Explicit limits.** [`SAMPLE_RATE`] is a fixed host render rate, not a GBA
-//! sample-clock claim. PSG envelope retriggers use bounded latest-event snapshots:
-//! triggers between host observations coalesce, and `advance_bus` observes once
-//! per call. This is an approximation, not hardware timing. Direct Sound consumes one signed 8-bit FIFO byte per
-//! timer-0/1 overflow using the documented
-//! `16.777216 MHz / (prescaler * (65536 - reload))` rate, but the timer model
-//! itself advances on an instruction budget, not hardware cycles. A FIFO
-//! underrun holds the last sample instead of inventing silence.
-//!
-//! The bus-backed engine observes trigger events at each bus-advance call, even
-//! when no sample is due. Register-only `AudioEngine::advance` variants lazily
-//! latch the tracked square/noise-channel restart bits from snapshots but cannot
-//! recover triggers hidden between snapshots; stateless [`render_psg`] has no
-//! cross-call state.
+//! sample-clock claim. PSG envelope triggers are bounded latest-event snapshots;
+//! batch observations coalesce. Direct Sound consumes timer-0/1 overflow samples
+//! at the documented nominal rate, but timers advance by instruction budget.
+//! Underrun holds the last sample. Bus advance observes triggers without a due
+//! sample; register-only advance lazily latches restart bits but misses hidden
+//! triggers. Stateless [`render_psg`] has no cross-call state; this is only a host approximation.
 
 mod direct_sound;
 mod format;
 mod noise;
 mod square;
+mod sweep;
 
 #[cfg(test)]
 mod tests;
@@ -38,6 +32,7 @@ pub use format::{render_tone, wav_bytes};
 use noise::noise_frequency;
 use noise::{noise_sample, noise_seed};
 use square::{square_frequency, square_sample};
+use sweep::FrequencySweep;
 
 /// Fixed host render rate. This is not a claim about the GBA sample clock.
 pub const SAMPLE_RATE: u32 = 32_768;
@@ -138,6 +133,7 @@ struct PsgMixer {
     square_active: [bool; 2],
     square_bus_observed: [bool; 2],
     envelopes: [Option<PsgEnvelope>; 3],
+    sweep: Option<FrequencySweep>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -161,6 +157,7 @@ impl PsgMixer {
             square_active: [false; 2],
             square_bus_observed: [false; 2],
             envelopes: [None; 3],
+            sweep: None,
         }
     }
 
@@ -174,11 +171,21 @@ impl PsgMixer {
         for (index, offset) in [0x04, 0x0C].into_iter().enumerate() {
             if !self.square_bus_observed[index] && u16_at(regs, offset) & 0x8000 != 0 {
                 self.square_active[index] = true;
+                if index == 0 && self.sweep.is_none() {
+                    self.sweep = Some(FrequencySweep::new(regs[0], u16_at(regs, 0x04) & 0x07ff));
+                }
             }
         }
+        let raw_frequency = u16_at(regs, 0x04) & 0x07ff;
+        if let Some(sweep) = self.sweep.as_mut() {
+            sweep.observe_registers(regs[0], raw_frequency);
+        }
+        let sweep_frequency = self.sweep.map(FrequencySweep::frequency);
         if channel_enabled(regs, 0)
             && self.square_active[0]
-            && let Some(frequency) = square_frequency(regs, 0x04)
+            && let Some(frequency) = sweep_frequency
+                .map(|value| 131_072.0 / f32::from(2048 - value))
+                .or_else(|| square_frequency(regs, 0x04))
         {
             mixed += square_sample(regs, 0x02, self.phases[0], self.envelope_volume(0));
             self.phases[0] = (self.phases[0] + frequency / SAMPLE_RATE as f32).fract();
@@ -201,6 +208,11 @@ impl PsgMixer {
         }
         if !self.noise_bus_observed && u16_at(regs, 0x1C) & 0x8000 != 0 {
             self.noise_active = true;
+        }
+        if let Some(sweep) = self.sweep.as_mut()
+            && !sweep.advance()
+        {
+            self.square_active[0] = false;
         }
         if channel_enabled(regs, 3) && self.noise_active {
             let envelope_volume = self.envelope_volume(2);
@@ -283,6 +295,22 @@ impl PsgMixer {
         }
     }
 
+    fn observe_sweep(&mut self, event: crate::bus::EnvelopeTrigger, regs: &[u8]) {
+        if self.envelopes[0].is_some_and(|state| state.sequence == event.sequence) {
+            return;
+        }
+        self.sweep = event
+            .triggered
+            .then(|| FrequencySweep::new(regs[0], u16_at(regs, 0x04) & 0x07ff));
+    }
+
+    fn observe_bus(&mut self, bus: &Bus) {
+        let events = bus.sound_envelope_triggers();
+        let regs = bus.sound_registers();
+        self.observe_sweep(events[0], &regs);
+        self.observe_envelopes(events);
+    }
+
     fn advance_envelopes(&mut self, frames: usize) {
         for envelope in self.envelopes.iter_mut().flatten() {
             if envelope.period == 0 {
@@ -333,16 +361,10 @@ pub fn render_psg(regs: &[u8], frames: usize, settings: AudioSettings) -> Vec<i1
 
 /// Stateful mixer that advances with the guest instruction timeline.
 ///
-/// Call [`AudioEngine::advance_instruction_bus`] after every guest instruction
-/// when the live bus is available: it renders PSG and Direct Sound from current
-/// guest state, consumes FIFO A/B bytes at the timer-selected rate and requests
-/// the half-empty sound DMA refill. [`AudioEngine::advance_instruction`] remains
-/// the register-only PSG path for tests that have no bus.
-///
-/// Phase, LFSR, FIFO position and resampling accumulators persist across calls,
-/// so a guest pitch, volume, timer or FIFO change is heard at the next generated
-/// sample, not after a fixed snapshot interval. One instruction is attributed
-/// three nominal cycles, matching the bus's documented frame/timer mapping.
+/// Bus advance renders PSG and Direct Sound, consuming timer-selected FIFO
+/// samples and requesting half-empty refills; register-only advance renders PSG.
+/// Phases, FIFO position and resampling persist across calls, so changes apply at
+/// the next generated sample. One instruction is attributed three nominal cycles.
 #[derive(Clone, Debug)]
 pub struct AudioEngine {
     settings: AudioSettings,
@@ -407,18 +429,16 @@ impl AudioEngine {
     /// and the Sound A/B FIFOs. FIFO samples are consumed at the timer rate and
     /// a sound-timed DMA burst is requested once a FIFO is at most half full.
     pub fn advance_instruction_bus(&mut self, bus: &mut Bus) -> Result<()> {
-        self.psg.observe_envelopes(bus.sound_envelope_triggers());
+        self.psg.observe_bus(bus);
         let frames = self.due_frames(1);
         self.render_bus(bus, frames)
     }
 
     /// Advance PSG and Direct Sound by many instructions in one step.
     ///
-    /// Batch variant for callers that already hold a bus and want one register
-    /// snapshot for several instructions; generated dispatchers call
-    /// [`AudioEngine::advance_instruction_bus`] at every instruction boundary.
+    /// Batch variant; generated dispatchers observe every guest boundary.
     pub fn advance_bus(&mut self, bus: &mut Bus, instructions: u64) -> Result<()> {
-        self.psg.observe_envelopes(bus.sound_envelope_triggers());
+        self.psg.observe_bus(bus);
         let frames = self.due_frames(instructions);
         self.render_bus(bus, frames)
     }

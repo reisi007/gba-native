@@ -92,6 +92,12 @@ Relevant anchors actually consulted for this milestone:
   SOUND3CNT_H volume codes 0=mute, 1=100%, 2=50%, 3=25%, with bit 15 forcing
   75%. Consulted 2026-11-10 at <https://problemkaputt.de/gbatek.htm>; retrieval
   not retained.
+- `#gbasoundchannel1squarewave`: NR10 shift bits 0..2, direction bit 3
+  (increase/decrease), period bits 4..6 in 7.8 ms units with zero disabling
+  sweep, and `X(t)=X(t-1) +/- X(t-1)/2^n` applied to the raw frequency setting.
+  Consulted 2026-11-10 at <https://mgba-emu.github.io/gbatek/>; retrieval not
+  separately retained or hashed. The implementation's 256-host-sample period is
+  a host approximation at 32,768 samples/s, not source timing evidence.
 - `#gba-cart-io-port-gpio`: GPIO data/direction/control registers at ROM-window
   offsets `C4h`/`C6h`/`C8h`, low-four-bit data and direction, control bit 0, and
   the documented 16-/32-bit ROM-store access forms. Consulted at

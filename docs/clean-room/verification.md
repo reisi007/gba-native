@@ -15,6 +15,30 @@ instead of skipping the gate.
 
 ## Automated checks
 
+### Channel 1 sample-quantized frequency sweep (2026-11-10)
+
+- The host PSG mixer applies Channel 1 NR10 sweep only. It uses the documented
+  integer update `n +/- (n >> shift)` on the raw 11-bit frequency setting,
+  including shift zero as a full-frequency delta;
+  nonzero NR10 period units are 256 samples each at the fixed host 32,768-Hz
+  clock. Period zero leaves pitch unchanged. Overflow above 2047 disables the
+  modeled Channel 1 without wrapping. Channel 2 is unchanged.
+- `audio/sweep.rs` unit tests cover independent increase/decrease expectations,
+  shift-zero arithmetic, the exact 256-sample boundary, zero period, overflow,
+  and a live frequency-register rebase. Bus-backed trigger sequences
+  initialize/reset this private state; register-only `AudioEngine` lazily
+  initializes from a set restart bit. A bus test verifies trigger initialization
+  and sound-reset clearing. Distinct changed register values rebase the sweep; a
+  same-value write cannot be inferred without a bus write event.
+  Trigger coalescing follows the existing latest-observation policy; standalone
+  stateless `render_psg` cannot preserve sweep state.
+- The focused audio target passes 35/35. Fresh-target `./scripts/full.sh` passes:
+  hard 500-line gate, Ratchet fast/slow, fmt, Clippy, debug/release tests, demo
+  and synthetic AOT proof (`native_vs_reference=match`, zero fallbacks). The
+  workspace inventory is 696 tests (208 core library tests). This is a bounded
+  host render approximation, not hardware sweep timing, exact register mutation,
+  length behavior or audio conformance.
+
 ### Source size and quality gates
 
 `src/bin/quality-counter` is the single maintained-Rust counter. It scans every
