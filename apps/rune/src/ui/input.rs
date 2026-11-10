@@ -30,7 +30,7 @@ pub(super) fn touch_drag(state: &mut AppState, drag: &mut Drag, _tx: &mut Tx) {
         return;
     }
 
-    let enabled = state.model.page() == Page::Demo
+    let enabled = matches!(state.model.page(), Page::Demo | Page::InputTester)
         && !state.model.settings().fullscreen
         && state.model.settings().touch_controls
         && drag.w > 0.0

@@ -18,12 +18,15 @@ pub enum Page {
     Settings,
     /// Host-side synthetic save-slot manager.
     Saves,
+    /// Repository-generated synthetic guest input test.
+    InputTester,
 }
 
 /// App state that is independent of a particular Rune scene or platform.
 #[derive(Debug)]
 pub struct RuneAppModel {
     demo: Result<RgbaImage, String>,
+    input_tester: Option<Result<RgbaImage, String>>,
     settings: Settings,
     page: Page,
     details_visible: bool,
@@ -43,6 +46,7 @@ impl RuneAppModel {
     fn from_demo_result(demo: Result<RgbaImage, String>) -> Self {
         Self {
             demo,
+            input_tester: None,
             settings: Settings::default(),
             page: Page::Demo,
             details_visible: false,
@@ -61,6 +65,9 @@ impl RuneAppModel {
 
     pub fn set_page(&mut self, page: Page) {
         self.page = page;
+        if page == Page::InputTester && self.input_tester.is_none() {
+            self.run_input_tester();
+        }
     }
 
     /// Whether the Rune layer should expose additional snapshot details.
@@ -80,6 +87,12 @@ impl RuneAppModel {
     /// The synthetic source image, or its load diagnostic.
     pub fn demo(&self) -> Result<&RgbaImage, &str> {
         self.demo.as_ref().map_err(String::as_str)
+    }
+
+    pub fn input_tester(&self) -> Option<Result<&RgbaImage, &str>> {
+        self.input_tester
+            .as_ref()
+            .map(|result| result.as_ref().map_err(String::as_str))
     }
 
     #[must_use]
@@ -149,8 +162,8 @@ impl RuneAppModel {
         self.refresh_input();
     }
 
-    /// Current held-button mask, suitable for `Bus::set_pressed_keys` if a
-    /// future runner explicitly consumes it. The current Rune demo does not.
+    /// Current host-held button mask. The Input Tester page injects this into
+    /// the generated synthetic guest; the static Demo page does not consume it.
     #[must_use]
     pub const fn input(&self) -> InputState {
         self.input
@@ -174,13 +187,30 @@ impl RuneAppModel {
     /// does not open or resize an operating-system surface. Other settings are
     /// retained and displayed by the settings page, but do not trigger host
     /// effects here. The shared shell always draws touch controls, so the host
-    /// must honor `touch_controls` when routing pointer events. This model does
-    /// not provide audio playback, settings persistence, save slots or guest
-    /// execution.
+    /// must honor `touch_controls` when routing pointer events. Only the Input
+    /// Tester page runs a generated synthetic guest; this model does not load
+    /// arbitrary ROMs or provide guest audio/save emulation.
     pub fn composed_image(&self) -> Result<RgbaImage, String> {
         match self.page {
             Page::Settings => Ok(ui::settings_page(&self.settings)),
             Page::Saves => Ok(ui::saves_page(&[], 0)),
+            Page::InputTester => {
+                let image = self
+                    .input_tester
+                    .as_ref()
+                    .expect("page selection generates image")
+                    .as_ref()
+                    .map_err(Clone::clone)?;
+                if self.settings.fullscreen {
+                    Ok(ui::fullscreen(image))
+                } else {
+                    Ok(ui::shell_with_controls(
+                        image,
+                        self.input.mask(),
+                        self.settings.touch_controls,
+                    ))
+                }
+            }
             Page::Demo => {
                 let demo = self.demo.as_ref().map_err(|error| error.clone())?;
                 if self.settings.fullscreen {
@@ -204,7 +234,21 @@ impl RuneAppModel {
         );
         let next = InputState::from_mask(keyboard.mask() | self.button_input.mask());
         self.input_edges.update(next.mask());
+        let changed = self.input.mask() != next.mask();
         self.input = next;
+        if changed {
+            if self.page == Page::InputTester {
+                self.run_input_tester();
+            } else {
+                self.input_tester = None;
+            }
+        }
+    }
+
+    fn run_input_tester(&mut self) {
+        self.input_tester = Some(
+            frontend::input_tester_image(self.input.mask()).map_err(|error| error.to_string()),
+        );
     }
 }
 
@@ -230,6 +274,46 @@ mod tests {
         assert_eq!(model.settings(), &Settings::default());
         assert_eq!(model.input().mask(), 0);
         assert_eq!(model.demo().unwrap().guest_budget(), 7);
+    }
+
+    #[test]
+    fn input_tester_cache_tracks_guest_input_and_release() {
+        let mut model = RuneAppModel::default();
+        model.set_page(Page::InputTester);
+        let idle = model
+            .input_tester()
+            .unwrap()
+            .unwrap()
+            .rgb_sha256()
+            .to_owned();
+        model.set_pressed_key_codes(["KeyZ"]);
+        let pressed = model
+            .input_tester()
+            .unwrap()
+            .unwrap()
+            .rgb_sha256()
+            .to_owned();
+        assert_ne!(idle, pressed);
+        assert_eq!(
+            pressed,
+            frontend::input_tester_image(Button::A.bit())
+                .unwrap()
+                .rgb_sha256()
+        );
+        model.clear_input();
+        assert_eq!(idle, model.input_tester().unwrap().unwrap().rgb_sha256());
+        assert_eq!(idle, frontend::input_tester_image(0).unwrap().rgb_sha256());
+
+        model.set_page(Page::Demo);
+        model.set_pressed_key_codes(["KeyZ"]);
+        assert!(model.input_tester().is_none());
+        model.set_page(Page::InputTester);
+        assert_eq!(
+            model.input_tester().unwrap().unwrap().rgb_sha256(),
+            frontend::input_tester_image(Button::A.bit())
+                .unwrap()
+                .rgb_sha256()
+        );
     }
 
     #[test]

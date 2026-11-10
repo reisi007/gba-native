@@ -17,6 +17,7 @@ pub mod viewport;
 pub use features::{FEATURE_COUNT, FEATURE_IDS, Feature, ids as feature_ids, ids_of};
 pub use image::{
     ImageError, LoadError, MAX_IMAGE_PIXELS, RgbaImage, convert_rgb888_to_rgba, demo_image,
+    input_tester_image,
 };
 pub use player::{ENV_OVERRIDE, Player, detect as detect_player, play as play_wav};
 pub use saves::{IMPORT_FILE, MAX_SAVE_BYTES, SYNTHETIC_ROM_SHA, SaveSlot, SaveSlots};

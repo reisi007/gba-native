@@ -11,17 +11,20 @@ assistive-technology behavior.
 This isolated package shares one Rune `AppSpec`, view and host-state model across
 Linux, macOS, Windows, browser/WASM and Rune's iOS target. It pins Rune to
 `bca47138e9c31a7870a79272ee2523b592b1248d` and depends directly on
-`crates/core`, not on the root facade or AOT tooling. The UI presents the core's
-synthetic snapshot only: it does not load a ROM, run guest gameplay, or produce
+`crates/core`, not on the root facade or AOT tooling. The Demo page presents the
+core's static synthetic snapshot. The Input Tester page runs the
+repository-generated input-test fixture with the current host input, stopping
+after one completed guest drawing pass (capped at 150,000 instructions). It does
+not load arbitrary ROMs, boot a game or BIOS, or claim gameplay compatibility;
+an instruction budget is not frame or cycle timing. The UI does not produce
 guest audio or save data. Host-side synthetic saves and a generated test tone
-are UI demonstrations, not emulation features. An instruction budget is not
-frame or cycle timing.
+are UI demonstrations, not emulation features.
 
 ## Current platform status
 
 | Target | Implemented in this package | Verification limits |
 |---|---|---|
-| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots and isolated named profiles; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. This is not a physical-GPU or live-window test. macOS/Windows GPU presentation remains unverified. |
+| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots and isolated named profiles; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. On 2026-11-10 a native 960×720 `GBA snapshot` window was detected under Xvfb. This is not a physical-display or physical-GPU test. macOS/Windows GPU presentation remains unverified. |
 | Browser/WASM | Rune WebGPU shell; localStorage settings and IndexedDB-backed synthetic save profiles/slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | The current WASM, adapter and Chromium gates passed locally on 2026-11-09. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
 | iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
 

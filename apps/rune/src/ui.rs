@@ -225,6 +225,9 @@ impl AppState {
 fn show_demo(state: &mut AppState) {
     state.select_page(Page::Demo);
 }
+fn show_input_tester(state: &mut AppState) {
+    state.select_page(Page::InputTester);
+}
 
 fn show_settings(state: &mut AppState) {
     state.select_page(Page::Settings);
@@ -291,6 +294,7 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
         Page::Demo => "Synthetic demo",
         Page::Settings => "Settings",
         Page::Saves => "Save slots",
+        Page::InputTester => "Input tester",
     };
     let toolbar = toolbar(state, compact);
 
@@ -310,7 +314,11 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
         let (surface_width, surface_height) = state.composed.size();
         el().key("snapshot")
             .role("image")
-            .label("Synthetic GBA demo shell with static 240 by 160 fixture and host controls")
+            .label(if state.model.page() == Page::InputTester {
+                "Synthetic guest input test framebuffer"
+            } else {
+                "Synthetic GBA demo shell with static 240 by 160 fixture and host controls"
+            })
             .w(surface_width as f32 / scale)
             .h(surface_height as f32 / scale)
             .focusable(true)
@@ -322,15 +330,26 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
 
     let mut content = col().key("page-content").w_full().gap(12.0);
     if state.model.details_visible() {
-        let details = match state.model.demo() {
-            Ok(demo) => format!(
-                "Synthetic fixture · {}×{} · {} · {} guest instructions (not frames or cycles)",
+        let shown = if state.model.page() == Page::InputTester {
+            state.model.input_tester()
+        } else {
+            Some(state.model.demo())
+        };
+        let details = match shown {
+            Some(Ok(demo)) => format!(
+                "{} · {}×{} · {} · {} guest instructions (not frames or cycles)",
+                if state.model.page() == Page::InputTester {
+                    "Synthetic input tester"
+                } else {
+                    "Synthetic fixture"
+                },
                 demo.width(),
                 demo.height(),
                 demo.rgb_sha256(),
                 demo.guest_budget()
             ),
-            Err(error) => error.to_owned(),
+            Some(Err(error)) => error.to_owned(),
+            None => "Synthetic input tester has not run".to_owned(),
         };
         content = content.child(
             text(details)
@@ -377,6 +396,7 @@ fn toolbar(state: &AppState, compact: bool) -> El {
     let demo = button("demo", "Demo", show_demo);
     let settings = button("settings", "Settings", show_settings);
     let saves = button("saves", "Saves", show_saves);
+    let input_test = button("input-tester", "Input", show_input_tester);
     let fullscreen = fullscreen_button();
     let details = button(
         "details",
@@ -392,6 +412,7 @@ fn toolbar(state: &AppState, compact: bool) -> El {
             .w_full()
             .gap(8.0)
             .child(demo)
+            .child(input_test)
             .child(settings)
             .child(saves);
         let display = row().w_full().gap(8.0).child(fullscreen).child(details);
@@ -407,6 +428,7 @@ fn toolbar(state: &AppState, compact: bool) -> El {
             .w_full()
             .gap(8.0)
             .child(demo)
+            .child(input_test)
             .child(settings)
             .child(saves)
             .child(fullscreen)

@@ -7,10 +7,11 @@
 
 use std::fmt;
 
-use crate::{demo, display};
+use crate::{bus::Bus, cpu::Cpu, demo, display, interpret};
 
 /// Refuse accidental giant conversions even before a surface is involved.
 pub const MAX_IMAGE_PIXELS: u64 = 4096 * 4096;
+const INPUT_TESTER_MAX_BUDGET: u64 = 150_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageError {
@@ -211,6 +212,54 @@ pub fn demo_image() -> Result<RgbaImage, LoadError> {
     })
 }
 
+/// Run the generated input guest to one completed draw pass and snapshot it.
+///
+/// The pass is bounded by [`INPUT_TESTER_MAX_BUDGET`] guest instructions. This
+/// fixed-fixture runner is not a hardware-timed frame or arbitrary ROM runner.
+pub fn input_tester_image(pressed: u16) -> Result<RgbaImage, LoadError> {
+    let mut cpu = Cpu::direct_entry();
+    cpu.set_pc(demo::INPUT_TESTER_ENTRY);
+    cpu.set_thumb(false);
+    let mut bus = Bus::new(demo::input_tester_cartridge());
+    bus.set_pressed_keys(pressed);
+    let mut completed_draw = false;
+    let mut used = 0;
+    while used < INPUT_TESTER_MAX_BUDGET {
+        interpret::deliver_pending_irq(&mut cpu, &mut bus)
+            .map_err(|error| LoadError::Core(error.to_string()))?;
+        interpret::step(&mut cpu, &mut bus).map_err(|error| LoadError::Core(error.to_string()))?;
+        bus.tick_frame();
+        used += 1;
+        // The fixture labels the guest PC immediately after writing every band.
+        if cpu.pc() == demo::INPUT_TESTER_DRAW_DONE {
+            completed_draw = true;
+            break;
+        }
+    }
+    if !completed_draw {
+        return Err(LoadError::Core(format!(
+            "synthetic input tester did not complete a draw pass within {INPUT_TESTER_MAX_BUDGET} guest instructions (pc={:#010X}, used={used})",
+            cpu.pc()
+        )));
+    }
+    let image = display::snapshot(&bus).map_err(|error| LoadError::Core(error.to_string()))?;
+    if image.width != display::WIDTH || image.height != display::HEIGHT {
+        return Err(LoadError::UnexpectedDimensions {
+            width: image.width,
+            height: image.height,
+        });
+    }
+    let rgba = convert_rgb888_to_rgba(image.width, image.height, &image.pixels)
+        .map_err(LoadError::Image)?;
+    Ok(RgbaImage {
+        width: image.width,
+        height: image.height,
+        rgba,
+        rgb_sha256: image.sha256_hex(),
+        guest_budget: used,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +339,15 @@ mod tests {
         assert_eq!(image.rgb_sha256(), expected.sha256_hex());
         assert_eq!(image.guest_budget(), demo::DEMO_BUDGET);
         assert_eq!(image.rgba().len(), 240 * 160 * 4);
+    }
+
+    #[test]
+    fn input_tester_runs_guest_until_draw_pass_and_reflects_mask() {
+        for mask in [0, 0x000B] {
+            let actual = input_tester_image(mask).expect("input tester");
+            let expected = demo::expected_input_tester_image(mask);
+            assert_eq!(actual.rgb_sha256(), expected.sha256_hex());
+            assert!(actual.guest_budget() > 0 && actual.guest_budget() <= INPUT_TESTER_MAX_BUDGET);
+        }
     }
 }

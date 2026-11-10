@@ -21,6 +21,8 @@ pub const INPUT_TESTER_LEN: usize = 0x1000;
 pub const INPUT_TESTER_TITLE: &str = "INPUTTEST";
 /// Budget used by the committed expected-frame tests and the CI job.
 pub const INPUT_TESTER_BUDGET: u64 = 20_000_000;
+/// Guest PC immediately after it completes its Mode 3 input bands.
+pub const INPUT_TESTER_DRAW_DONE: u32 = ROM_BASE + 0x178;
 /// A fixed input mask used by the committed expected frame: A + B + Start.
 pub const INPUT_TESTER_SAMPLE_MASK: u16 = 0x000B;
 

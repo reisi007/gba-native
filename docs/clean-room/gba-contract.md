@@ -1246,10 +1246,12 @@ does not write PC and does not itself end the block.
 
 `info`, `demo`, `run`, `aot proof`, `aot emit` and `aot build` are documented in
 `README.md`. PPM is the only image output of the core CLI. The separate canonical
-`apps/rune` package presents the static synthetic snapshot on supported desktop,
-browser/WASM and iOS targets; Android retains its existing adapter. Neither
-accepts a cartridge or is built by the default workspace, and neither is a core
-CLI output format. See `apps/rune/README.md` for its platform evidence limits.
+`apps/rune` presents a static synthetic Demo plus an Input Tester page that runs
+only the repository-generated fixture using the current host input. The tester
+stops after one guest drawing pass, with a 150,000-instruction ceiling. It
+accepts no arbitrary ROM and makes no game/BIOS boot, gameplay compatibility, or
+frame/cycle-timing claim. Android retains its existing adapter. See
+`apps/rune/README.md` for its platform evidence limits.
 
 - Generated files are restricted to `<cwd>/output/...`. Relative paths resolve
   against the process working directory; absolute paths are accepted only when

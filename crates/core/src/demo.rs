@@ -17,8 +17,8 @@ pub mod input_tester;
 pub mod save_tester;
 
 pub use input_tester::{
-    ENTRY as INPUT_TESTER_ENTRY, INPUT_TESTER_BUDGET, INPUT_TESTER_SAMPLE_MASK,
-    expected_input_tester_image, input_tester_cartridge,
+    ENTRY as INPUT_TESTER_ENTRY, INPUT_TESTER_BUDGET, INPUT_TESTER_DRAW_DONE,
+    INPUT_TESTER_SAMPLE_MASK, expected_input_tester_image, input_tester_cartridge,
 };
 pub use save_tester::{SAVE_TESTER_BUDGET, expected_save_tester_image, save_tester_cartridge};
 

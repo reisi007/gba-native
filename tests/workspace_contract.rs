@@ -189,7 +189,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     );
     assert_success(&listed, "cargo test -- --list");
     let total = listed_count(&listed);
-    assert_eq!(total, 696, "full workspace test inventory changed");
+    assert_eq!(total, 697, "full workspace test inventory changed");
     let core_manifest = root.join("crates/core/Cargo.toml");
     let aot_manifest = root.join("crates/aot/Cargo.toml");
     let root_manifest = root.join("Cargo.toml");
@@ -288,7 +288,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
     baseline += count_targets(&root, &target, &home, &core_manifest, &core_targets);
     baseline += count_targets(&root, &target, &home, &aot_manifest, &aot_targets);
     baseline += count_targets(&root, &target, &home, &root_manifest, &root_targets);
-    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 208);
+    baseline += assert_target_count(&root, &target, &home, &core_manifest, "--lib", "", 209);
     baseline += assert_target_count(&root, &target, &home, &aot_manifest, "--lib", "", 32);
     baseline += assert_target_count(
         &root,
@@ -299,7 +299,7 @@ fn offline_default_graph_inventory_and_bare_cli_contract() {
         "gba-native",
         9,
     );
-    assert_eq!(baseline, 689, "selected package test inventory changed");
+    assert_eq!(baseline, 690, "selected package test inventory changed");
     // Bare/default-run CLI from the root, then invocations from an unrelated cwd.
     let help = cargo(
         &root,

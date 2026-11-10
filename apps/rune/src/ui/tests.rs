@@ -2,6 +2,7 @@ use super::*;
 use gba_native::frontend::ui as core_ui;
 use rune::{Env, Runtime};
 
+mod input_tester;
 mod touch_tests;
 
 #[test]
@@ -33,6 +34,7 @@ fn core_demo_image_and_shared_ui_are_present() {
     runtime.frame(0.0);
     assert!(runtime.find("snapshot").is_some());
     assert!(runtime.find("button-demo").is_some());
+    assert!(runtime.find("button-input-tester").is_some());
     assert!(runtime.find("button-settings").is_some());
 }
 

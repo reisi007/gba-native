@@ -15,6 +15,32 @@ instead of skipping the gate.
 
 ## Automated checks
 
+### Linux synthetic input-test prototype (2026-11-10)
+
+- Rune's **Input tester** page runs only the repository-generated fixture, feeds
+  it the current host key mask and shows the guest-written framebuffer. The
+  reference runner stops at the first completed drawing pass, capped at 150,000
+  guest instructions. Model and Rune UI tests verify the held-key image, touch
+  press/release and return to the idle image; this is not a general ROM player,
+  game boot, frame/cycle timing or retail-input claim.
+- `cargo test --offline -p gba-native-core --lib frontend::image`: 5 passed.
+  `cargo test --offline --locked --manifest-path apps/rune/Cargo.toml --lib
+  input_tester`: 2 passed. `scripts/frontend.sh` passed with 44 Rune unit tests
+  and 5 iOS adapter tests; it is a headless gate and makes no physical-GPU claim.
+- `scripts/web.sh --ci` passed: 13 browser adapter tests and 16 Playwright
+  tests passed, with 8 tests skipped by the configured project matrix. This
+  checks browser behavior separately; it does not establish GPU hardware parity.
+- Native Linux launch under Xvfb produced an `xwininfo` child window named
+  `GBA snapshot`, 960×720, with the Rune process alive. This is window-creation
+  evidence only, not a physical-display or physical-GPU test. The host lacked
+  `libxkbcommon-x11`; the required distro runtime libraries were unpacked under
+  ignored `target/rune/` for this check, without changing system packages or
+  project dependencies.
+- Fresh-target `scripts/full.sh` passed: 209 core library tests, 697 workspace
+  tests, debug/release gates, demo and synthetic native AOT proof
+  (`native_vs_reference=match`, zero fallbacks), plus Ratchet fast/slow. No
+  retail ROM or BIOS was used. #3, #7, #8 and #29 remain open.
+
 ### Channel 1 sample-quantized frequency sweep (2026-11-10)
 
 - The host PSG mixer applies Channel 1 NR10 sweep only. It uses the documented
@@ -35,9 +61,9 @@ instead of skipping the gate.
 - The focused audio target passes 35/35. Fresh-target `./scripts/full.sh` passes:
   hard 500-line gate, Ratchet fast/slow, fmt, Clippy, debug/release tests, demo
   and synthetic AOT proof (`native_vs_reference=match`, zero fallbacks). The
-  workspace inventory is 696 tests (208 core library tests). This is a bounded
-  host render approximation, not hardware sweep timing, exact register mutation,
-  length behavior or audio conformance.
+  workspace inventory at that round was 696 tests (208 core library tests).
+  This is a bounded host render approximation, not hardware sweep timing, exact
+  register mutation, length behavior or audio conformance.
 
 ### Source size and quality gates
 
@@ -941,27 +967,32 @@ was used. No retail game is supported or known playable. No BIOS boots; only the
 bounded synthetic SWI path, behavior-only VBlank IRQ dispatcher frame/return,
 and documented CPU-only ALU SPSR return have synthetic-test coverage. IRQ
 nesting, FIQ, other interrupt sources, other exception entry/vectoring, save
-persistence, hardware audio output or live speaker playback, input interaction,
-DMA arbitration and automatic event timing, cycle timing, other BG modes/layers,
-OBJ/sprite rendering or a playable frontend are not verified. The static Mode 0
-BG0 snapshot is only a synthetic, documentation-driven capability slice; it is
-not evidence that a supplied ROM configures BG0 or reaches a recognizable/booted
-screen. Canonical `apps/rune` covers Rune-supported desktop, browser/WASM and iOS
-UI targets; Android remains on its existing frontend pending upstream Rune
-support (issue #31). On cutover commit `cf2ac67`, Rune UI CI run `42470521196`
-passed the Linux/macOS/Windows host jobs, Linux Mesa software-Vulkan offscreen
-render, WASM/Chromium interaction suite, and iOS device/simulator target checks
-plus simulator package/install/launch. These do not prove physical-GPU
-presentation, physical iOS behavior, screen-reader behavior, audible output or
-real document-picker interaction.
+persistence, hardware audio output or live speaker playback, retail/game input
+compatibility, DMA arbitration and automatic event timing, cycle timing, other
+BG modes/layers, OBJ/sprite rendering or a playable frontend are not verified.
+Rune's Input Tester executes only the repository-generated synthetic fixture
+from reset until one completed guest drawing pass (150,000-instruction cap) per
+logical input change; it does not load arbitrary ROMs or test gameplay. The
+static Mode 0 BG0 snapshot is only a synthetic, documentation-driven capability
+slice; it is not evidence that a supplied ROM configures BG0 or reaches a
+recognizable/booted screen. Canonical `apps/rune` covers Rune-supported desktop,
+browser/WASM and iOS UI targets; Android remains on its existing frontend
+pending upstream Rune support (issue #31). On cutover commit `cf2ac67`, Rune UI
+CI run `42470521196` passed the Linux/macOS/Windows host jobs, Linux Mesa
+software-Vulkan offscreen render, WASM/Chromium interaction suite, and iOS
+device/simulator target checks plus simulator package/install/launch. These do
+not prove physical-GPU presentation, physical iOS behavior, screen-reader
+behavior, audible output or real document-picker interaction.
 The former `apps/desktop` and `apps/web` implementations were removed for issue
 #32; their prior build/test evidence is historical and does not establish Rune
 parity or describe current repository capabilities. The separate ROM-bound WASM module from
 `aot build --target wasm32-unknown-unknown` has synthetic-module and pinned-Node
 evidence only; no browser hosting, GPU presentation, input, saves or per-ROM
-application around it is verified. Neither app is a per-ROM playable/input loop.
+application around it is verified. Neither app is a per-ROM playable
+application; Rune's Input Tester runs only the repository-generated fixture.
 No Windows/Linux physical-GPU run, cross-platform presentation claim or
-visible-frame counter is verified. PSR-transfer and banking evidence is
+visible-frame counter is verified. Xvfb window creation is not hardware
+presentation evidence. PSR-transfer and banking evidence is
 limited to the synthetic/direct-entry subset. Guest SWI/SVC and all six HLE
 services have synthetic-test evidence only; BIOS execution and hardware
 conformance remain unverified. No real GBA hardware measurement is claimed.
