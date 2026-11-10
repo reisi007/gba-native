@@ -1,7 +1,7 @@
 //! Display snapshot tests: complete mode-3 image, page selection, bounds,
 //! blank/backdrop behavior and explicit rejection of unsupported PPU features.
 
-use gba_native_core::bus::{Bus, DISPCNT_ADDR, PALETTE_BASE, VRAM_BASE};
+use gba_native_core::bus::{BG2CNT_ADDR, Bus, DISPCNT_ADDR, OAM_BASE, PALETTE_BASE, VRAM_BASE};
 use gba_native_core::cart::Cartridge;
 use gba_native_core::display::{self, HEIGHT, WIDTH, rgb555_to_rgb888};
 use gba_native_core::error::Error;
@@ -29,6 +29,48 @@ fn mode3_full_image_matches_rgb555_conversion() {
     bus.write16(VRAM_BASE, 0xFFFF).expect("unused bit");
     let image = display::snapshot(&bus).expect("snapshot");
     assert_eq!(image.pixel(0, 0), 0x00FF_FFFF);
+
+    bus.write16(PALETTE_BASE + 0x202, 0x001F)
+        .expect("OBJ red palette entry");
+    bus.write16(OAM_BASE, 0).expect("normal OBJ");
+    bus.write16(OAM_BASE + 2, 0).expect("OBJ origin");
+    bus.write16(OAM_BASE + 4, 0).expect("OBJ tile and priority");
+    for entry in 1..128 {
+        bus.write16(OAM_BASE + entry * 8, 0x0200)
+            .expect("disable unused OBJ");
+    }
+    for offset in (0..32).step_by(2) {
+        bus.write16(VRAM_BASE + 0x1_4000 + offset, 0x1111)
+            .expect("bitmap-mode OBJ tile");
+    }
+    bus.write16(BG2CNT_ADDR, 2).expect("BG2 priority");
+    bus.write16(OAM_BASE + 4, 0x0800)
+        .expect("OBJ priority tied with BG2");
+    bus.write16(DISPCNT_ADDR, 0x1403)
+        .expect("Mode 3 BG2 and OBJ");
+    let image = display::snapshot(&bus).expect("Mode 3 OBJ overlay");
+    assert_eq!(image.pixel(0, 0), rgb555_to_rgb888(0x001F));
+    assert_eq!(image.pixel(8, 0), rgb555_to_rgb888(8));
+
+    bus.write16(OAM_BASE + 4, 0x0C00)
+        .expect("OBJ priority behind BG2");
+    let image = display::snapshot(&bus).expect("BG2 wins priority");
+    assert_eq!(image.pixel(0, 0), rgb555_to_rgb888(0xFFFF));
+
+    bus.write16(OAM_BASE + 4, 0).expect("restore OBJ priority");
+    bus.write16(DISPCNT_ADDR, 0x1003)
+        .expect("Mode 3 OBJ without BG2");
+    let image = display::snapshot(&bus).expect("OBJ over backdrop");
+    assert_eq!(image.pixel(0, 0), rgb555_to_rgb888(0x001F));
+    assert_eq!(image.pixel(8, 0), 0);
+
+    bus.write16(OAM_BASE + 4, 0x0200)
+        .expect("OBJ tile starts at bitmap OBJ end");
+    assert!(matches!(
+        display::snapshot(&bus),
+        Err(Error::BgVramOutOfRange { addr, width: 1 })
+            if addr == VRAM_BASE + 0x1_8000
+    ));
 }
 
 #[test]
@@ -97,11 +139,14 @@ fn unsupported_modes_and_layers_are_explicit_errors() {
         display::snapshot(&bus),
         Err(Error::UnsupportedDisplayMode { mode: 6 })
     ));
-    bus.write16(DISPCNT_ADDR, 0x1403).expect("OBJ layer");
-    assert!(matches!(
-        display::snapshot(&bus),
-        Err(Error::UnsupportedPpuFeature { .. })
-    ));
+    for dispcnt in [0x1404, 0x1414, 0x1405] {
+        bus.write16(DISPCNT_ADDR, dispcnt)
+            .expect("OBJ remains unsupported in Mode 4/5");
+        assert!(matches!(
+            display::snapshot(&bus),
+            Err(Error::UnsupportedPpuFeature { .. })
+        ));
+    }
     bus.write16(DISPCNT_ADDR, 0x0503).expect("BG0 layer");
     assert!(matches!(
         display::snapshot(&bus),

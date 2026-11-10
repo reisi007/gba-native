@@ -2233,6 +2233,21 @@ on-device MediaPlayer playback remains outside CI.
 - Source grounding: public GBATEK `#gbasoundchannel3waveoutput`, consulted
   2026-11-10 at <https://problemkaputt.de/gbatek.htm>; no emulator source used.
 
+## Round: Mode 3 static OBJ composition (2026-11-10)
+
+- Mode 3 now accepts the OBJ display flag and composes its static OBJ pixels
+  against BG2 using priority, with the bitmap-mode OBJ tile base at VRAM offset
+  `0x14000`. OBJ remains visible over the backdrop when BG2 is disabled.
+- The existing complete Mode 3 image test also checks the sprite palette/tile,
+  equal-priority OBJ precedence, lower-priority occlusion and BG2-disabled OBJ
+  output, plus rejection at the exclusive bitmap-OBJ VRAM boundary. Mode 4/5
+  OBJ, bitmap windows and scanline timing remain unsupported.
+- Source grounding: public GBATEK `#lcd-io-display-control`,
+  `#lcd-io-bg-control`, `#lcd-vram-overview`, `#lcd-vram-bitmap-bg-modes`, and
+  `#lcd-obj---overview` / `#lcd-obj---vram-character-tile-mapping`, retrieved
+  2026-11-10 from <https://mgba-emu.github.io/gbatek/>. No emulator
+  implementation source was used.
+
 ## Round: Mode 2 static affine BG slice (2026-11-09)
 
 - Added a bounded static Mode 2 compositor that reuses `AffineBg` for BG2 and

@@ -79,6 +79,7 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
         0 => MODE0_UNSUPPORTED_DISPCNT_MASK,
         1 => MODE1_UNSUPPORTED_DISPCNT_MASK,
         2 => MODE2_UNSUPPORTED_DISPCNT_MASK,
+        3 => BITMAP_UNSUPPORTED_DISPCNT_MASK & !0x1000,
         _ => BITMAP_UNSUPPORTED_DISPCNT_MASK,
     };
     if dispcnt & unsupported_mask != 0 {
@@ -127,10 +128,10 @@ pub fn render_dispcnt(bus: &Bus, dispcnt: u16) -> Result<Image> {
             }
         }
         3 => {
-            if dispcnt & 0x0400 == 0 {
+            if dispcnt & 0x1400 == 0 {
                 Ok(solid(backdrop))
             } else {
-                render_mode3(bus)
+                render_mode3(bus, dispcnt, backdrop, &blend)
             }
         }
         4 => {
@@ -336,12 +337,32 @@ fn check_bg_vram(offset: usize, width: usize) -> Result<()> {
     })
 }
 
-fn render_mode3(bus: &Bus) -> Result<Image> {
+fn render_mode3(bus: &Bus, dispcnt: u16, backdrop: u32, blend: &blend::Blend) -> Result<Image> {
+    let objects = if dispcnt & 0x1000 != 0 {
+        Some(obj::render(bus, dispcnt)?)
+    } else {
+        None
+    };
+    let bg_priority = (bus.bgcnt(2) & 3) as u8;
     let mut pixels = Vec::with_capacity((WIDTH * HEIGHT) as usize);
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
             let addr = VRAM_BASE + 2 * (y * WIDTH + x);
-            pixels.push(rgb555_to_rgb888(bus.read16(addr)?));
+            let index = (y * WIDTH + x) as usize;
+            let mut candidates = [None; 5];
+            if dispcnt & 0x0400 != 0 {
+                candidates[2] = Some(layer::LayerPixel {
+                    color: rgb555_to_rgb888(bus.read16(addr)?),
+                    priority: bg_priority,
+                    layer: 2,
+                    semi_transparent: false,
+                    order: 3,
+                });
+            }
+            if let Some(objects) = &objects {
+                candidates[4] = objects.pixels[index];
+            }
+            pixels.push(composite(&candidates, backdrop, blend, true));
         }
     }
     Ok(Image {

@@ -14,6 +14,8 @@ const OAM_LEN: u32 = 1024;
 const VRAM_LEN: u32 = 96 * 1024;
 const OBJ_PALETTE_BASE: u32 = PALETTE_BASE + 0x200;
 const OBJ_TILE_BASE: u32 = 0x1_0000;
+const BITMAP_OBJ_TILE_BASE: u32 = 0x1_4000;
+const BITMAP_OBJ_TILE_END: u32 = BITMAP_OBJ_TILE_BASE + 16 * 1024;
 
 #[derive(Clone, Copy)]
 struct ObjDimensions {
@@ -138,6 +140,11 @@ fn render_entry(
     let priority = ((attr2 >> 10) & 0x3) as u8;
     let tile_base = (attr2 & 0x03FF) as usize;
     let palette_bank = ((attr2 >> 12) & 0xF) as usize;
+    let (obj_tile_base, obj_tile_end) = if dispcnt & 0x7 >= 3 {
+        (BITMAP_OBJ_TILE_BASE, BITMAP_OBJ_TILE_END)
+    } else {
+        (OBJ_TILE_BASE, VRAM_LEN)
+    };
     let (matrix, flip_x, flip_y) = if affine {
         (Some(read_affine(bus, attr1)?), false, false)
     } else {
@@ -225,7 +232,15 @@ fn render_entry(
             };
             let pixel_x = source_x as usize % 8;
             let pixel_y = source_y as usize % 8;
-            let Some(color_index) = read_tile_pixel(bus, tile, pixel_x, pixel_y, color_8bpp)?
+            let Some(color_index) = read_tile_pixel(
+                bus,
+                tile,
+                pixel_x,
+                pixel_y,
+                color_8bpp,
+                obj_tile_base,
+                obj_tile_end,
+            )?
             else {
                 continue;
             };
@@ -308,15 +323,17 @@ fn read_tile_pixel(
     x: usize,
     y: usize,
     color_8bpp: bool,
+    obj_tile_base: u32,
+    obj_tile_end: u32,
 ) -> Result<Option<usize>> {
     // The OAM tile number is a 32-byte unit for both depths;
     // 8bpp tiles occupy two consecutive units (GBATEK's 04h/06h example).
     let offset = if color_8bpp {
-        OBJ_TILE_BASE as usize + tile * 32 + y * 8 + x
+        obj_tile_base as usize + tile * 32 + y * 8 + x
     } else {
-        OBJ_TILE_BASE as usize + tile * 32 + y * 4 + x / 2
+        obj_tile_base as usize + tile * 32 + y * 4 + x / 2
     };
-    if offset >= VRAM_LEN as usize {
+    if offset >= obj_tile_end as usize {
         return Err(Error::BgVramOutOfRange {
             addr: VRAM_BASE + offset as u32,
             width: 1,

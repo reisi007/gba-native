@@ -1017,7 +1017,11 @@ scanline PPU, frame renderer or timing claim.
   RGB555 at VRAM offset 0; Mode 4 is 240x160 palette indices with frame 0 at 0
   and frame 1 at `0xA000` selected by DISPCNT bit 4; Mode 5 is 160x128 RGB555
   with the remainder of the 240x160 output set to backdrop (palette entry 0).
-  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop.
+  Mode 3 composes the enabled static OBJ layer from its bitmap-mode tile region
+  at VRAM offset `0x14000`, ordered against BG2 using its priority field; if BG2
+  is disabled, OBJ composes over the backdrop. Modes 4/5 still reject OBJ.
+  In each bitmap mode, BG2 disabled (bit 10 clear) yields backdrop unless the
+  Mode 3 OBJ layer is enabled.
 - Nonidentity bitmap/affine combinations and scanline effects remain absent.
   Unsupported registers or layers fail
   explicitly rather than being treated as no-ops.
