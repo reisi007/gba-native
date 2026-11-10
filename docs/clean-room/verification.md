@@ -387,8 +387,9 @@ expectations, not from the decoder/interpreter:
   snapshots, not hardware validation. Semi-transparent OBJ has the bounded
   static composition coverage recorded in the follow-up below; issue #3 remains
   open for its other scoped work.
-- Integer nearest scaling, exact 3:2 letterboxing, invalid sizes, and explicit
-  rejection of FSR1/temporal-FSR/ML-FSR/DLSS names.
+- Integer nearest scaling, exact 3:2 letterboxing, the scale-aware
+  sharp-bilinear CPU reference, invalid sizes, and explicit rejection of
+  FSR1/temporal-FSR/ML-FSR/DLSS names.
 - PPM header and payload length.
 
 ### Hybrid AOT and native proof
@@ -2508,3 +2509,23 @@ on-device MediaPlayer playback remains outside CI.
   the hard source limit, Ratchet fast/slow, formatting, Clippy, debug/release
   workspace tests, demo, and synthetic AOT proof (`native_vs_reference=match`).
   The workspace test inventory remains 688; no test function was added.
+
+## Round: CPU sharp-bilinear presentation reference (2026-11-10)
+
+- Added selectable `sharp-bilinear` scaling to the CPU PPM renderer. It preserves
+  aspect ratio with centered black bars and tightens the bilinear interpolation
+  window by the scale factor; integer scales remain pixel-exact. CLI mode only:
+  no Rune UI/GPU pass, 4K capture, FSR or DLSS integration is claimed.
+- Existing renderer assertions were extended for integer equivalence, a
+  fractional-scale high-contrast edge, mode parsing, and the unchanged nearest
+  baseline. Verification gates and test inventory are pending the orchestrator's
+  run. #26 remains open for backend-neutral UI/GPU architecture and
+  cross-target captures.
+- Focused renderer tests pass 3/3. The synthetic CLI ran
+  `--size 3840x2160 --backend sharp-bilinear`; its PPM header and 24,883,200-byte
+  RGB payload match the requested output dimensions. This is CPU-rendered
+  synthetic output, not a physical-GPU capture.
+- Fresh-target `scripts/full.sh` passed: hard source limit, Ratchet fast/slow,
+  formatting, Clippy, debug/release workspace tests, demo and synthetic AOT proof
+  (`native_vs_reference=match`). Assertions were added to an existing renderer
+  test, so the workspace inventory remains 688 tests.

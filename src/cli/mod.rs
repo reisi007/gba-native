@@ -26,7 +26,7 @@ use output::{create_fresh_directory, create_unique_workspace, write_safely};
 const USAGE: &str = "\
 usage:
   gba-native info <rom.gba>
-  gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|fsr1|temporal-fsr|ml-fsr|dlss]
+  gba-native demo [--out output/demo.ppm] [--size WxH] [--backend nearest|sharp-bilinear|fsr1|temporal-fsr|ml-fsr|dlss]
   gba-native fixture input-tester --out output/<input-tester.gba>
   gba-native save list|import|export|use|default|delete <rom.gba> [slot] [--dir output/saves]
   gba-native audio --out output/<tone.wav> [--frequency 440] [--seconds 2] [--volume 80] [--mute]

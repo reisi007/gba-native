@@ -9,12 +9,14 @@ separate-team legal clean-room process.
 
 ## What exists now
 
-Deterministic **integer** nearest-neighbor output with exact 3:2 content,
-centered and black-letterboxed. Output dimensions are bounded to 1..=4096 per
-axis and must be at least 240x160; content is always an integer multiple of the
-native 240x160 image. PPM output needs no platform graphics dependency. This
-establishes a tested baseline only: **it is neither FSR nor DLSS nor AI
-upscaling**.
+Deterministic integer nearest-neighbor output and a selectable CPU
+`sharp-bilinear` reference filter. Nearest uses integer scaling; sharp-bilinear
+uses fractional scaling, with centered black bars and aspect-preserving
+content. Output dimensions are bounded to 1..=4096 per axis; sharp-bilinear
+requires at least 240x160, while nearest requires a valid integer scale. Both
+produce PPM without a platform graphics dependency. The
+sharp-bilinear CLI mode is not integrated into Rune or a GPU pass; neither mode
+is FSR, DLSS, or AI upscaling.
 
 The canonical `apps/rune` UI presents the same static synthetic snapshot on
 Rune-supported desktop, browser/WASM and iOS targets. Android remains on its
@@ -24,6 +26,7 @@ cartridge or implements a vendor backend. See `apps/rune/README.md`.
 | Backend name | CLI value | Status |
 | --- | --- | --- |
 | Nearest | `nearest` | Implemented CPU reference |
+| Sharp bilinear | `sharp-bilinear` | Implemented CPU reference; no GPU/UI integration |
 | FSR 1 | `fsr1` | Explicitly unsupported, error |
 | Temporal FSR | `temporal-fsr` | Explicitly unsupported, error |
 | ML FSR | `ml-fsr` | Explicitly unsupported, error |

@@ -1,6 +1,5 @@
-//! Presentation baseline: deterministic nearest-neighbor integer scaling with
-//! 3:2 letterboxing. Vendor temporal/AI backends are explicit unsupported
-//! status, never a hidden nearest-neighbor fallback.
+//! CPU presentation filters with centered letterboxing. Vendor temporal/AI
+//! backends are explicit unsupported status, never hidden fallbacks.
 
 use crate::display::{HEIGHT, Image, WIDTH};
 use crate::error::{Error, Result};
@@ -10,6 +9,7 @@ pub const MAX_OUTPUT_DIMENSION: u32 = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
     Nearest,
+    SharpBilinear,
     Fsr1,
     TemporalFsr,
     MlFsr,
@@ -20,6 +20,7 @@ impl Backend {
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
             "nearest" => Ok(Backend::Nearest),
+            "sharp-bilinear" => Ok(Backend::SharpBilinear),
             "fsr1" | "fsr" => Ok(Backend::Fsr1),
             "temporal-fsr" | "temporalfsr" => Ok(Backend::TemporalFsr),
             "ml-fsr" | "mlfsr" => Ok(Backend::MlFsr),
@@ -33,6 +34,7 @@ impl Backend {
     pub fn name(self) -> &'static str {
         match self {
             Backend::Nearest => "nearest",
+            Backend::SharpBilinear => "sharp-bilinear",
             Backend::Fsr1 => "fsr1",
             Backend::TemporalFsr => "temporal-fsr",
             Backend::MlFsr => "ml-fsr",
@@ -41,17 +43,22 @@ impl Backend {
     }
 }
 
-/// Integer nearest-neighbor scale. The content is always exactly 3:2 and is
-/// centered with black bars. Fractional scaling and all vendor backends are
-/// deliberately absent.
+/// Scale the native image into an output with centered black bars.
+/// Sharp-bilinear is a CPU reference filter; vendor backends remain unsupported.
 pub fn scale(image: &Image, width: u32, height: u32, backend: Backend) -> Result<Image> {
-    if backend != Backend::Nearest {
+    if !matches!(backend, Backend::Nearest | Backend::SharpBilinear) {
         return Err(Error::UnsupportedBackend {
             name: backend.name().to_string(),
         });
     }
     if width == 0 || height == 0 || width > MAX_OUTPUT_DIMENSION || height > MAX_OUTPUT_DIMENSION {
         return Err(Error::InvalidOutputSize { width, height });
+    }
+    if backend == Backend::SharpBilinear {
+        if width < WIDTH || height < HEIGHT {
+            return Err(Error::OutputTooSmall { width, height });
+        }
+        return Ok(scale_sharp_bilinear(image, width, height));
     }
 
     let scale = (width / WIDTH).min(height / HEIGHT);
@@ -83,6 +90,54 @@ pub fn scale(image: &Image, width: u32, height: u32, backend: Backend) -> Result
         height,
         pixels,
     })
+}
+
+fn sharp_axis(position: u32, source_size: u32, scale: f64) -> (u32, u32, f64) {
+    let source = ((f64::from(position) + 0.5) / scale - 0.5).clamp(0.0, f64::from(source_size - 1));
+    let low = source.floor() as u32;
+    let fraction = source - f64::from(low);
+    let weight = ((fraction - 0.5) * scale + 0.5).clamp(0.0, 1.0);
+    (low, (low + 1).min(source_size - 1), weight)
+}
+
+fn sharp_bilinear_pixel(image: &Image, x: u32, y: u32, scale: f64) -> u32 {
+    let (x0, x1, tx) = sharp_axis(x, WIDTH, scale);
+    let (y0, y1, ty) = sharp_axis(y, HEIGHT, scale);
+    let [top_left, top_right, bottom_left, bottom_right] = [
+        image.pixel(x0, y0),
+        image.pixel(x1, y0),
+        image.pixel(x0, y1),
+        image.pixel(x1, y1),
+    ];
+    let channel = |shift: u32| {
+        let top = f64::from((top_left >> shift) & 0xFFu32) * (1.0 - tx)
+            + f64::from((top_right >> shift) & 0xFFu32) * tx;
+        let bottom = f64::from((bottom_left >> shift) & 0xFFu32) * (1.0 - tx)
+            + f64::from((bottom_right >> shift) & 0xFFu32) * tx;
+        ((top * (1.0 - ty) + bottom * ty).round() as u32) << shift
+    };
+    channel(16) | channel(8) | channel(0)
+}
+
+fn scale_sharp_bilinear(image: &Image, width: u32, height: u32) -> Image {
+    let scale = (f64::from(width) / f64::from(WIDTH)).min(f64::from(height) / f64::from(HEIGHT));
+    // Clamp rounding at the output boundary before subtracting/offsetting.
+    let content_width = ((f64::from(WIDTH) * scale).round() as u32).min(width);
+    let content_height = ((f64::from(HEIGHT) * scale).round() as u32).min(height);
+    let offset_x = (width - content_width) / 2;
+    let offset_y = (height - content_height) / 2;
+    let mut output = vec![0; (width * height) as usize];
+    for y in 0..content_height {
+        for x in 0..content_width {
+            let index = ((offset_y + y) * width + offset_x + x) as usize;
+            output[index] = sharp_bilinear_pixel(image, x, y, scale);
+        }
+    }
+    Image {
+        width,
+        height,
+        pixels: output,
+    }
 }
 
 pub fn to_ppm(image: &Image) -> Vec<u8> {
@@ -132,6 +187,27 @@ mod tests {
         assert_eq!(letterboxed.pixel(30, 20), image.pixel(0, 0));
         assert_eq!(letterboxed.pixel(269, 179), image.pixel(239, 159));
         assert_eq!(letterboxed.pixel(270, 20), 0);
+
+        let sharp_integer = scale(&image, 480, 320, Backend::SharpBilinear).expect("sharp scale");
+        assert_eq!(sharp_integer.pixels, scaled.pixels);
+        let sharp_odd_integer =
+            scale(&image, 720, 480, Backend::SharpBilinear).expect("odd integer scale");
+        let nearest_odd_integer = scale(&image, 720, 480, Backend::Nearest).expect("nearest scale");
+        assert_eq!(sharp_odd_integer.pixels, nearest_odd_integer.pixels);
+
+        let mut edge = Image {
+            width: WIDTH,
+            height: HEIGHT,
+            pixels: vec![0x00FF_FFFF; (WIDTH * HEIGHT) as usize],
+        };
+        for y in 0..HEIGHT {
+            edge.pixels[(y * WIDTH) as usize] = 0;
+        }
+        let fractional = scale(&edge, 360, 240, Backend::SharpBilinear).expect("fractional scale");
+        assert_eq!(fractional.pixel(0, 0), 0);
+        assert_eq!(fractional.pixel(1, 0), 0x0080_8080);
+        assert_eq!(fractional.pixel(2, 0), 0x00FF_FFFF);
+        assert_eq!(Backend::parse("sharp-bilinear"), Ok(Backend::SharpBilinear));
     }
 
     #[test]

@@ -78,7 +78,7 @@ the root workspace lockfile contains only these three internal path packages.
 
 ```text
 cargo run -- info <rom.gba>
-cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest]
+cargo run -- demo [--out output/demo.ppm] [--size 480x320] [--backend nearest|sharp-bilinear]
 cargo run -- run <rom.gba> [--budget 1000000] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--save-dir output/saves] [--save-slot NAME] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k|--synthetic-backup-eeprom512|--synthetic-backup-eeprom8k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 cargo run -- fixture input-tester --out output/<new-directory>/input-tester.gba
 cargo run -- fixture save-tester --out output/<new-directory>/save-tester.gba
