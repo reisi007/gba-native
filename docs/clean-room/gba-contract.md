@@ -581,8 +581,9 @@ bits clear their corresponding queues; RegisterRamReset group 6 clears both and
 group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
 automatic audio output. The separate `audio` module renders a bounded PSG mix
-from the register snapshot with a host volume/mute. Channels 1, 2 and 4 capture
-envelope initial volume, direction and period on trigger writes and advance
+from the register snapshot with a host volume/mute. The wave channel applies
+documented NR32 mute/100%/50%/25% volume and the force-75% bit. Channels 1, 2 and
+4 capture envelope initial volume, direction and period on trigger writes and advance
 steps on the host's 32768 Hz nominal sample clock; this is host-rendered state,
 not hardware timing. The bus retains one latest trigger snapshot and wrapping
 sequence per channel. Every trigger write increments it, but multiple writes

@@ -23,6 +23,17 @@ fn noise_regs(nr43: u8) -> [u8; 0x48] {
     regs
 }
 
+fn wave_regs(volume: u16) -> [u8; 0x48] {
+    let mut regs = [0u8; 0x48];
+    regs[0x10] = 0x80; // Wave DAC enabled.
+    regs[0x12..0x14].copy_from_slice(&volume.to_le_bytes());
+    regs[0x14..0x16].copy_from_slice(&0x86D6u16.to_le_bytes()); // Trigger, rate 1750.
+    regs[0x20..0x22].copy_from_slice(&0x4407u16.to_le_bytes()); // Channel 3, max PSG volume.
+    regs[0x24] = 0x80;
+    regs[0x30..0x40].fill(0xFF);
+    regs
+}
+
 /// A bus with timer 0 at 65536 Hz (reload 0xFF00, prescaler F/1).
 fn direct_sound_bus() -> Bus {
     let mut bus = Bus::new(Cartridge::from_bytes(vec![0u8; 0x200]).expect("cart"));
@@ -77,6 +88,29 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
     let mut disabled = noise_regs(0x00);
     disabled[0x1D] = 0;
     assert_eq!(noise_frequency(&disabled), None);
+}
+
+#[test]
+fn wave_channel_volume_mute_ratios_and_force_75_percent_are_documented() {
+    let peak = |volume| {
+        render_psg(&wave_regs(volume), 64, AudioSettings::new(100, false))
+            .into_iter()
+            .map(|sample| sample.unsigned_abs())
+            .max()
+            .unwrap()
+    };
+
+    let muted = peak(0x0000);
+    let full = peak(0x2000);
+    let half = peak(0x4000);
+    let quarter = peak(0x6000);
+    let forced = peak(0xE000); // Force 75%, overriding the 25% ratio.
+
+    assert_eq!(muted, 0);
+    assert!(full > 0);
+    assert_eq!(half, full / 2);
+    assert_eq!(quarter, full / 4);
+    assert_eq!(forced, full * 3 / 4);
 }
 
 #[test]

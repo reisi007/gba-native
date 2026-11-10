@@ -138,9 +138,19 @@ fn wave_sample(regs: &[u8], phase: f32) -> f32 {
     } else {
         byte & 0x0F
     };
-    let volume_shift = (u16_at(regs, 0x12) >> 13) & 3;
+    let volume_control = u16_at(regs, 0x12);
+    let volume = if volume_control & 0x8000 != 0 {
+        0.75
+    } else {
+        match (volume_control >> 13) & 3 {
+            0 => 0.0,
+            1 => 1.0,
+            2 => 0.5,
+            _ => 0.25,
+        }
+    };
     let sample = (f32::from(nibble) / 15.0) * 2.0 - 1.0;
-    sample / f32::from(1u16 << volume_shift)
+    sample * volume
 }
 
 fn noise_frequency(regs: &[u8]) -> Option<f32> {

@@ -2437,3 +2437,11 @@ on-device MediaPlayer playback remains outside CI.
   against an independent format classifier and validates rejection metadata,
   including BX's unused destination bits.
   This is decoder-space, not hardware-conformance evidence; issue #5 remains open.
+
+## Round: PSG wave-channel output volume (2026-11-10)
+
+- The host PSG renderer now follows documented SOUND3CNT_H volume values:
+  mute, 100%, 50%, and 25%; bit 15 forces 75% regardless of the ratio field.
+- A deterministic rendered-wave test checks silence and exact relative peak
+  levels. This is synthetic audio behavior, not hardware timing or retail-audio
+  evidence. Issue #7 remains open for the remaining input/audio scope.
