@@ -6,16 +6,19 @@ import vm from 'node:vm';
 
 const source = await readFile(new URL('../www/app.js', import.meta.url), 'utf8');
 
-async function start(init, importFailure = null) {
+async function start(init, importFailure = null, options = {}) {
   const status = { removed: false, textContent: '', remove() { this.removed = true; } };
   const saveInput = {
     files: [], value: '', clicks: 0, listeners: {},
     addEventListener(name, fn) { this.listeners[name] = fn; },
     click() { this.clicks += 1; },
   };
+  const windowState = {};
+  if (options.pendingRom) windowState.__gbaNativeRunePendingRom = options.pendingRom;
   const values = new Map();
   const errors = [];
   const observers = [];
+  const requested = [];
   const documentElement = {};
   let a11yMirror = null;
   class MutationObserverStub {
@@ -35,8 +38,18 @@ async function start(init, importFailure = null) {
       getItem(key) { return values.get(key) ?? null; },
       setItem(key, value) { values.set(key, value); },
     },
+    window: windowState,
+    location: { href: 'http://localhost/' },
+    fetch: async (url) => {
+      requested.push(String(url));
+      return {
+        ok: true,
+        arrayBuffer: async () => Uint8Array.of(1, 2).buffer,
+      };
+    },
     MutationObserver: MutationObserverStub,
     Uint8Array,
+    URL,
     console: { error(error) { errors.push(error); } },
   });
   const app = new vm.SourceTextModule(source, {
@@ -44,7 +57,10 @@ async function start(init, importFailure = null) {
     async importModuleDynamically(specifier) {
       assert.equal(specifier, './pkg/gba_native_rune.js');
       if (importFailure) throw importFailure;
-      const glue = new vm.SyntheticModule(['default'], function () { this.setExport('default', init); }, { context });
+      const exports = { default: init, ...(options.exports ?? {}) };
+      const glue = new vm.SyntheticModule(Object.keys(exports), function () {
+        for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
+      }, { context });
       await glue.link(() => {});
       await glue.evaluate();
       return glue;
@@ -56,7 +72,9 @@ async function start(init, importFailure = null) {
     status,
     errors,
     saveInput,
+    windowState,
     values,
+    requested,
     observers,
     documentElement,
     setA11yMirror(root) { a11yMirror = root; },
@@ -167,4 +185,20 @@ test('Import fixture opens the native file picker synchronously only when no fil
   app.values.set('gba-native.rune.save.pending', '4742');
   importAction.click();
   assert.equal(app.saveInput.clicks, 1, 'the second click consumes the staged file instead');
+});
+
+test('a bound ROM request uses the same-origin URL only without a browser preload', async () => {
+  const bound = { bound_rom_url: () => './emerald.gba' };
+  const app = await start(async () => {}, null, { exports: bound });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(app.requested, ['http://localhost/emerald.gba']);
+  assert.deepEqual([...app.windowState.__gbaNativeRunePendingRom], [1, 2]);
+
+  const preloaded = await start(async () => {}, null, {
+    exports: bound,
+    pendingRom: Uint8Array.of(3),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(preloaded.requested, []);
+  assert.deepEqual([...preloaded.windowState.__gbaNativeRunePendingRom], [3]);
 });

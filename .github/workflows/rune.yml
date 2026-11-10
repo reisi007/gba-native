@@ -33,7 +33,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers
+          sudo apt-get install --yes libasound2-dev pkg-config libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers
 
       - name: Rune host gate (headless)
         run: bash scripts/frontend.sh

@@ -22,6 +22,31 @@ export function runePlayTone(bytes) {
     return true;
   } catch (_) { return false; }
 }
+let guestContext = null;
+let guestCursor = 0;
+export function runeStartGuestAudio() {
+  try {
+    guestContext ??= new AudioContext();
+    guestContext.resume();
+    return true;
+  } catch (_) { return false; }
+}
+export function runePlayGuestSamples(samples) {
+  try {
+    if (!samples.length) return true;
+    guestContext ??= new AudioContext();
+    guestContext.resume();
+    const buffer = guestContext.createBuffer(1, samples.length, 32768);
+    buffer.copyToChannel(Float32Array.from(samples, (sample) => sample / 32768), 0);
+    const source = guestContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(guestContext.destination);
+    const start = Math.max(guestContext.currentTime, guestCursor);
+    source.start(start);
+    guestCursor = start + buffer.duration;
+    return true;
+  } catch (_) { return false; }
+}
 export function runeDownloadTone(bytes) {
   try {
     const blob = new Blob([bytes], { type: "audio/wav" });
@@ -36,8 +61,22 @@ export function runeDownloadTone(bytes) {
 extern "C" {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runePlayTone)]
     fn browser_play_tone(bytes: &[u8]) -> bool;
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeStartGuestAudio)]
+    fn browser_start_guest_audio() -> bool;
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = runePlayGuestSamples)]
+    fn browser_play_guest_samples(samples: &[i16]) -> bool;
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = runeDownloadTone)]
     fn browser_download_tone(bytes: &[u8]) -> bool;
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn start_guest_audio() -> bool {
+    browser_start_guest_audio()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn play_guest_samples(samples: &[i16]) -> bool {
+    browser_play_guest_samples(samples)
 }
 
 pub(crate) fn create_artifact(settings: &Settings) -> Result<String, String> {

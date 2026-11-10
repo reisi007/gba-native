@@ -2,8 +2,8 @@ use gba_native::input::Button;
 use rune::tok::{self, type_};
 use rune::{El, col, el, row, text};
 
-use super::play_test_tone;
-use super::{AppState, create_tone_artifact, input};
+use super::pages::{create_tone_artifact, play_test_tone};
+use super::{AppState, input};
 
 pub(super) fn view(state: &AppState, dark: bool, compact: bool) -> El {
     let theme = tok::theme(dark);

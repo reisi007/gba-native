@@ -2617,3 +2617,196 @@ on-device MediaPlayer playback remains outside CI.
   formatting, Clippy, debug/release workspace tests, demo and synthetic AOT proof
   (`native_vs_reference=match`). Assertions were added to an existing renderer
   test, so the workspace inventory remains 688 tests.
+
+## Round: Rune one-game Rune builds, live audio and host RTC (2026-11-10)
+
+- `GBA_NATIVE_ROM_PATH=<rom>` now turns `apps/rune` into a one-game build. The
+  host CLI performs bounded AOT discovery at the ROM base and emits the
+  translated program (`aot emit-program`); `build.rs` copies it into `OUT_DIR`
+  and compiles it into the executable while binding title, game code, SHA-256
+  and length. The app crate therefore keeps no build-time dependency on
+  `gba-native-aot`, as the Rune dependency-boundary gate requires. The original `.gba` is not copied
+  into source or the crate; a mismatch is rejected before a session starts.
+- The one-game UI opens fullscreen on a handheld shell (D-pad, A/B, Start/Select,
+  L/R), hides the demo/settings/save/ROM-picker navigation, and paces the guest by
+  its own wall clock (`elapsed × 16,777,216 / 3` instructions, capped at one
+  million per poll). The 800x600 composition is fitted by the host GPU instead of
+  being CPU-upscaled every frame; pointer input corrects for that letterboxing.
+- Native output uses `cpal` (CoreAudio on macOS, WASAPI on Windows, ALSA on
+  Linux). The mixer is persistent across polls: an earlier version rebuilt the
+  engine each slice, which restarted PSG phases and produced audible gaps.
+- A documented GPIO RTC is enabled for the one-game build and seeded from host
+  UTC time, so Emerald no longer shows its dry-battery message. Because the core
+  contract marks GPIO buses as reference-only, RTC sessions run the interpreter
+  loop instead of the generated dispatcher; the translated program stays in the
+  binary but is not used in that mode.
+- Local release smoke (`RUNE_SMOKE_POLLS=4500`, no window): 450,000,000 guest
+  instructions in 15.33 s, `error=None`, framebuffer digest
+  `f6aa5891c1f9efe83ccfb6236461745bb5a3d47700ef6fe61712e1ba6585e7d5`,
+  2,636,718 PCM samples, peak amplitude 14,874. This is a local read-only ROM
+  observation, not a retail-compatibility claim.
+- macOS release window: Emerald's title screen renders fullscreen in the
+  handheld shell with the internal-battery message absent. Audio output was
+  accepted by the host device; audible quality was confirmed by the owner, not
+  instrumented here.
+- Cross-target `cargo check` for the ROM-bound crate passed for
+  `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-gnu`,
+  `x86_64-pc-windows-msvc`, `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
+  `wasm32-unknown-unknown`. The local `x86_64-unknown-linux-gnu` check fails only
+  because this macOS host has no ALSA development package for `alsa-sys`; Linux
+  CI remains the verification path for that target.
+- The default executable is not yet self-contained: cartridge data reads and
+  interpreter fallbacks still come from the bound image beside the executable
+  (desktop) or in the same-origin web bundle. Original ROM bytes are never
+  committed or published (decision D53, issue #33). The opt-in local
+  `GBA_NATIVE_EMBED_ROM=1` single-file build (D54) is the only path that embeds
+  the image, and that output must never be committed, published or used in CI.
+
+## Round: Rune one-game web smoke and local single-file desktop build (2026-11-10)
+
+- `scripts/rune-web-screenshots.sh` with the Emerald-bound bundle now passes the
+  `bound game loads locally and advances in the browser session` Chromium test
+  on the desktop project (21.4 s). The earlier failure was an invalid ARIA role:
+  the mirrored surface exposed `role="image"`, which browsers do not match;
+  it now exposes the standard `img` role and the test queries `getByRole('img')`.
+- `GBA_NATIVE_EMBED_ROM=1` (decision D54) compiles the bound image into the
+  executable. The build refuses to run with `CI` set or for `wasm32` targets, and
+  emits retail-derived binaries only under the git-ignored `target/`.
+- macOS release smoke: the embedded binary was copied alone into an empty
+  temporary directory and launched without `GBA_NATIVE_ROM_RUNTIME_PATH` or a
+  sibling `.gba`. Emerald reached its title/intro scene in the fullscreen
+  handheld shell, and injected Start/Enter presses advanced the guest, so the
+  single-file path does not read the external image.
+- Final release headless smoke (`RUNE_SMOKE_POLLS=4500`): identity
+  `POKEMON EMER (BPED)`, 16,777,216 bytes, SHA-256
+  `7c599c56849efeebeb93bd71f714932ae4cdf980db51c9c1016b4431057f71d4`,
+  419,427,000 guest instructions, digest
+  `153440a0b5866006188dffcdc8a1998c5ed6096d5e59f977feaddb99e037a928`,
+  2,457,580 PCM samples, peak 14,874, `error=None`.
+- `scripts/rune-bound.sh` (host CLI `aot emit-program` followed by the app
+  build) with the embedded ROM produced a macOS binary of 38,435,056 bytes and
+  `gba-native-rune.exe` (PE32+ x86-64, 60,742,061 bytes); the embedded cartridge
+  title is present in the executable. The Windows binary was not executed here
+  (no Windows host or Wine run in this round); Windows runtime playability
+  remains unverified.
+- The pre-emitted program keeps `apps/rune` free of a `gba-native-aot` build
+  dependency; `scripts/frontend.sh`'s dependency-boundary check passes, and
+  `cargo tree` shows no AOT package. `scripts/rune-bound.sh` owns the two-step
+  local build.
+- Android is explicitly outside this platform matrix. Rune has no supported
+  Android frontend (upstream issue #31), so no Android package, build or smoke
+  claim is made; the installed Android Rust targets alone do not constitute
+  platform support. The verified matrix is macOS, Windows, iOS, wasm and Linux
+  (Linux checked in a real container once available).
+- `scripts/web.sh --ci` passes end to end for the synthetic bundle: adapter
+  tests, WASM build, and the Chromium suite (16 passed, 11 skipped, 36 review
+  PNGs, 52.8 s). The browser adapter test stubs the same-origin `bound_rom_url` export
+  and supplies the `URL` global; the bootstrap skips its fetch when the page was
+  preloaded with cartridge bytes.
+- The one-game web artifact is checked separately with a ROM-bound bundle and
+  `RUNE_SCREENSHOT_GREP='bound game'`: that Chromium test loads the fixed game
+  and asserts that injected input changes the frame (1 passed, 17.8 s). Running the full synthetic
+  suite against a bound bundle is not expected to pass, because a one-game build
+  intentionally opens on its play screen and hides the Demo/Settings/Saves
+  navigation.
+- Platform checks with the ROM-bound crate pass for `aarch64-apple-darwin`,
+  `x86_64-apple-darwin`, `x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`,
+  `aarch64-apple-ios`, `aarch64-apple-ios-sim` and `wasm32-unknown-unknown`.
+  `x86_64-unknown-linux-gnu` was checked inside a real Debian-based
+  `rust:1-slim-bookworm` container (aarch64 host, x86_64 target) after
+  installing `libasound2-dev` and `pkg-config`; `PKG_CONFIG_ALLOW_CROSS=1` was
+  needed because the container itself is aarch64. The ROM-bound app was
+  configured with the host-emitted `GBA_NATIVE_PROGRAM_PATH`, and the check
+  finished. This is a real Linux-header type-check, not an x86_64 link or
+  runtime claim; Linux CI remains the link path for that target. These are
+  compile checks, not platform support claims. The local step is reproducible
+  with `rust:1-slim-bookworm`, apt `libasound2-dev` + `pkg-config`, the host
+  cargo registry mounted at `/usr/local/cargo`, `PKG_CONFIG_ALLOW_CROSS=1`,
+  `CARGO_TARGET_DIR=/tmp/target`, `GBA_NATIVE_ROM_PATH` and the pre-emitted
+  `GBA_NATIVE_PROGRAM_PATH`, then
+  `cargo check --locked --manifest-path apps/rune/Cargo.toml --lib --target x86_64-unknown-linux-gnu`.
+- A native `aarch64-unknown-linux-gnu` debug build in the same container also
+  linked the ROM-bound app: `target/linux-check/debug/gba-native-rune` is a
+  529,799,320-byte aarch64 Linux ELF with interpreter
+  `/lib/ld-linux-aarch64.so.1` (`cargo build` finished in 1m 33s). This exercises
+  a real Linux link including ALSA; it is still not a Linux GUI or runtime
+  playability claim.
+- `scripts/frontend.sh` passes, including the Rune dependency boundary: the app
+  tree contains no `gba-native-aot` package. The host CLI (`aot emit-program`)
+  and `scripts/rune-bound.sh` own discovery and the two-step local build.
+- `./scripts/short.sh` (with the repository-pinned Ratchet 0.6.4) passed after
+  the change, including the 500-line hard gate, Ratchet fast tier, formatting,
+  Clippy with warnings denied and the fast tests. Rune's 52 lib tests and Clippy
+  with `-D warnings` pass in the default unbound configuration, and Clippy also
+  compiles the ROM-bound and embedded configurations. The ROM-bound
+  configuration is exercised by `rom_smoke` and the bound-game Chromium test, not
+  by the lib suite: a bound `AppState::default()` opens the play page and loads
+  the image, so the unbound page assertions do not apply to it.
+- Web bundle: the wasm contains the bound identity and the page fetches the
+  same-origin image; the Chromium smoke verifies rendering/input, not audible
+  sound.
+
+### Review-fix round (same change, 2026-11-10)
+
+An independent review of the change range (`git diff origin/main...HEAD`) returned
+"changes required" on documentation/config accuracy and on two behavioural
+details. The fixes are part of the same change:
+
+- Linux CI installs `libasound2-dev` and `pkg-config`; the Rune Linux host job
+  builds `cpal`/`alsa-sys`, and `apps/rune/README.md` states the prerequisite.
+- The verification claims about the ROM-bound configuration were corrected: the
+  Rune lib suite and its page assertions cover the default unbound build; the
+  bound configuration is exercised by `rom_smoke` and the bound-game Chromium
+  test, and Clippy compiles it with warnings denied.
+- `apps/rune/README.md`, the root `README.md`, `gba-contract.md`, `protocol.md`
+  and D53 now describe the one-game build that exists: per-ROM compiled, no
+  runtime picker, native `cpal` output, and interpreter-only sessions under the
+  host-seeded GPIO clock.
+- `aot emit-program` writes a `<program>.sha256` sidecar and
+  `apps/rune/build.rs` refuses a program emitted for a different image, so a
+  stale translation cannot be compiled silently. The program file itself stays
+  free of ROM metadata. `GBA_NATIVE_PROGRAM_PATH` without
+  `GBA_NATIVE_ROM_PATH` is reported as ignored.
+- Pointer input no longer clamps letterbox clicks onto edge controls, and a
+  failed bound load shows its specific status instead of the generic
+  composition error.
+- The native audio sink opens its host device when a game session loads instead
+  of when the app state is built. The Windows CI host gate crashed with
+  `STATUS_ACCESS_VIOLATION` while running the Rune unit tests: every
+  `AppState::default()` opened a WASAPI stream for tests and headless runs that
+  never play guest audio. Tests and headless runs now keep an idle sink, and the
+  one-game app still starts native audio with its session.
+- Fullscreen bootstrap no longer toggles three times. `touch_drag`/`keys.rs`
+  issue exactly one `toggle_full_screen` request after the first painted frame
+  (200 ms settle), because Rune's shell drops the request while its window is
+  not visible. Verified on macOS: `AXFullScreen = true` after launch. macOS also
+  ignores the request while the app is not active, so an inactive background
+  launch can leave the window windowed; that is host activation, not app code.
+
+Evidence for this round, on the final tree:
+
+- `./scripts/short.sh` (Ratchet 0.6.4): hard 500-line gate, fast tier,
+  formatting, Clippy `-D warnings` and the fast tests pass (209 root tests plus
+  32 AOT tests).
+- Rune: 52 lib tests pass unbound; Clippy `-D warnings` passes for the unbound,
+  ROM-bound and embedded configurations; `scripts/frontend.sh` passes including
+  the dependency boundary.
+- `scripts/web.sh --ci`: WASM build, adapter tests and Chromium interaction
+  checks pass (16 passed, 11 skipped).
+- Bound-game Chromium smoke (`RUNE_EMBEDDED_PROGRAM=1`, grep `bound game`):
+  1 passed in 20.7 s.
+- `rom_smoke` (debug, `RUNE_SMOKE_POLLS=4500`): 419,427,000 instructions,
+  digest `153440a0b5866006188dffcdc8a1998c5ed6096d5e59f977feaddb99e037a928`,
+  2,457,580 PCM samples, peak 14,874, `error=None`, 240.61 s. Local read-only
+  observation, not a compatibility claim.
+- Linux container (`rust:1-slim-bookworm`, apt `libasound2-dev`, `pkg-config`,
+  `libxkbcommon-dev`, `libwayland-dev`, `libvulkan1`,
+  `mesa-vulkan-drivers`): the ROM-bound lib and binary link natively for
+  aarch64 Linux with `GBA_NATIVE_ROM_PATH` and the pre-emitted
+  `GBA_NATIVE_PROGRAM_PATH`.
+- Windows cross-check (`cargo clippy --all-targets --target
+  x86_64-pc-windows-gnu -D warnings`) passes after the lazy audio-sink change;
+  the CI host gate on `windows-latest` is the runtime check.
+- macOS embedded release binary: `AXFullScreen = true` and the Game Freak intro
+  rendering in the handheld shell after launch; the window was closed after the
+  check.

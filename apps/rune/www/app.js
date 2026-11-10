@@ -82,10 +82,26 @@ saveInput.addEventListener('change', async () => {
 });
 
 try {
-  const { default: init } = await import('./pkg/gba_native_rune.js');
+  const rune = await import('./pkg/gba_native_rune.js');
+  const init = rune.default;
   await init();
   watchSaveActionAvailability();
   document.querySelector('#status').remove();
+  const romUrl = rune.bound_rom_url?.();
+  if (romUrl && !window.__gbaNativeRunePendingRom) {
+    fetch(new URL(romUrl, location.href), { credentials: 'same-origin' })
+      .then((response) => {
+        if (!response.ok) throw new Error(`bound ROM request failed: HTTP ${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then((buffer) => {
+        if (buffer.byteLength > 32 * 1024 * 1024) throw new Error('bound ROM exceeds 32 MiB');
+        window.__gbaNativeRunePendingRom = new Uint8Array(buffer);
+      })
+      .catch((error) => {
+        window.__gbaNativeRuneRomError = String(error);
+      });
+  }
 } catch (error) {
   document.querySelector('#status').textContent = `Unable to start Rune: ${error}`;
   console.error(error);

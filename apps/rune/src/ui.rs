@@ -1,18 +1,22 @@
 use rune::tok::{self, type_};
-use rune::{AppSpec, Cx, El, Pixels, ScrollSpec, SurfaceFit, Tx, col, el, row, text};
+use rune::{AppSpec, Cx, El, Pixels, ScrollSpec, SurfaceFit, col, el, text};
 
 use crate::model::{Page, RuneAppModel};
 
 #[cfg(target_arch = "wasm32")]
 mod browser_saves;
 mod buttons;
+mod game_actions;
+mod game_view;
 mod input;
 mod keys;
+mod pages;
 mod save_actions;
 mod saves_view;
 mod settings_view;
 mod surface;
 use buttons::{accent_foreground, button, state_button};
+use pages::toolbar;
 use save_actions::{create_save, delete_save, set_default_save};
 #[cfg(any(test, target_arch = "wasm32", target_os = "ios"))]
 use save_actions::{export_save, import_save};
@@ -27,6 +31,8 @@ pub struct AppState {
     composed: Pixels,
     source: Option<gba_native::frontend::image::RgbaImage>,
     composition_error: Option<String>,
+    game: Option<crate::game::GameSession>,
+    game_status: Option<String>,
     pointer_button: Option<gba_native::input::Button>,
     settings_status: Option<String>,
     audio_status: Option<String>,
@@ -41,6 +47,13 @@ pub struct AppState {
     binding_target: Option<gba_native::input::Button>,
     binding_status: Option<String>,
     fullscreen_bootstrap_done: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    audio_sink: crate::audio_sink::AudioSink,
+    /// Wall clock anchor for guest pacing. Rune's frame delta is not a stable
+    /// realtime reference on every host (idle frames, display refresh), so the
+    /// native app measures its own poll interval.
+    #[cfg(not(target_arch = "wasm32"))]
+    last_poll: std::time::Instant,
 }
 
 impl Default for AppState {
@@ -48,11 +61,18 @@ impl Default for AppState {
         let (settings, settings_status) = crate::storage::load_settings();
         let mut model = RuneAppModel::default();
         model.replace_settings(settings);
+        if crate::rom_binding::BOUND_ROM.is_some() {
+            // A one-game build opens as a handheld: fullscreen, controls visible.
+            model.update_settings(|settings| settings.fullscreen = true);
+        }
+
         let mut state = Self {
             model,
             composed: Pixels::new(),
             source: None,
             composition_error: None,
+            game: None,
+            game_status: None,
             pointer_button: None,
             settings_status,
             audio_status: None,
@@ -67,7 +87,14 @@ impl Default for AppState {
             binding_target: None,
             binding_status: None,
             fullscreen_bootstrap_done: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            audio_sink: crate::audio_sink::AudioSink::idle(),
+            #[cfg(not(target_arch = "wasm32"))]
+            last_poll: std::time::Instant::now(),
         };
+        if crate::rom_binding::BOUND_ROM.is_some() {
+            game_actions::start_bound_game(&mut state);
+        }
         state.refresh_composition();
         state
     }
@@ -75,7 +102,7 @@ impl Default for AppState {
 
 impl AppState {
     fn refresh_composition(&mut self) {
-        match self.model.composed_image() {
+        match game_actions::presentation(self) {
             Ok(image) => {
                 self.composed
                     .set(image.width(), image.height(), image.rgba().to_vec());
@@ -95,7 +122,7 @@ impl AppState {
             .map(|error| format!("Settings could not be saved: {error}"));
     }
 
-    fn ensure_integer_device_pixels(&self, device_scale: f32, root_width: Option<f32>) {
+    fn ensure_integer_device_pixels(&self, device_scale: f32, root: Option<(f32, f32)>) {
         let Some(source) = &self.source else { return };
         let maximum_factor = (8192 / source.width()).min(8192 / source.height());
         let requested_factor = if self.model.settings().integer_scaling {
@@ -103,23 +130,51 @@ impl AppState {
         } else {
             1
         };
-        let available_width = root_width.map_or(source.width() * requested_factor, |width| {
-            ((width - 40.0).max(1.0) * device_scale).floor() as u32
+        let padding = if crate::rom_binding::BOUND_ROM.is_some() {
+            0.0
+        } else {
+            40.0
+        };
+        let available = root.map(|(width, height)| {
+            (
+                ((width - padding).max(1.0) * device_scale).floor() as u32,
+                ((height - padding).max(1.0) * device_scale).floor() as u32,
+            )
         });
+        let available_width = available.map_or(source.width() * requested_factor, |size| size.0);
+        // Only the handheld page is constrained by the window height; the
+        // scrollable demo/settings pages intentionally grow past it.
+        let available_height = if crate::rom_binding::BOUND_ROM.is_some() {
+            available.map_or(source.height() * requested_factor, |size| size.1)
+        } else {
+            u32::MAX
+        };
+        if crate::rom_binding::BOUND_ROM.is_some() {
+            // The handheld composition stays at its native 800x600 and the host
+            // GPU fits it to the window; CPU upscaling every frame stalls input.
+            if self.composed.size() != (source.width(), source.height()) {
+                self.composed
+                    .set(source.width(), source.height(), source.rgba().to_vec());
+            }
+            return;
+        }
         let factor = (available_width / source.width())
+            .min(available_height / source.height())
             .min(requested_factor)
             .min(maximum_factor)
             .max(1);
-        let (width, height) = if available_width >= source.width() {
-            (source.width() * factor, source.height() * factor)
-        } else {
-            let width = available_width.clamp(1, 8192);
-            let height = ((u64::from(source.height()) * u64::from(width)
-                + u64::from(source.width()) / 2)
-                / u64::from(source.width()))
-            .min(8192) as u32;
-            (width, height.max(1))
-        };
+        let (width, height) =
+            if available_width >= source.width() && available_height >= source.height() {
+                (source.width() * factor, source.height() * factor)
+            } else {
+                // A window smaller than the shell falls back to a bounded fit.
+                let width = available_width.clamp(1, 8192);
+                let height = ((u64::from(source.height()) * u64::from(width)
+                    + u64::from(source.width()) / 2)
+                    / u64::from(source.width()))
+                .min(8192) as u32;
+                (width, height.max(1))
+            };
         if self.composed.size() == (width, height) {
             return;
         }
@@ -222,83 +277,28 @@ impl AppState {
     }
 }
 
-fn show_demo(state: &mut AppState) {
-    state.select_page(Page::Demo);
-}
-fn show_input_tester(state: &mut AppState) {
-    state.select_page(Page::InputTester);
-}
-
-fn show_settings(state: &mut AppState) {
-    state.select_page(Page::Settings);
-}
-
-fn show_saves(state: &mut AppState) {
-    state.select_page(Page::Saves);
-    #[cfg(target_arch = "wasm32")]
-    state
-        .browser_saves
-        .show(&state.save_store, &mut state.save_status);
-    #[cfg(not(target_arch = "wasm32"))]
-    state.reload_save_slots();
-}
-
-fn toggle_fullscreen(state: &mut AppState, tx: &mut Tx) {
-    state.toggle_fullscreen_layout();
-    tx.toggle_full_screen();
-}
-
-fn fullscreen_button() -> El {
-    el().key("button-fullscreen")
-        .role("button")
-        .label("Toggle fullscreen")
-        .focusable(true)
-        .on_physical_input(input::physical_input)
-        .h(40.0)
-        .px(14.0)
-        .center()
-        .radius(8.0)
-        .fill(tok::accent(0, true))
-        .child(
-            text("Fullscreen")
-                .font(type_::LABEL)
-                .color(accent_foreground()),
-        )
-        .on_press_tx(toggle_fullscreen)
-}
-
-fn toggle_details(state: &mut AppState) {
-    state.toggle_details();
-}
-
-fn create_tone_artifact(state: &mut AppState) {
-    state.audio_status =
-        Some(crate::audio::create_artifact(state.model.settings()).unwrap_or_else(|error| error));
-}
-
-fn play_test_tone(state: &mut AppState) {
-    state.audio_status =
-        Some(crate::audio::play(state.model.settings()).unwrap_or_else(|error| error));
-}
-
-fn details_scene(state: &mut AppState) {
-    state.model.set_details_visible(true);
-}
-
 pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
-    let root_width = cx.layout_with("root", |rect| rect[2]);
-    state.ensure_integer_device_pixels(cx.env().scale, root_width);
+    let root = cx.layout_with("root", |rect| (rect[2], rect[3]));
+    let root_width = root.map(|size| size.0);
+    state.ensure_integer_device_pixels(cx.env().scale, root);
     let theme = tok::theme(cx.system_dark());
     let compact = root_width.is_some_and(|width| width < 640.0);
-    let page_title = match state.model.page() {
-        Page::Demo => "Synthetic demo",
-        Page::Settings => "Settings",
-        Page::Saves => "Save slots",
-        Page::InputTester => "Input tester",
+    let bound_game = crate::rom_binding::BOUND_ROM;
+    let page_title = if state.model.page() == Page::Game {
+        bound_game.map_or("Game", |binding| binding.title)
+    } else {
+        match state.model.page() {
+            Page::Demo => "Synthetic demo",
+            Page::Settings => "Settings",
+            Page::Saves => "Save slots",
+            Page::InputTester => "Input tester",
+            Page::Game => "Play local ROM",
+        }
     };
-    let toolbar = toolbar(state, compact);
 
-    let image = if state.model.page() == Page::Settings {
+    let image = if state.model.page() == Page::Game {
+        game_view::view(state, cx)
+    } else if state.model.page() == Page::Settings {
         settings_view::view(state, cx.system_dark(), compact)
     } else if state.model.page() == Page::Saves {
         saves_view::view(state, cx.system_dark(), compact)
@@ -313,7 +313,7 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
         let scale = cx.env().scale.max(1.0);
         let (surface_width, surface_height) = state.composed.size();
         el().key("snapshot")
-            .role("image")
+            .role("img")
             .label(if state.model.page() == Page::InputTester {
                 "Synthetic guest input test framebuffer"
             } else {
@@ -328,9 +328,23 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
             .on_drag(input::touch_drag)
     };
 
+    if bound_game.is_some() {
+        return col()
+            .key("root")
+            .w_full()
+            .h_full()
+            .padding(0.0)
+            .fill(tok::theme(true).bg)
+            .focusable(true)
+            .on_physical_input(input::physical_input)
+            .child(image);
+    }
+
     let mut content = col().key("page-content").w_full().gap(12.0);
     if state.model.details_visible() {
-        let shown = if state.model.page() == Page::InputTester {
+        let shown = if state.model.page() == Page::Game {
+            None
+        } else if state.model.page() == Page::InputTester {
             state.model.input_tester()
         } else {
             Some(state.model.demo())
@@ -349,6 +363,16 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
                 demo.guest_budget()
             ),
             Some(Err(error)) => error.to_owned(),
+            None if state.model.page() == Page::Game => state.game.as_ref().map_or_else(
+                || "No game image is loaded".to_owned(),
+                |game| {
+                    format!(
+                        "{} · {} guest instructions",
+                        game.identity(),
+                        game.instructions()
+                    )
+                },
+            ),
             None => "Synthetic input tester has not run".to_owned(),
         };
         content = content.child(
@@ -362,7 +386,7 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
     }
     content = content.child(image);
 
-    col()
+    let root = col()
         .key("root")
         .w_full()
         .h_full()
@@ -370,77 +394,38 @@ pub(crate) fn view(state: &AppState, cx: &mut Cx<AppState>) -> El {
         .padding(20.0)
         .fill(theme.bg)
         .focusable(true)
-        .on_physical_input(input::physical_input)
-        .child(
-            text(page_title)
-                .role("heading")
-                .level(1)
-                .font(type_::TITLE)
-                .color(theme.text),
-        )
-        .child(toolbar)
-        .child(
-            col()
-                .key("page-scroll")
-                .w_full()
-                .grow(1.0)
-                .min_h(0.0)
-                .scroll(ScrollSpec {
-                    stick_bottom: false,
-                })
-                .child(content),
-        )
-}
-
-fn toolbar(state: &AppState, compact: bool) -> El {
-    let demo = button("demo", "Demo", show_demo);
-    let settings = button("settings", "Settings", show_settings);
-    let saves = button("saves", "Saves", show_saves);
-    let input_test = button("input-tester", "Input", show_input_tester);
-    let fullscreen = fullscreen_button();
-    let details = button(
-        "details",
-        if state.model.details_visible() {
-            "Hide details"
-        } else {
-            "Details"
-        },
-        toggle_details,
-    );
-    if compact {
-        let navigation = row()
-            .w_full()
-            .gap(8.0)
-            .child(demo)
-            .child(input_test)
-            .child(settings)
-            .child(saves);
-        let display = row().w_full().gap(8.0).child(fullscreen).child(details);
+        .on_physical_input(input::physical_input);
+    root.child(
+        text(page_title)
+            .role("heading")
+            .level(1)
+            .font(type_::TITLE)
+            .color(theme.text),
+    )
+    .child(toolbar(state, compact))
+    .child(
         col()
-            .key("toolbar")
+            .key("page-scroll")
             .w_full()
-            .gap(8.0)
-            .child(navigation)
-            .child(display)
-    } else {
-        row()
-            .key("toolbar")
-            .w_full()
-            .gap(8.0)
-            .child(demo)
-            .child(input_test)
-            .child(settings)
-            .child(saves)
-            .child(fullscreen)
-            .child(details)
-    }
+            .grow(1.0)
+            .min_h(0.0)
+            .scroll(ScrollSpec {
+                stick_bottom: false,
+            })
+            .child(content),
+    )
 }
 
 pub fn app_spec() -> AppSpec<AppState> {
     AppSpec {
-        scenes: &[("details", details_scene)],
+        scenes: &[("details", pages::details_scene)],
         on_key: Some(keys::app_key),
         poll: Some(keys::bootstrap_fullscreen),
-        ..AppSpec::new("GBA snapshot", (960.0, 720.0), AppState::default, view)
+        ..AppSpec::new(
+            crate::rom_binding::BOUND_ROM.map_or("GBA snapshot", |binding| binding.title),
+            (960.0, 720.0),
+            AppState::default,
+            view,
+        )
     }
 }

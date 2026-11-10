@@ -32,11 +32,23 @@ not a roadmap promise and not a retail-game compatibility statement.
   SWI return. Other exception classes, halfword-multiply instructions and BIOS
   boot remain absent.
 - No GPU vendor SDK, FSR, DLSS or ML upscaling is integrated. `apps/rune` is the
-  canonical shared synthetic UI for desktop, browser/WASM and iOS; Android stays
-  on its existing adapter. Both are separate from the default CLI and accept no
-  cartridge; neither is a playable/per-ROM frontend. Host-side synthetic save
-  images are UI demonstrations, not guest save emulation or retail save
-  compatibility. Rune WebGL is disabled.
+  shared UI for desktop, browser/WASM and iOS; Android stays on its existing
+  adapter. A `GBA_NATIVE_ROM_PATH` build compiles generated translated ROM blocks
+  and binds one game's SHA-256/length/game code, then starts on its play screen
+  with Game Boy controls. These one-game sessions enable the documented opt-in
+  policies including the host-seeded GPIO clock; because GPIO-enabled buses are
+  reference-only, they execute the reference interpreter even though the
+  translated program is compiled and bound. The original image is not embedded
+  by default and remains beside the executable (or in the same-origin web
+  bundle) for data reads and interpreter fallbacks, so the default artifact is
+  not a single-file executable. The opt-in local `GBA_NATIVE_EMBED_ROM=1` build
+  (D54) embeds the image for single-file desktop use and must never be
+  committed, published or used in CI. Unsupported behavior remains an explicit
+  stop, and no BIOS boot or retail compatibility is claimed. The unbound Rune
+  build, Rune iOS and Android remain synthetic-only. Host-side save images are UI
+  demonstrations, not guest-save emulation or retail save compatibility. Browser
+  guest audio uses the bounded host renderer; native live guest audio goes
+  through the `cpal` sink. Rune WebGL is disabled.
 - `aot build` compiles a headless release executable for a locally supported
   Cargo target from an externally bound ROM. It is an experimental artifact, not
   a playable game, GUI frontend, save-aware application, final app or browser
@@ -421,12 +433,13 @@ Implemented regions and widths:
   setter provides no frame scheduler or sampling guarantee. The std-only `input`
   module adds the host button/key-binding model, an 800x600 landscape and a
   portrait normalised touch
-  layout, the persisted settings document and instruction-indexed input
+   layout, the persisted settings document and instruction-indexed input
    scripts. Rune and Android use that model for keyboard/touch buttons,
-   fullscreen and settings. These are synthetic-only UIs: they do not accept a
-   cartridge, retail save data or guest audio stream. Rune accepts only its
-   documented synthetic save fixture on import. Neither is a retail-game or
-   playability claim.
+   fullscreen and settings. A ROM-bound Rune build routes host input into its
+   fixed game and always shows the shared shell controls; the unbound build, iOS
+   and Android remain synthetic-only. No Rune target accepts retail save data.
+   Rune's save import remains limited to its documented synthetic fixture. The
+   session is not a BIOS boot, retail-game compatibility or timing claim.
    BG0 scroll reads are
   write-only-register `UnsupportedIoRead` errors. Scroll writes retain only
   documented bits 0..8; unused upper bits have no state effect.
@@ -1037,10 +1050,11 @@ scanline PPU, frame renderer or timing claim.
 Presentation (`upscaling.md`): the core CLI/CPU reference emits integer
 nearest-neighbor PPM only, with exact 3:2 content, centered black bars and output
 dimensions 1..=4096 and at least 240x160. FSR1, temporal FSR, ML-FSR and DLSS
-names return `UnsupportedBackend`. Canonical `apps/rune` presents the same
-static synthetic snapshot on desktop, browser/WASM and iOS; Rune WebGL is not
-enabled. Rune and Android are outside the root graph and are not vendor
-upscalers or per-ROM execution (`apps/rune/README.md`). A separate
+names return `UnsupportedBackend`. Canonical `apps/rune` presents a synthetic
+demo when unbound, and a one-game snapshot with compiled translated blocks plus
+interpreter fallbacks when built against a fixed ROM; Rune WebGL is not enabled.
+Rune and Android are outside the root graph and are not vendor upscalers. The
+one-game build is not yet a single-file executable (`apps/rune/README.md`). A separate
 `aot build --target wasm32-unknown-unknown`
 branch produces a ROM-bound WASM
 execution module callable from a browser, but it ships no HTML/JS application,

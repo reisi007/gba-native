@@ -11,7 +11,7 @@ use super::image::RgbaImage;
 use super::saves::SaveSlot;
 
 mod shell;
-pub use shell::{shell, shell_with_controls};
+pub use shell::{game_shell, shell, shell_with_controls, shell_with_controls_label};
 
 pub const WIDTH: u32 = 800;
 pub const HEIGHT: u32 = 600;

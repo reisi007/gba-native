@@ -33,6 +33,7 @@ usage:
   gba-native run <rom.gba> [--budget N] [--out output/<new-directory>] [--input <script>] [--audio-out <wav>] [--play] [--volume 0..100] [--mute] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k|--synthetic-backup-eeprom512|--synthetic-backup-eeprom8k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
   gba-native aot proof [--out output/<new-directory>]
   gba-native aot emit <rom.gba> output/<name>.rs
+  gba-native aot emit-program <rom.gba> output/<name>.rs
   gba-native aot build <rom.gba> --target <triple> [--out output/<new-directory>] [--budget N] [--trace <trace.txt>] [--synthetic-bios-zero-fill] [--synthetic-bios-rom-writes] [--synthetic-rom-writes-ignored] [--synthetic-backup-sram|--synthetic-backup-sram64k|--synthetic-backup-flash128k|--synthetic-backup-eeprom512|--synthetic-backup-eeprom8k] [--synthetic-bios-decompress] [--synthetic-bios-affine]
 
 The synthetic demo is the only supported end-to-end fixture. Progress is
@@ -61,12 +62,13 @@ pub fn run() -> Result<()> {
         "save" => save_cmd::run(args),
         "run" => run_cmd::run(args),
         "aot" => {
-            let subcommand = args
-                .next()
-                .ok_or_else(|| Error::Args("aot needs proof, emit or build".to_string()))?;
+            let subcommand = args.next().ok_or_else(|| {
+                Error::Args("aot needs proof, emit, emit-program or build".to_string())
+            })?;
             match subcommand.as_str() {
                 "proof" => cmd_aot_proof(args),
                 "emit" => cmd_aot_emit(args),
+                "emit-program" => cmd_aot_emit_program(args),
                 "build" => aot_build::run(args),
                 _ => Err(Error::Args(USAGE.to_string())),
             }
@@ -187,6 +189,36 @@ fn cmd_aot_emit(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
     println!(
         "note=generated source binds SHA-256+length and requires --rom PATH; it is not executed by this command"
     );
+    Ok(())
+}
+
+fn cmd_aot_emit_program(mut args: std::iter::Skip<std::env::Args>) -> Result<()> {
+    let rom = args
+        .next()
+        .ok_or_else(|| Error::Args("aot emit-program needs a ROM path".to_string()))?;
+    let out = args
+        .next()
+        .ok_or_else(|| Error::Args("aot emit-program needs an output path".to_string()))?;
+    if args.next().is_some() {
+        return Err(Error::Args(
+            "aot emit-program takes exactly two paths".to_string(),
+        ));
+    }
+    let cart = Cartridge::from_path(Path::new(&rom))?;
+    let artifact = aot::discover(&cart, 0x0800_0000, false, aot::Limits::default())?;
+    let source = aot::emit_program_module(&cart, &artifact)?;
+    write_safely(Path::new(&out), source.as_bytes())?;
+    // The app build verifies this sidecar so a stale program cannot be
+    // compiled; the program section itself stays free of ROM metadata.
+    let sidecar = format!("{out}.sha256");
+    let record = format!("rom_sha256={}\n", artifact.rom_sha256_hex());
+    write_safely(Path::new(&sidecar), record.as_bytes())?;
+    println!("rom_sha256={}", artifact.rom_sha256_hex());
+    println!("blocks={}", artifact.stats.blocks);
+    println!("translated_instructions={}", artifact.stats.instructions);
+    println!("output={out}");
+    println!("sha256_file={sidecar}");
+    println!("note=target-neutral program section for a caller that loads the cartridge");
     Ok(())
 }
 

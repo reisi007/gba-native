@@ -147,9 +147,14 @@ instructions, 230,411 guest instructions, 0 fallbacks, and
   file, Nintendo logo bytes, BIOS bytes or save data. All such ROMs are
   read-only inputs. Never copy ROM bytes into generated output or CI artifacts,
   publish them, or include their binaries in a CI workflow; local manual
-  execution is optional and must follow `tests/roms/gba-tests/README.md`.
-  Generated AOT source must not contain a ROM byte array or raw image copy; bind
-  SHA-256+length and require a caller-supplied `--rom PATH`.
+  execution is optional and must follow `tests/roms/gba-tests/README.md` (D54: see `apps/rune/AGENTS.md`).
+  Generated AOT source must not contain a ROM byte array or raw image copy.
+  Per-ROM local application executables may integrate generated translated code
+  and non-raw converted runtime data; those retail-derived outputs must remain
+  local, uncommitted, unpublished and outside CI artifacts. Do not require a
+  runtime `--rom PATH` when the app's converted representation is self-contained.
+  Any remaining data/fallback dependency on the source ROM must be explicit and
+  must not be described as a self-contained executable.
 - Do not use third-party emulator implementation sources, game decompilations or
   leaked SDKs. BIOS disassembly analysis remains prohibited except that a
   separate analyst may inspect only public GBA BIOS `RegisterRamReset` (`01h`)
