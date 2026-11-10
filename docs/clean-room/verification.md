@@ -2494,3 +2494,17 @@ on-device MediaPlayer playback remains outside CI.
   limit, Ratchet fast/slow, formatting, Clippy, debug/release workspace tests,
   demo, and synthetic AOT proof (`native_vs_reference=match`). The workspace
   test inventory remains 688; no test function was added.
+
+## Round: Inactive Wave channel mix gating (2026-11-10)
+
+- The host mix now excludes a routed Channel 3 when its DAC is disabled or its
+  current frequency snapshot has the restart bit clear. Previously, that silent
+  channel entered active-channel normalization and attenuated other PSG output.
+  The Wave trigger remains snapshot-based and is not event-tracked.
+- Assertions added to the existing Wave volume test compare the square-only mix
+  with both inactive Wave cases. This is a synthetic mixer regression, not
+  hardware-audio evidence; Issue #7 remains open.
+- A fresh-target `scripts/full.sh` passed after the implementation, including
+  the hard source limit, Ratchet fast/slow, formatting, Clippy, debug/release
+  workspace tests, demo, and synthetic AOT proof (`native_vs_reference=match`).
+  The workspace test inventory remains 688; no test function was added.

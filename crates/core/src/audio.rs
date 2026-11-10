@@ -93,14 +93,15 @@ fn channel_enabled(regs: &[u8], index: usize) -> bool {
     control & (1 << (8 + index)) != 0 || control & (1 << (12 + index)) != 0
 }
 
-fn wave_sample(regs: &[u8], phase: f32) -> f32 {
+fn wave_frequency(regs: &[u8]) -> Option<f32> {
     let enable = u16_at(regs, 0x10);
-    if enable & 0x0080 == 0 {
-        return 0.0;
+    if enable & 0x0080 == 0 || u16_at(regs, 0x14) & 0x8000 == 0 {
+        return None;
     }
-    if u16_at(regs, 0x14) & 0x8000 == 0 {
-        return 0.0;
-    }
+    square_frequency(regs, 0x14)
+}
+
+fn wave_sample(regs: &[u8], phase: f32) -> f32 {
     let index = ((phase * 32.0) as usize) & 31;
     let byte = regs[0x30 + index / 2];
     let nibble = if index.is_multiple_of(2) {
@@ -189,13 +190,11 @@ impl PsgMixer {
             self.phases[1] = (self.phases[1] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
-        if channel_enabled(regs, 2) {
+        if channel_enabled(regs, 2)
+            && let Some(frequency) = wave_frequency(regs)
+        {
             mixed += wave_sample(regs, self.phases[2]);
-            if u16_at(regs, 0x14) & 0x8000 != 0
-                && let Some(frequency) = square_frequency(regs, 0x14)
-            {
-                self.phases[2] = (self.phases[2] + frequency / SAMPLE_RATE as f32).fract();
-            }
+            self.phases[2] = (self.phases[2] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
         if !self.noise_bus_observed && u16_at(regs, 0x1C) & 0x8000 != 0 {

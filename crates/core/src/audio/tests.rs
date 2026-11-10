@@ -203,6 +203,22 @@ fn wave_channel_volume_mute_ratios_and_force_75_percent_are_documented() {
     assert_eq!(half, full / 2);
     assert_eq!(quarter, full / 4);
     assert_eq!(forced, full * 3 / 4);
+
+    let square = square_regs();
+    let (square_only, square_channels) = PsgMixer::new().frame(&square);
+    assert_eq!(square_channels, 1);
+    for (wave_control, wave_frequency) in [(0x0000u16, 0x8000u16), (0x0080, 0x0000)] {
+        let mut regs = square;
+        regs[0x10..0x12].copy_from_slice(&wave_control.to_le_bytes());
+        regs[0x14..0x16].copy_from_slice(&wave_frequency.to_le_bytes());
+        regs[0x20..0x22].copy_from_slice(&0x0507u16.to_le_bytes());
+        let (mixed, channels) = PsgMixer::new().frame(&regs);
+        assert_eq!(channels, 1, "inactive routed wave channel is not counted");
+        assert_eq!(
+            mixed, square_only,
+            "inactive wave channel does not attenuate mix"
+        );
+    }
 }
 
 #[test]

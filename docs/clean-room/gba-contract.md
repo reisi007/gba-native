@@ -582,8 +582,11 @@ group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
 automatic audio output. The separate `audio` module renders a bounded PSG mix
 from the register snapshot with a host volume/mute. The wave channel applies
-documented NR32 mute/100%/50%/25% volume and the force-75% bit. Channels 1, 2 and
-4 capture envelope initial volume, direction and period on trigger writes and
+documented NR32 mute/100%/50%/25% volume and the force-75% bit. For its
+normalized mix, the host counts Channel 3 only when routed, DAC-enabled, and the
+current register snapshot has its restart bit set. This snapshot gate is not
+persistent trigger-event tracking. Channels 1, 2 and 4 capture envelope initial
+volume, direction and period on trigger writes and
 advance steps on the host's 32768 Hz nominal sample clock; this is host-rendered
 state, not hardware timing. Channel 4 selects 15-bit/7-bit recurrence from NR43 bit 3,
 uses the documented `6000h`/`0060h` feedback XOR masks, and seeds `4000h`/`40h`
