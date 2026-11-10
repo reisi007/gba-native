@@ -4,6 +4,8 @@ use super::*;
 use crate::bus::{Bus, EWRAM_BASE, SoundFifo};
 use crate::cart::Cartridge;
 
+mod square_trigger;
+
 fn square_regs() -> [u8; 0x48] {
     let mut regs = [0u8; 0x48];
     // 440 Hz: 2048 - 131072/440 = 1750.
@@ -68,6 +70,7 @@ fn square_tone_is_audible_and_periodic() {
         .count();
     // One second of 440 Hz square has about 880 sign changes.
     assert!((800..=960).contains(&crossings), "crossings={crossings}");
+    square_trigger::restart_bit_does_not_act_as_a_square_channel_enable();
 }
 
 #[test]

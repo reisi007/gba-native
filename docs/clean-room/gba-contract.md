@@ -594,9 +594,9 @@ do not claim hardware sample, cycle or timing conformance. GBATEK defines NR44
 bit 15 as write-only Initial (1=Restart Sound): clearing it on a later write does
 not stop an already observed running noise channel. The renderer tracks bus-backed
 Channel 4 active state from its observed trigger snapshot (initially inactive;
-reset clears it); register-only rendering lazily activates from a set trigger bit
-while master sound is enabled and keeps that synthetic channel active when the
-bit is later cleared. This is bounded host state, not timing or
+reset clears it); the stateful register-only `AudioEngine` path lazily activates
+from a set trigger bit while master sound is enabled and keeps that synthetic
+channel active when the bit is later cleared. This is bounded host state, not timing or
 hardware-conformance evidence. The bus retains one
 latest trigger snapshot and wrapping sequence per channel. Every trigger write
 increments it, but multiple writes
@@ -609,7 +609,15 @@ events.
 while `advance_bus` observes once per batch call and cannot reproduce
 intermediate writes. Sequence wrap after 2^64 trigger writes between observations
 can alias; no stronger guarantee is claimed. A host engine observes group-6
-reset as envelope-state clearing. Standalone `render_psg` retains stateless
+reset as envelope-state clearing. For Channels 1 and 2, GBATEK likewise defines
+frequency in bits 0..10 and bit 15 as a write-only restart request. The bus-backed
+mixer tracks their active state from the observed trigger snapshots; later
+frequency writes with bit 15 clear do not silence a running channel, and group-6
+reset clears that observed state. Register-only rendering lazily latches a set
+restart bit in the stateful `AudioEngine` path while master sound is enabled,
+independently of routing, and retains the synthetic active state after the bit
+is cleared. This is bounded host state, not hardware audio evidence. Standalone
+`render_psg` retains stateless
 register-snapshot volume behavior. Wave-channel envelopes, sweep, length
 counters and full PSG/timing behavior remain unsupported. The renderer does not
 consume FIFO samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic

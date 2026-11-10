@@ -16,14 +16,16 @@
 //! itself advances on an instruction budget, not hardware cycles. A FIFO
 //! underrun holds the last sample instead of inventing silence.
 //!
-//! The bus-backed engine observes envelope trigger events at each bus-advance
-//! call, even when no sample is due. Its register-only `advance` variants and
-//! stateless [`render_psg`] intentionally retain snapshot-volume behavior and do
-//! not provide trigger-event guarantees.
+//! The bus-backed engine observes trigger events at each bus-advance call, even
+//! when no sample is due. Register-only `AudioEngine::advance` variants lazily
+//! latch the tracked square/noise-channel restart bits from snapshots but cannot
+//! recover triggers hidden between snapshots; stateless [`render_psg`] has no
+//! cross-call state.
 
 mod direct_sound;
 mod format;
 mod noise;
+mod square;
 
 #[cfg(test)]
 mod tests;
@@ -35,6 +37,7 @@ pub use format::{render_tone, wav_bytes};
 #[cfg(test)]
 use noise::noise_frequency;
 use noise::{noise_sample, noise_seed};
+use square::{square_frequency, square_sample};
 
 /// Fixed host render rate. This is not a claim about the GBA sample clock.
 pub const SAMPLE_RATE: u32 = 32_768;
@@ -90,49 +93,12 @@ fn channel_enabled(regs: &[u8], index: usize) -> bool {
     control & (1 << (8 + index)) != 0 || control & (1 << (12 + index)) != 0
 }
 
-fn square_frequency(regs: &[u8], x_offset: usize) -> Option<f32> {
-    let raw = u16_at(regs, x_offset);
-    if raw & 0x8000 == 0 {
-        return None;
-    }
-    let rate = raw & 0x07FF;
-    if rate >= 2048 {
-        return None;
-    }
-    Some(131_072.0 / f64::from(2048 - rate) as f32)
-}
-
-fn duty_threshold(duty: u16) -> f32 {
-    match duty & 3 {
-        0 => 0.125,
-        1 => 0.25,
-        2 => 0.5,
-        _ => 0.75,
-    }
-}
-
-fn square_sample(
-    regs: &[u8],
-    h_offset: usize,
-    x_offset: usize,
-    phase: f32,
-    envelope_volume: Option<u8>,
-) -> f32 {
-    if square_frequency(regs, x_offset).is_none() {
-        return 0.0;
-    }
-    let control = u16_at(regs, h_offset);
-    let volume = f32::from(envelope_volume.unwrap_or(((control >> 12) & 0xF) as u8)) / 15.0;
-    let duty = duty_threshold((control >> 6) & 3);
-    if phase < duty { volume } else { -volume }
-}
-
 fn wave_sample(regs: &[u8], phase: f32) -> f32 {
     let enable = u16_at(regs, 0x10);
     if enable & 0x0080 == 0 {
         return 0.0;
     }
-    if square_frequency(regs, 0x14).is_none() {
+    if u16_at(regs, 0x14) & 0x8000 == 0 {
         return 0.0;
     }
     let index = ((phase * 32.0) as usize) & 31;
@@ -166,6 +132,8 @@ struct PsgMixer {
     noise_seed_pending: bool,
     noise_active: bool,
     noise_bus_observed: bool,
+    square_active: [bool; 2],
+    square_bus_observed: [bool; 2],
     envelopes: [Option<PsgEnvelope>; 3],
 }
 
@@ -187,6 +155,8 @@ impl PsgMixer {
             noise_seed_pending: true,
             noise_active: false,
             noise_bus_observed: false,
+            square_active: [false; 2],
+            square_bus_observed: [false; 2],
             envelopes: [None; 3],
         }
     }
@@ -198,23 +168,32 @@ impl PsgMixer {
         }
         let mut mixed = 0.0f32;
         let mut active = 0u16;
+        for (index, offset) in [0x04, 0x0C].into_iter().enumerate() {
+            if !self.square_bus_observed[index] && u16_at(regs, offset) & 0x8000 != 0 {
+                self.square_active[index] = true;
+            }
+        }
         if channel_enabled(regs, 0)
+            && self.square_active[0]
             && let Some(frequency) = square_frequency(regs, 0x04)
         {
-            mixed += square_sample(regs, 0x02, 0x04, self.phases[0], self.envelope_volume(0));
+            mixed += square_sample(regs, 0x02, self.phases[0], self.envelope_volume(0));
             self.phases[0] = (self.phases[0] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
         if channel_enabled(regs, 1)
+            && self.square_active[1]
             && let Some(frequency) = square_frequency(regs, 0x0C)
         {
-            mixed += square_sample(regs, 0x08, 0x0C, self.phases[1], self.envelope_volume(1));
+            mixed += square_sample(regs, 0x08, self.phases[1], self.envelope_volume(1));
             self.phases[1] = (self.phases[1] + frequency / SAMPLE_RATE as f32).fract();
             active += 1;
         }
         if channel_enabled(regs, 2) {
             mixed += wave_sample(regs, self.phases[2]);
-            if let Some(frequency) = square_frequency(regs, 0x14) {
+            if u16_at(regs, 0x14) & 0x8000 != 0
+                && let Some(frequency) = square_frequency(regs, 0x14)
+            {
                 self.phases[2] = (self.phases[2] + frequency / SAMPLE_RATE as f32).fract();
             }
             active += 1;
@@ -277,6 +256,10 @@ impl PsgMixer {
                 self.envelopes[index].is_none_or(|state| state.sequence != event.sequence);
             if !changed {
                 continue;
+            }
+            if index < 2 {
+                self.square_bus_observed[index] = true;
+                self.square_active[index] = event.triggered;
             }
             if index == 2 && event.triggered {
                 self.noise_seed_pending = true;

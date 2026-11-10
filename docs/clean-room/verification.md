@@ -2477,3 +2477,20 @@ on-device MediaPlayer playback remains outside CI.
 - A deterministic rendered-wave test checks silence and exact relative peak
   levels. This is synthetic audio behavior, not hardware timing or retail-audio
   evidence. Issue #7 remains open for the remaining input/audio scope.
+
+## Round: Square-channel restart bits (2026-11-10)
+
+- Public GBATEK defines SOUND1CNT_X/SOUND2CNT_H bit 15 as a write-only restart
+  request, not a persistent enable. The host mixer now tracks bus-observed
+  Channels 1 and 2 trigger state independently of the raw restart bit; reset
+  observations clear that state. The stateful register-only path latches a set
+  restart bit before routing, then remains active after it is cleared.
+- Assertions added inside the existing square-wave test exercise both channels,
+  inactive-before-trigger, continued output after a later non-trigger write,
+  reset-cleared state, and register-only activation before routing. This is
+  synthetic host-state evidence only, not hardware audio conformance. Issue #7
+  remains open.
+- A fresh-target `scripts/full.sh` passed after the implementation: hard source
+  limit, Ratchet fast/slow, formatting, Clippy, debug/release workspace tests,
+  demo, and synthetic AOT proof (`native_vs_reference=match`). The workspace
+  test inventory remains 688; no test function was added.

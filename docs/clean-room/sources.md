@@ -82,6 +82,11 @@ Relevant anchors actually consulted for this milestone:
   channel 3 has no volume envelope. Consulted 2026-11-09 at
   <https://problemkaputt.de/gbatek.htm>; retrieval not separately retained or
   hashed. This grounds register fields only, not the host sample-clock policy.
+- `#gbasoundchannel1squarewave` and `#gbasoundchannel2tone`: SOUND1CNT_X bits
+  0..10 encode frequency and bit 15 is write-only `Initial (1=Restart Sound)`;
+  Channel 2 follows the same frequency/control behavior. Consulted 2026-11-10
+  at <https://problemkaputt.de/gbatek.htm>; retrieval not separately retained
+  or hashed. The restart bit is an event, not a persistent enable.
 - `#gbasoundchannel3waveoutput`: SOUND3CNT_H volume codes 0=mute, 1=100%,
   2=50%, 3=25%, and bit 15 forces 75% regardless of the code. Consulted
   2026-11-10 at <https://problemkaputt.de/gbatek.htm>; retrieval not retained.
