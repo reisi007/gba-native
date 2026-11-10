@@ -583,10 +583,16 @@ is generated from the documented 16-byte refill threshold, a timer, a frame or
 automatic audio output. The separate `audio` module renders a bounded PSG mix
 from the register snapshot with a host volume/mute. The wave channel applies
 documented NR32 mute/100%/50%/25% volume and the force-75% bit. Channels 1, 2 and
-4 capture envelope initial volume, direction and period on trigger writes and advance
-steps on the host's 32768 Hz nominal sample clock; this is host-rendered state,
-not hardware timing. The bus retains one latest trigger snapshot and wrapping
-sequence per channel. Every trigger write increments it, but multiple writes
+4 capture envelope initial volume, direction and period on trigger writes and
+advance steps on the host's 32768 Hz nominal sample clock; this is host-rendered
+state, not hardware timing. Channel 4 selects 15-bit/7-bit recurrence from NR43 bit 3,
+uses the documented `6000h`/`0060h` feedback XOR masks, and seeds `4000h`/`40h`
+on observed trigger (or first standalone render); changing width mid-stream
+selects its recurrence/mask without reseeding. The output holds between host
+samples when no LFSR step is due. Noise steps are quantized to host samples and
+do not claim hardware sample, cycle or timing conformance. The bus retains one
+latest trigger snapshot and wrapping sequence per channel. Every trigger write
+increments it, but multiple writes
 between engine observations intentionally coalesce to the latest captured
 parameters. Once triggered, the captured envelope controls rendered volume;
 later envelope-register edits do not rewrite that running host envelope unless

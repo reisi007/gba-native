@@ -2182,6 +2182,21 @@ on-device MediaPlayer playback remains outside CI.
   acceptance work. Host-rate sample generation remains approximate, not hardware
   cycle/timing or retail-audio validation.
 
+## Round: PSG Channel 4 noise width and recurrence (2026-11-10)
+
+- NR43 bit 3 selects the documented 15-bit or 7-bit right-shift recurrence,
+  feedback masks (`6000h`/`0060h`) and restart seeds (`4000h`/`40h`). The rate
+  formula remains unchanged; width selection does not reseed a running stream.
+  Bus-observed channel-4 trigger sequences seed at the next rendered noise sample;
+  standalone rendering seeds from NR43 on its first render.
+- The existing noise tests verify both eight-step independent states (`0040h`,
+  `0030h`), the width-bit rate invariance and the existing bounded phase rate.
+- Focused verification: `cargo test -p gba-native-core --lib audio` passes
+  28/28 selected tests. No hardware/conformance claim: steps are
+  host-sample-quantized and timing remains approximate.
+- Source grounding: public GBATEK `#gbasoundchannel4noise`, consulted
+  2026-11-10 at <https://problemkaputt.de/gbatek.htm>; no emulator source used.
+
 ## Round: Mode 2 static affine BG slice (2026-11-09)
 
 - Added a bounded static Mode 2 compositor that reuses `AffineBg` for BG2 and

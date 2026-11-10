@@ -23,6 +23,7 @@
 
 mod direct_sound;
 mod format;
+mod noise;
 
 #[cfg(test)]
 mod tests;
@@ -31,6 +32,9 @@ use crate::bus::{Bus, INSTRUCTION_CYCLES};
 use crate::error::Result;
 use direct_sound::DirectSound;
 pub use format::{render_tone, wav_bytes};
+#[cfg(test)]
+use noise::noise_frequency;
+use noise::{noise_sample, noise_seed};
 
 /// Fixed host render rate. This is not a claim about the GBA sample clock.
 pub const SAMPLE_RATE: u32 = 32_768;
@@ -153,45 +157,13 @@ fn wave_sample(regs: &[u8], phase: f32) -> f32 {
     sample * volume
 }
 
-fn noise_frequency(regs: &[u8]) -> Option<f32> {
-    let raw = u16_at(regs, 0x1C);
-    if raw & 0x8000 == 0 {
-        return None;
-    }
-    let ratio = match raw & 0x7 {
-        0 => 0.5,
-        value => f32::from(value),
-    };
-    let shift = u32::from((raw >> 4) & 0xF);
-    Some(524_288.0 / ratio / (1_u32 << (shift + 1)) as f32)
-}
-
-fn noise_sample(
-    regs: &[u8],
-    phase: f32,
-    lfsr: &mut u16,
-    envelope_volume: Option<u8>,
-) -> (f32, f32) {
-    let Some(frequency) = noise_frequency(regs) else {
-        return (0.0, phase);
-    };
-    let control = u16_at(regs, 0x18);
-    let volume = f32::from(envelope_volume.unwrap_or(((control >> 12) & 0xF) as u8)) / 15.0;
-    let advance = phase + frequency / SAMPLE_RATE as f32;
-    let steps = advance.floor() as u32;
-    for _ in 0..steps {
-        let bit = (*lfsr ^ (*lfsr >> 1)) & 1;
-        *lfsr = (*lfsr >> 1) | (bit << 14);
-    }
-    let sample = if *lfsr & 1 == 0 { volume } else { -volume };
-    (sample, advance.fract())
-}
-
 /// Phase and noise state of the four PSG channels.
 #[derive(Clone, Debug)]
 struct PsgMixer {
     phases: [f32; 4],
     lfsr: u16,
+    noise_output_high: bool,
+    noise_seed_pending: bool,
     envelopes: [Option<PsgEnvelope>; 3],
 }
 
@@ -208,7 +180,9 @@ impl PsgMixer {
     fn new() -> Self {
         Self {
             phases: [0.0; 4],
-            lfsr: 0x7FFF,
+            lfsr: noise_seed(0),
+            noise_output_high: false,
+            noise_seed_pending: true,
             envelopes: [None; 3],
         }
     }
@@ -243,8 +217,18 @@ impl PsgMixer {
         }
         if channel_enabled(regs, 3) {
             let envelope_volume = self.envelope_volume(2);
-            let (sample, next_phase) =
-                noise_sample(regs, self.phases[3], &mut self.lfsr, envelope_volume);
+            if self.noise_seed_pending {
+                self.lfsr = noise_seed(regs[0x1C]);
+                self.noise_output_high = false;
+                self.noise_seed_pending = false;
+            }
+            let (sample, next_phase) = noise_sample(
+                regs,
+                self.phases[3],
+                &mut self.lfsr,
+                &mut self.noise_output_high,
+                envelope_volume,
+            );
             mixed += sample;
             self.phases[3] = next_phase;
             active += 1;
@@ -286,6 +270,9 @@ impl PsgMixer {
                 self.envelopes[index].is_none_or(|state| state.sequence != event.sequence);
             if !changed {
                 continue;
+            }
+            if index == 2 && event.triggered {
+                self.noise_seed_pending = true;
             }
             if !event.triggered {
                 self.envelopes[index] = None;

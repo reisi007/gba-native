@@ -85,6 +85,67 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
         );
     }
     assert_eq!(noise_frequency(&noise_regs(0x00)), Some(524_288.0));
+    assert_eq!(noise_frequency(&noise_regs(0x08)), Some(524_288.0));
+    for (width, seed, expected) in [(0x00, 0x4000, 0x0040), (0x08, 0x0040, 0x0030)] {
+        let mut state = seed;
+        for _ in 0..8 {
+            let carry = state & 1;
+            state >>= 1;
+            if carry != 0 {
+                state ^= if width == 0 { 0x6000 } else { 0x0060 };
+            }
+            state &= if width == 0 { 0x7FFF } else { 0x007F };
+        }
+        assert_eq!(noise_seed(width), seed);
+        assert_eq!(state, expected);
+
+        let regs = noise_regs(width | 0x01); // Exactly eight shifts per sample.
+        let mut actual_state = noise_seed(width);
+        let mut output_high = false;
+        let (_, phase) = noise_sample(&regs, 0.0, &mut actual_state, &mut output_high, None);
+        assert_eq!(phase, 0.0);
+        assert_eq!(actual_state, expected);
+    }
+
+    let mut mixer = PsgMixer::new();
+    mixer.observe_envelopes([crate::bus::EnvelopeTrigger::default(); 3]);
+    mixer.frame(&noise_regs(0x48)); // 7-bit mode, exactly one shift per sample.
+    assert_eq!(
+        mixer.lfsr, 0x20,
+        "initial bus observation keeps the 7-bit seed"
+    );
+
+    let mut triggers = [crate::bus::EnvelopeTrigger::default(); 3];
+    triggers[2] = crate::bus::EnvelopeTrigger {
+        sequence: 1,
+        triggered: true,
+        initial_volume: 15,
+        increase: false,
+        period: 0,
+    };
+    mixer.observe_envelopes(triggers);
+    mixer.frame(&noise_regs(0x40)); // Trigger reseeds 15-bit mode before one shift.
+    assert_eq!(mixer.lfsr, 0x2000);
+
+    let mut state = 1;
+    let mut output_high = false;
+    let (high_sample, phase) = noise_sample(
+        &noise_regs(0x31), // One shift per sample; bit 0 is initially set.
+        0.0,
+        &mut state,
+        &mut output_high,
+        None,
+    );
+    assert!(high_sample > 0.0);
+    let (held_sample, _) = noise_sample(
+        &noise_regs(0x41), // Half a shift per sample: no step is due yet.
+        phase,
+        &mut state,
+        &mut output_high,
+        None,
+    );
+    assert!(held_sample > 0.0, "output holds until the next LFSR step");
+
     let mut disabled = noise_regs(0x00);
     disabled[0x1D] = 0;
     assert_eq!(noise_frequency(&disabled), None);
@@ -123,7 +184,7 @@ fn noise_phase_advances_at_the_calculated_nr43_frequency() {
     mixer.frame(&regs);
     assert!((mixer.phases[3] - 2.0 / 7.0).abs() < 0.00001);
     assert_eq!(
-        mixer.lfsr, 0x1FFF,
+        mixer.lfsr, 0x1000,
         "two crossed cycles advance the LFSR twice"
     );
 }

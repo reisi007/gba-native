@@ -29,7 +29,7 @@
   markers, profile-local defaults, isolated native profile namespaces and
   path-safe identifiers; `Bus::backup_image` / `Bus::load_backup` move raw
   backup images in and out of the device model.
-- `crates/core/src/audio.rs`, `audio/` (`direct_sound.rs`, `format.rs`,
+- `crates/core/src/audio.rs`, `audio/` (`direct_sound.rs`, `format.rs`, `noise.rs`,
   `tests.rs`, `tests/envelope_tests.rs`): dependency-free PSG mixer plus
   timer-clocked Direct Sound FIFO A/B playback, bounded host-sampled envelope
   slice, stateful `AudioEngine`, volume/mute settings and a WAV sink. It has no

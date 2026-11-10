@@ -52,8 +52,10 @@ Relevant anchors actually consulted for this milestone:
   the FIFO A/B reset bits.
 - `#gbasoundchannel4noise`: NR43 ratio/shift fields, `r=0` treated as `0.5`,
   the `524288 / r / 2^(s+1)` frequency formula, and documented 7-/15-bit noise
-  generator behavior. The noise-frequency slice below implements the divisor
-  and shift formula only; it does not claim the complete noise generator.
+  generator behavior: NR43 bit 3 selects width; each step shifts right and, for
+  old bit 0 set, outputs HIGH and XORs `6000h` (15-bit) or `0060h` (7-bit).
+  Restart seeds are `4000h` and `40h`, respectively. The host generator uses
+  these recurrence details within its bounded sampling approximation.
 - `#gba-timers`, `#4000100h---tm0cnt_l---timer-0-counterreload-rw` and
   `#4000102h---tm0cnt_h---timer-0-control-rw`: the four incrementing 16-bit
   timers, `F/1`/`F/64`/`F/256`/`F/1024` prescaler selection, count-up cascading
@@ -68,7 +70,7 @@ Relevant anchors actually consulted for this milestone:
   These anchors were consulted on 2026-10-29 in the same upstream GBATEK text at
   <https://problemkaputt.de/gbatek.htm>; that retrieval was not separately
   retained or hashed.
-- The Channel 4 noise section was consulted on 2026-11-09 at
+- The Channel 4 noise section was consulted on 2026-11-10 at
   <https://problemkaputt.de/gbatek.htm>; this retrieval was not separately
   retained or hashed.
 - `#gbasoundchannel1squarewave` and `#gbasoundchannel4noise`: SOUND1CNT_H
