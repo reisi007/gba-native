@@ -302,4 +302,24 @@ test.describe('Rune UI review captures', () => {
     await expect(page.getByText(/Browser save operation failed: IndexedDB is unavailable/))
       .toBeVisible();
   });
+
+  test('bound game loads locally and advances in the browser session', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'bound-game smoke uses the desktop Chromium project');
+    test.skip(process.env.RUNE_EMBEDDED_PROGRAM !== '1', 'requires a ROM-bound bundle');
+    await page.goto('/');
+    await expect(page.locator('#status')).toHaveCount(0, { timeout: 90_000 });
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 90_000 });
+    const screen = page.getByRole('img', { name: /Game screen with GBA directional pad/ });
+    await expect(screen).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator('[data-rune-a11y]')).not.toContainText(/Execution stopped:/);
+    await page.waitForTimeout(4_000);
+    const first = await page.screenshot();
+    await page.keyboard.down('z');
+    await page.waitForTimeout(1_500);
+    await page.keyboard.up('z');
+    await page.waitForTimeout(1_500);
+    const second = await page.screenshot();
+    expect(first.equals(second)).toBe(false);
+    await expect(page.locator('[data-rune-a11y]')).not.toContainText(/Execution stopped:/);
+  });
 });

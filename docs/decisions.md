@@ -150,9 +150,10 @@ Each ROM must support multiple persistent save profiles/slots across supported
 environments, with a portable data format and platform-specific persistence.
 Save management belongs in the application; mutable save data remains separate
 from compiled code. Native files and browser storage are implementation targets,
-not existing features. This does not authorize embedding or publishing the
-original ROM or existing user saves: the current external, read-only,
-SHA-256/length-bound ROM contract and data-preservation boundaries still apply.
+not existing features. D11 did not authorize embedding or publishing the original
+ROM or existing user saves. Its prior implication that application executables
+must load the original ROM at runtime is superseded by D53; the original remains
+a read-only build input and raw ROM bytes remain prohibited in outputs.
 
 Implementation note (2026-10-25): at that time `apps/web` provided an isolated
 synthetic WASM presentation foundation with WebGPU and WebGL2 paths. It did not
@@ -1168,3 +1169,50 @@ keys. The browser file-import staging key is a separate temporary clipboard and
 may continue to use `localStorage`; it is cleared only after the IndexedDB save
 transaction commits. Any future migration requires a new decision if a versioned
 browser-save release has first made migration necessary.
+
+## D53 — Local ROM-specific executables integrate converted game representations
+
+Decided by the owner on 2026-11-10 while implementing #33. A per-ROM application
+build targets one game and launches directly into its play screen. The local
+executable may integrate the generated translated program and supported
+non-raw, converted runtime representation needed by the target. The input `.gba`
+remains read-only build input: never commit, copy or embed the original image or
+a raw/lossless byte-array form. Retail-derived executables and generated sources
+are machine-local build outputs only; never commit, publish or attach them to CI.
+
+This changes the earlier runtime-caller-supplied-ROM packaging assumption in
+D11/#10 for self-contained per-ROM app targets. The AOT CLI/harness may retain its
+existing external-ROM contract as a separate tooling interface. A target must
+not claim to be self-contained while unsupported instructions, data reads or
+interpreter fallbacks still require the original ROM at runtime; such remaining
+dependencies must be made explicit and tracked. No increase to BIOS, ISA, PPU,
+timing, save, or retail-compatibility claims follows from this packaging choice.
+
+The host CLI emits the translated program, and `apps/rune/build.rs` requires the
+emitted header's `rom_sha256` to match the bound image, so a stale translation
+cannot be compiled silently. A one-game session that enables the host-seeded
+GPIO clock runs the reference interpreter, because the core keeps GPIO-enabled
+buses reference-only; the generated program stays compiled and bound but is not
+executed by that session. This is a session-policy fact, not a packaging change.
+
+## D54 — Owner-requested local single-file desktop build may embed the bound image
+
+Decided by the owner on 2026-11-10 while targeting a desktop single-file build
+for the Emerald one-game app. `GBA_NATIVE_EMBED_ROM=1` is an explicit, opt-in
+build switch that embeds the bound image in the executable so the app starts
+without a sibling `.gba` file. It is a narrow supersession of D53's "never embed
+the original image" clause for this local packaging path only:
+
+- The switch is off by default; ordinary builds still require the external
+  runtime image and none of the committed sources change.
+- The build script refuses to run when `CI` is set, and refuses `wasm32` targets
+  (the web bundle stages the image beside the bundle instead).
+- The resulting binary is retail-derived, machine-local output. It is written
+  under the git-ignored `target/`, must never be committed, published, attached
+  to a CI job or shared as an artifact, and no ROM bytes may be added to source,
+  tests, documentation or fixtures.
+- Identity binding (SHA-256, length, title, game code) still runs before a
+  session starts. Embedding does not relax any ISA, PPU, timing, save or
+  compatibility claim, and it is not a licence to distribute the image.
+
+The original `.gba` remains a read-only build input.

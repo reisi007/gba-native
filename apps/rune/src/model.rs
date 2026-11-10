@@ -20,6 +20,8 @@ pub enum Page {
     Saves,
     /// Repository-generated synthetic guest input test.
     InputTester,
+    /// Locally selected cartridge session.
+    Game,
 }
 
 /// App state that is independent of a particular Rune scene or platform.
@@ -211,6 +213,7 @@ impl RuneAppModel {
                     ))
                 }
             }
+            Page::Game => Err("Load a local ROM to start a game session".to_owned()),
             Page::Demo => {
                 let demo = self.demo.as_ref().map_err(|error| error.clone())?;
                 if self.settings.fullscreen {

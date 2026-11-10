@@ -8,6 +8,16 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 
 cd "$ROOT"
 require_cargo
+
+# The host CLI owns AOT discovery; apps/rune must not depend on that tooling.
+if [ -n "${GBA_NATIVE_ROM_PATH:-}" ]; then
+  [ -f "$GBA_NATIVE_ROM_PATH" ] || fail "GBA_NATIVE_ROM_PATH is not a file: $GBA_NATIVE_ROM_PATH"
+  PROGRAM="$ROOT/output/rune-bound/rom_program.rs"
+  mkdir -p "$(dirname -- "$PROGRAM")"
+  cargo run --quiet --locked -- aot emit-program "$GBA_NATIVE_ROM_PATH" "$PROGRAM"
+  export GBA_NATIVE_PROGRAM_PATH="$PROGRAM"
+fi
+
 export CARGO_TARGET_DIR="target/rune"
 NODE="$ROOT/target/tools/node-pinned/bin/node"
 

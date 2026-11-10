@@ -6,8 +6,10 @@ device/HLE opt-ins it can reach an observed retail title screen, but it makes no
 general retail-game or gameplay compatibility claim and has no
 vendor upscaling integration. The canonical synthetic desktop, browser and iOS
 frontend is the shared Rune application in `apps/rune`; Android stays on its
-existing frontend. Neither UI is playable or per-ROM. There is no successful
-REA native-analysis evidence.
+existing frontend. The Rune app has an optional per-ROM one-game build that
+starts one bound image on its play screen and runs it through the reference
+interpreter, but neither UI is a general playable emulator or retail-compatible.
+There is no successful REA native-analysis evidence.
 It is **not** a certified separate-team legal clean-room project.
 
 The repository currently contains a small, deliberately bounded ARMv4T subset,
@@ -67,7 +69,7 @@ the root workspace lockfile contains only these three internal path packages.
 | Android native compilation | `scripts/android.sh` cross-builds the default three-package workspace for `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android` with an installed NDK and verifies each artifact's ELF machine and `/system/bin/linker*` interpreter |
 | Android app (`apps/android`) | Signed debug APK with a framework `NativeActivity` and no Java code; the Rust library composes the shared shell, fullscreen frame and settings/saves pages, routes touch controls with per-pointer ownership and move/cancel cleanup, persists settings, manages named save slots including import/export and writes the shared tone artifact, and plays it through `android.media.MediaPlayer`; arm64-v8a, armeabi-v7a and x86_64; host unit tests and `scripts/android-app.sh` run in CI; synthetic only, no ROM/BIOS payload or device-multitouch claim |
 | Shared frontend model (`crates/core/src/frontend`) | Validated RGBA pipeline, synthetic demo snapshot, integer letterbox viewport, shell/fullscreen/settings screens, settings persistence and tone artifact shared by Rune and Android |
-| Canonical Rune frontend (`apps/rune`) | Shared Rune UI for Linux, macOS, Windows, browser/WASM and iOS; synthetic snapshot, controls, settings, host-side save slots and test-tone adapters. No ROM/gameplay or guest audio/save path. See `apps/rune/README.md` for verification limits. |
+| Canonical Rune frontend (`apps/rune`) | Shared Rune UI for Linux, macOS, Windows, browser/WASM and iOS; synthetic demo, input-tester fixture and an optional per-ROM compiled one-game build that binds one image identity, starts on its play screen with Game Boy controls, runs live guest audio through `cpal` and can embed the image locally (D54). No runtime ROM picker, BIOS boot, retail compatibility or guest-save persistence. See `apps/rune/README.md` for limits. |
 | Cross-target feature contract | `crates/core/src/frontend/features.rs` remains the shared contract. Rune host/browser targets expose its supported features and iOS exposes its tested subset; Android keeps its existing native adapter. |
 | FSR/DLSS/ML-FSR | **Not implemented**; explicit error |
 | Retail game compatibility | **None claimed** |
@@ -279,9 +281,21 @@ tools/Chromium and run its browser gate:
 ./scripts/web.sh --build-only       # partial Rune build/adapter checks; skips runtime E2E
 ```
 
-Rune runs the synthetic demo through the std-only core. Its default browser
-backend is WebGPU; Rune WebGL is not enabled. It is not a per-ROM browser
-application.
+Rune runs the synthetic demo and the input-tester fixture through the std-only
+core. A build that sets `GBA_NATIVE_ROM_PATH` becomes a per-ROM compiled
+one-game app: it compiles generated translated blocks, binds one image's
+SHA-256/length/game code and starts on its play screen with Game Boy controls.
+There is no runtime ROM picker. The one-game policy also enables the
+host-seeded GPIO clock, and because GPIO-enabled buses are reference-only in the
+core, the session executes the reference interpreter even though the translated
+program is compiled in. The image stays beside the executable (or in the
+same-origin web bundle) for data reads; the local opt-in
+`GBA_NATIVE_EMBED_ROM=1` build embeds it for a single-file desktop executable
+(decision D54). This is not BIOS boot and claims no retail compatibility;
+unsupported behavior stops execution explicitly. Native live guest audio is
+implemented through `cpal`, browser guest samples use Web Audio, and guest-save
+persistence is not implemented. The default browser backend is WebGPU; Rune
+WebGL is not enabled.
 
 The separate `aot build --target wasm32-unknown-unknown` path produces a
 ROM-bound WASM *execution module* and JS glue for a caller that already has a

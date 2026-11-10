@@ -3,13 +3,20 @@
 #![forbid(unsafe_code)]
 
 mod audio;
+#[cfg(not(target_arch = "wasm32"))]
+mod audio_sink;
+#[cfg(target_arch = "wasm32")]
+mod browser_rom;
 pub mod features;
+mod game;
 pub mod model;
 pub mod presentation;
+mod rom_binding;
 mod saves;
 mod storage;
 mod ui;
 
+pub use game::{GameSession, SessionPolicy};
 pub use ui::{AppState, app_spec};
 
 pub fn run_app() {

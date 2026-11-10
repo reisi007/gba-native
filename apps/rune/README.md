@@ -6,27 +6,116 @@ cutover gates passed on commit `cf2ac67` and the evidence is recorded in
 Android stays on its existing adapter pending Rune Android support (tracked in
 issue [#31](https://github.com/reisi007/gba-native/issues/31)).
 This status does not claim physical-GPU, physical-iOS, audible-output or
-assistive-technology behavior.
+assistive-technology behavior. A ROM-bound build also exists; it does not claim
+Emerald/retail compatibility.
 
 This isolated package shares one Rune `AppSpec`, view and host-state model across
 Linux, macOS, Windows, browser/WASM and Rune's iOS target. It pins Rune to
 `bca47138e9c31a7870a79272ee2523b592b1248d` and depends directly on
-`crates/core`, not on the root facade or AOT tooling. The Demo page presents the
-core's static synthetic snapshot. The Input Tester page runs the
-repository-generated input-test fixture with the current host input, stopping
-after one completed guest drawing pass (capped at 150,000 instructions). It does
-not load arbitrary ROMs, boot a game or BIOS, or claim gameplay compatibility;
-an instruction budget is not frame or cycle timing. The UI does not produce
-guest audio or save data. Host-side synthetic saves and a generated test tone
-are UI demonstrations, not emulation features.
+`crates/core` only; the translated program is pre-emitted by the host CLI, so the
+app crate has no build-time dependency on `crates/aot`. The default, unbound
+build keeps the Demo page with the core's static synthetic snapshot and the
+Input Tester page, which runs the repository-generated input-test fixture with
+the current host input, stopping after one completed guest drawing pass (capped
+at 150,000 instructions).
+
+Linux hosts need the ALSA development headers for the native output stream
+(`libasound2-dev` and `pkg-config` on Debian/Ubuntu); browser and macOS builds do
+not.
+
+## One-game application builds
+
+`GBA_NATIVE_ROM_PATH=/path/to/game.gba` turns the package into a one-game build:
+
+- The host CLI (`gba-native aot emit-program <rom> output/rune-bound/rom_program.rs`)
+  discovers reachable ROM blocks and emits target-neutral Rust; `build.rs` copies
+  that pre-emitted program into `OUT_DIR` and compiles it into the executable.
+  The app crate has no build-time dependency on the AOT tooling crate, and the
+  original `.gba` is never copied into the source tree. `scripts/rune-bound.sh`
+  runs both steps for desktop builds.
+- The app title, SHA-256, length and game code are bound at build time, and the
+  runtime rejects a different image before starting a session.
+- At startup the app opens directly on its play screen, in fullscreen by
+  default, and shows only the Game Boy shell with a directional pad, A/B,
+  Start/Select and L/R. The 800x600 shell is aspect-fitted by the host GPU
+  (bilinear sampling) instead of being CPU-upscaled, `F11` toggles the OS
+  fullscreen state, and `Esc` leaves non-game pages. Generic Demo, Settings,
+  Saves and ROM-picker navigation is hidden and its shortcuts are disabled in a
+  bound build; `M`, `-`, `=` and (outside iOS) `P` stay available for audio.
+- A native output stream (CoreAudio/WASAPI/ALSA through `cpal`) plays the core's
+  rendered PCM continuously. The mixer state persists across poll slices, so PSG
+  phases and Direct Sound FIFOs are not restarted every frame.
+- Non-embedded desktop builds locate the fixed cartridge next to the executable
+  (override with `GBA_NATIVE_ROM_RUNTIME_PATH`); embedded builds read the image
+  from the executable instead. Browser builds fetch the fixed file name from the
+  same origin; `scripts/rune-web.sh` copies it into the local bundle when
+  `GBA_NATIVE_ROM_PATH` is set.
+- `GBA_NATIVE_EMBED_ROM=1` additionally compiles the bound image into the
+  executable for a local single-file desktop build. The switch is off by
+  default, refuses to run in CI and refuses `wasm32`; the resulting binary is
+  retail-derived, stays under the git-ignored `target/`, and must never be
+  committed, published or attached to a CI artifact (decision D54):
+
+  ```text
+  GBA_NATIVE_ROM_PATH=/path/to/game.gba GBA_NATIVE_EMBED_ROM=1 \
+    scripts/rune-bound.sh --release --target x86_64-pc-windows-gnu
+  ```
+
+  That produces
+  `target/rune-bound/x86_64-pc-windows-gnu/release/gba-native-rune.exe`, which
+  starts without a sibling `.gba`. Building for the host produces the equivalent
+  local single-file binary. Without `GBA_NATIVE_EMBED_ROM`, the build keeps the
+  external runtime image and no cartridge bytes enter the executable.
+
+The runtime remains bounded: translated ROM blocks and interpreter fallbacks run
+in 100,000-instruction poll slices, and dynamic RAM code still goes through a
+fresh interpreter decode. **Session policy note:** the one-game builds enable the
+documented opt-in policies, including the host-seeded GPIO real-time clock. The
+core contract keeps GPIO-enabled buses on the reference interpreter, so these
+sessions execute the interpreter even though the generated translated program is
+compiled in and bound to the image; the native dispatcher path is covered by the
+AOT proof and IR-parity tests, not by this app. The input mapping follows the
+shared settings; host input injection has no hardware sampling/timing guarantee.
+The browser streams renderer samples to Web Audio; native output goes through the
+persistent `cpal` sink.
+
+This is an experimental interactive runtime path, not BIOS execution or a retail
+compatibility claim. The default strict bus and HLE policies are unchanged.
+Unsupported instructions, I/O, SWIs or PPU state stop the session explicitly. The
+PPU is a snapshot renderer, not a scanline/frame renderer; instruction counts are
+not cycles or frames. Game save data is not persisted; the existing save pages
+still manage synthetic host fixtures only. iOS currently loads its fixed ROM from
+app-local storage and has no picker; Android remains on its separate synthetic
+frontend while Rune lacks documented Android support.
+
+**Self-containment limit:** the executable integrates the generated translated
+program, but the current core still reads cartridge data and interpreter
+fallbacks from the original image. A default build is therefore not a single-file
+executable; it needs the bound `.gba` next to it (desktop) or in the same-origin
+bundle (web). The opt-in `GBA_NATIVE_EMBED_ROM=1` build (D54) embeds the image for
+local single-file use. Removing the external-image dependency for ordinary builds
+requires a complete converted data image and is tracked in issue #33.
+
+Local ROM-bound checks use two environment switches beyond
+`GBA_NATIVE_ROM_PATH`: `scripts/rune-bound.sh` builds desktop binaries, and the
+bound-game Chromium check runs with
+
+```text
+GBA_NATIVE_ROM_PATH=/path/to/game.gba RUNE_EMBEDDED_PROGRAM=1 \
+  RUNE_SCREENSHOT_GREP='bound game' RUNE_SCREENSHOT_PROJECT=desktop \
+  scripts/rune-web-screenshots.sh
+```
+
+`RUNE_EMBEDDED_PROGRAM=1` only marks the bundle as ROM-bound so the test is not
+skipped; the bundle itself is produced by `scripts/rune-web.sh`.
 
 ## Current platform status
 
 | Target | Implemented in this package | Verification limits |
 |---|---|---|
-| Linux, macOS, Windows | Shared Rune window and controls; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots and isolated named profiles; native Open/Save dialogs; WAV artifact and host-player adapter. Linux dialogs use the desktop portal. | All three host jobs passed in Rune UI run `42470521196`; Linux also passed the offscreen Mesa software-Vulkan render. On 2026-11-10 a native 960×720 `GBA snapshot` window was detected under Xvfb. This is not a physical-display or physical-GPU test. macOS/Windows GPU presentation remains unverified. |
-| Browser/WASM | Rune WebGPU shell; localStorage settings and IndexedDB-backed synthetic save profiles/slots; browser file picker/download; Web Audio tone request. `www/app.js` derives slot-dependent action availability from the Rune accessibility mirror and marks those buttons disabled. | The current WASM, adapter and Chromium gates passed locally on 2026-11-09. Audio request is not proof of audible output. Browser screen-reader behavior is not verified: the adapter is tested against stubbed and live Chromium DOM nodes, not with assistive technology. |
-| iOS device/simulator | Shared app code and the isolated native adapter compile for `aarch64-apple-ios` and `aarch64-apple-ios-sim`. Playback writes and opens the exact core-generated WAV through AVFoundation; mute and master volume are applied by the core artifact. Import presents a `.sav`-typed `UIDocumentPicker`, stages at most 128 KiB plus one rejection byte at `saves/import.sav`, then requires a second Import press for Rune's exact fixture validation. Exports remain in the Files-shared Documents folder. | Both target checks and the simulator package/install/launch smoke passed in run `42470521196`. Physical-device signing/execution, audible output, and actual document-picker interaction are unverified. Playback status means only that AVAudioPlayer accepted a request; there is no guest/emulator audio. |
+| Linux, macOS, Windows | Shared Rune window; persisted settings; native fullscreen; host keyboard/pointer input; synthetic save slots/profiles; native Open/Save dialogs; one-game ROM-bound build with generated translated blocks; live output through `cpal` (CoreAudio/WASAPI/ALSA). | A local macOS run reaches the Emerald title screen and produces non-silent PCM (`audio_peak=14874` over 450M guest instructions). Linux/Windows runtime presentation and audible verification remain outstanding; cross-target compile checks are recorded in the verification log. |
+| Browser/WASM | Rune WebGPU shell; localStorage settings and IndexedDB-backed synthetic save profiles/slots; same-origin bound `.gba` fetch, WASM reference interpreter, keyboard/touch controls and Web Audio sample path. | Requires a ROM-bound bundle built with `GBA_NATIVE_ROM_PATH`; the copied ROM file is local-only. Web Audio requests do not prove audible output; the Chromium smoke checks rendering and input, not sound. |
+| iOS device/simulator | Shared app code and the isolated native adapter compile for iOS targets. Existing synthetic save import/export and test-tone behavior remain available. | The one-game ROM path is not wired to an iOS document source; physical-device signing/execution and actual picker interaction remain unverified. |
 
 The Rune-specific host, browser and iOS runtime gates above are separately
 recorded in the verification log. A successful cross-build or browser capture

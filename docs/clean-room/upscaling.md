@@ -35,8 +35,9 @@ cartridge or implements a vendor backend. See `apps/rune/README.md`.
 Selecting any unimplemented vendor backend returns `UnsupportedBackend`. It is
 never silently replaced by nearest-neighbor. No GPU detection claim is made.
 The default core build has no graphics device, shader, model, weights or vendor
-SDK. Rune and Android present the synthetic bitmap only; neither integrates a
-vendor backend.
+SDK. Rune presents the synthetic demo, or a one-game snapshot with compiled
+translated blocks when built against a fixed ROM; Android remains
+synthetic-only. Neither integrates a vendor backend.
 
 ## Intended separation
 

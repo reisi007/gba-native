@@ -90,7 +90,15 @@
   WebGPU browser shell, while `scripts/rune-web-screenshots.sh` checks the
   desktop settings/save flow and captures desktop/mobile review states. It reuses the core synthetic shell
   compositor, settings and save contracts, with platform adapters for host
-  input, native/browser file operations and test-tone output. Mobile layouts
+  input, native/browser file operations and test-tone output. `src/rom_binding.rs`
+  and `build.rs` turn `GBA_NATIVE_ROM_PATH` into a one-game build: the host CLI
+  pre-emits the translated program (`aot emit-program`), `build.rs` compiles it
+  in and binds SHA-256/length/game code without copying the original image; the opt-in
+  `GBA_NATIVE_EMBED_ROM=1` local single-file path additionally compiles the
+  bound image into the executable (decision D54, desktop only, refused in CI). `src/game.rs`
+  drives the persistent session/mixer, `src/audio_sink.rs` plays its PCM through
+  `cpal` on native hosts, and `src/browser_rom.rs` fetches the same fixed file
+  from the web bundle's origin. Mobile layouts
   wrap, stack and scroll. `scripts/rune-ios-simulator.sh` links device and
   simulator executables, packages and launches a simulator app, and captures
   its screen in macOS CI; physical-device signing/execution and interactive

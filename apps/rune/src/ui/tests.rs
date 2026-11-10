@@ -2,6 +2,7 @@ use super::*;
 use gba_native::frontend::ui as core_ui;
 use rune::{Env, Runtime};
 
+mod game;
 mod input_tester;
 mod touch_tests;
 
@@ -332,7 +333,7 @@ fn high_dpi_surfaces_expand_by_integer_nearest_samples() {
         .into_iter()
         .find(|element| element.key.as_deref() == Some("snapshot"))
         .expect("snapshot element is present");
-    assert_eq!(snapshot.role, "image");
+    assert_eq!(snapshot.role, "img");
     assert_eq!(
         snapshot.label.as_deref(),
         Some("Synthetic GBA demo shell with static 240 by 160 fixture and host controls")

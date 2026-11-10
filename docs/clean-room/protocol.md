@@ -58,13 +58,23 @@ standalone emulator and not a game packager.
    instruction budget for a wholly synthetic fixture.
 
 No JIT or executable writable memory is required. iOS JIT constraints therefore
-do not block the current portable-core design. Standalone per-game packaging,
+do not block the current portable-core design. Complete standalone packaging,
 GPU vendor upscaling and retail-game compatibility are not claimed. `apps/rune`
-is the canonical synthetic UI for Linux, macOS, Windows, browser/WASM and iOS;
-Android remains on its existing adapter. Rune and Android remain outside the
-std-only core and accept no cartridge; neither is playable or vendor-upscaled.
-Rune WebGL is disabled, and physical iOS/device and GPU runtime evidence is
-tracked separately in `apps/rune/README.md` and `verification.md`.
+is the shared UI for Linux, macOS, Windows, browser/WASM and iOS; Android remains
+on its existing adapter. A Rune build that sets `GBA_NATIVE_ROM_PATH` becomes a
+one-game app: it compiles generated translated ROM blocks into the executable,
+binds SHA-256/length/game code, and starts directly on its play screen. Because
+the one-game policy enables the host-seeded GPIO clock, the session runs the
+reference interpreter even though the translated blocks are compiled and bound.
+The original `.gba` remains read-only build input and is not embedded by
+default; the runtime still reads cartridge data and interpreter fallbacks from
+that image next to the executable or in the same-origin web bundle
+(`docs/decisions.md` D53). The opt-in local `GBA_NATIVE_EMBED_ROM=1` build (D54)
+embeds the image for a single-file desktop executable and must stay local,
+uncommitted and outside CI. It does not execute a BIOS or establish retail-game
+compatibility. iOS and Android remain outside the verified one-game flow. Rune
+WebGL is disabled, and physical iOS/device and GPU runtime evidence is tracked
+separately in `apps/rune/README.md` and `verification.md`.
 
 ## Artifacts
 
@@ -102,11 +112,16 @@ retail cartridges**.
 
 ## Non-claims
 
-- No BIOS boot or retail-game playability claim. Rune's host-side synthetic save
-  slots and test-tone controls are UI demonstrations, not guest-save or retail
-  audio compatibility. The core accepts host-injected KEYINPUT state, but does
-  not schedule input sampling against the modeled LCD boundaries or make a
-  sampling guarantee.
+- No BIOS boot or retail-game compatibility claim. A ROM-bound Rune build
+  starts one fixed game with generated translated blocks plus the reference
+  interpreter; unsupported CPU, I/O, SWI or PPU behavior still stops execution.
+  The executable is not yet self-contained: the bound cartridge image must stay
+  available for data reads and fallbacks. Rune's synthetic save slots remain UI
+  demonstrations, not guest-save support. Browser guest audio uses the host
+  sample renderer; native live guest-audio output and retail audio compatibility
+  are not claimed. The core accepts host-injected KEYINPUT state, but does not
+  schedule input sampling against the modeled LCD boundaries or make a sampling
+  guarantee.
 - No cycle/frame-accurate timing, DMA arbitration, HBlank DMA/rendering,
   timer-driven sound request, or DMA-driven IRQ. A bounded HBlank status/IRQ
   transition is modeled at nominal scanline phase, without HBlank DMA,
@@ -131,6 +146,9 @@ retail cartridges**.
   WASM module has no HTML/JS UI, renderer, input or persistence. Building one
   target triple with the installed toolchain does not establish cross-platform
   support.
-- Rune and Android present only the static synthetic bitmap. Neither is a
-  playable/retail frontend, per-ROM application or vendor upscaler; neither
-  establishes frame/cycle timing.
+- Rune's one-game build presents a live snapshot from its bound game with
+  generated translated blocks and interpreter fallbacks; the unbound build, iOS
+  and the separate Android app remain synthetic-only. The executable is not a
+  single-file self-contained game yet, and this is not BIOS boot, a complete
+  per-ROM compiled application, a retail compatibility claim, or a
+  frame/cycle-timing guarantee. No target is a vendor upscaler.

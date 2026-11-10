@@ -4,6 +4,19 @@ set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 MANIFEST="$ROOT/apps/rune/Cargo.toml"
+PROGRAM="$ROOT/output/rune-bound/rom_program.rs"
+
+# The host CLI owns AOT discovery; apps/rune must not depend on that tooling.
+if [ -n "${GBA_NATIVE_ROM_PATH:-}" ]; then
+  [ -f "$GBA_NATIVE_ROM_PATH" ] || {
+    printf 'GBA_NATIVE_ROM_PATH is not a file: %s\n' "$GBA_NATIVE_ROM_PATH" >&2
+    exit 1
+  }
+  mkdir -p "$(dirname -- "$PROGRAM")"
+  (cd "$ROOT" && cargo run --quiet --locked -- aot emit-program "$GBA_NATIVE_ROM_PATH" "$PROGRAM")
+  export GBA_NATIVE_PROGRAM_PATH="$PROGRAM"
+fi
+
 export CARGO_TARGET_DIR="$ROOT/target/rune"
 BINDGEN=${WASM_BINDGEN:-"$ROOT/target/tools/bin/wasm-bindgen"}
 
@@ -24,4 +37,17 @@ mkdir "$DIST/pkg"
 cp "$ROOT/apps/rune/www/index.html" "$DIST/index.html"
 cp "$ROOT/apps/rune/www/app.js" "$DIST/app.js"
 cp "$ROOT/apps/rune/www/app.css" "$DIST/app.css"
+# A ROM-bound build fetches its one fixed game from the same origin. The bundle
+# is a local artifact: never serve it publicly or commit the copied ROM file.
+if [ -n "${GBA_NATIVE_ROM_PATH:-}" ]; then
+  if [ -n "${CI:-}" ] && [ "$CI" != "false" ] && [ "$CI" != "0" ]; then
+    printf 'Refusing to stage a retail ROM bundle in CI (GBA_NATIVE_ROM_PATH is set).\n' >&2
+    exit 1
+  fi
+  [ -f "$GBA_NATIVE_ROM_PATH" ] || {
+    printf 'GBA_NATIVE_ROM_PATH is not a file: %s\n' "$GBA_NATIVE_ROM_PATH" >&2
+    exit 1
+  }
+  cp "$GBA_NATIVE_ROM_PATH" "$DIST/$(basename -- "$GBA_NATIVE_ROM_PATH")"
+fi
 printf 'Rune browser bundle: %s\nServe this directory on localhost or HTTPS. This is not a browser E2E test.\n' "$DIST"
