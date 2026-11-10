@@ -700,6 +700,23 @@ is made.
   in `gba-contract.md`. No audio completeness, playability, hardware timing or
   retail compatibility is established; issues #7 and #29 remain open.
 
+## Round: Channel 4 NR44 restart bit (2026-11-10)
+
+- Public GBATEK defines NR44 bit 15 as a write-only restart request. Bus-backed
+  host audio now tracks the observed Channel 4 trigger separately, so a later
+  NR44 write with bit 15 clear does not silence an already-started noise channel;
+  reset observations clear that bounded host state. Register-only rendering
+  latches a set restart bit while master sound is enabled, independently of
+  channel routing.
+- The focused core audio suite passed 28/28. A fresh-target `scripts/full.sh`
+  passed: source-size limit, Ratchet fast/slow, formatting, Clippy, debug and
+  release workspace tests, demo, and synthetic native AOT proof
+  (`native_vs_reference=match`). Independent review approved the implementation.
+- Existing audio assertions verify inactive-before-trigger, continued output
+  after the trigger bit is cleared, and the register-only case. This is
+  synthetic host-state evidence only; Channel 4 length expiry and hardware audio
+  behavior remain unverified. Issues #7 and #29 remain open.
+
 ### Output path safety
 
 `src/cli/output.rs` enforces the CLI contract; `tests/cli_output.rs` exercises

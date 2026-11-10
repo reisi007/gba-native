@@ -72,7 +72,9 @@ Relevant anchors actually consulted for this milestone:
   retained or hashed.
 - The Channel 4 noise section was consulted on 2026-11-10 at
   <https://problemkaputt.de/gbatek.htm>; this retrieval was not separately
-  retained or hashed.
+  retained or hashed. It documents NR44 bit 15 as write-only `Initial
+  (1=Restart Sound)`; it is a restart event, not a persistent channel-enable
+  bit.
 - `#gbasoundchannel1squarewave` and `#gbasoundchannel4noise`: SOUND1CNT_H
   envelope step-time bits encode units of n/64 seconds (1..7; zero means no
   envelope), bit 11 selects decrease/increase, and bits 12..15 provide initial

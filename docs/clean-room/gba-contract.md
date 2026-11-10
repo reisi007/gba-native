@@ -590,7 +590,14 @@ uses the documented `6000h`/`0060h` feedback XOR masks, and seeds `4000h`/`40h`
 on observed trigger (or first standalone render); changing width mid-stream
 selects its recurrence/mask without reseeding. The output holds between host
 samples when no LFSR step is due. Noise steps are quantized to host samples and
-do not claim hardware sample, cycle or timing conformance. The bus retains one
+do not claim hardware sample, cycle or timing conformance. GBATEK defines NR44
+bit 15 as write-only Initial (1=Restart Sound): clearing it on a later write does
+not stop an already observed running noise channel. The renderer tracks bus-backed
+Channel 4 active state from its observed trigger snapshot (initially inactive;
+reset clears it); register-only rendering lazily activates from a set trigger bit
+while master sound is enabled and keeps that synthetic channel active when the
+bit is later cleared. This is bounded host state, not timing or
+hardware-conformance evidence. The bus retains one
 latest trigger snapshot and wrapping sequence per channel. Every trigger write
 increments it, but multiple writes
 between engine observations intentionally coalesce to the latest captured

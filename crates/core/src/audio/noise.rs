@@ -6,17 +6,14 @@ pub(super) fn noise_seed(nr43: u8) -> u16 {
     if nr43 & 0x08 != 0 { 0x0040 } else { 0x4000 }
 }
 
-pub(super) fn noise_frequency(regs: &[u8]) -> Option<f32> {
+pub(super) fn noise_frequency(regs: &[u8]) -> f32 {
     let raw = u16::from_le_bytes([regs[0x1C], regs[0x1D]]);
-    if raw & 0x8000 == 0 {
-        return None;
-    }
     let ratio = match raw & 0x7 {
         0 => 0.5,
         value => f32::from(value),
     };
     let shift = u32::from((raw >> 4) & 0xF);
-    Some(524_288.0 / ratio / (1_u32 << (shift + 1)) as f32)
+    524_288.0 / ratio / (1_u32 << (shift + 1)) as f32
 }
 
 pub(super) fn noise_sample(
@@ -26,9 +23,7 @@ pub(super) fn noise_sample(
     output_high: &mut bool,
     envelope_volume: Option<u8>,
 ) -> (f32, f32) {
-    let Some(frequency) = noise_frequency(regs) else {
-        return (0.0, phase);
-    };
+    let frequency = noise_frequency(regs);
     let nr43 = regs[0x1C];
     let control = u16::from_le_bytes([regs[0x18], regs[0x19]]);
     let volume = f32::from(envelope_volume.unwrap_or(((control >> 12) & 0xF) as u8)) / 15.0;

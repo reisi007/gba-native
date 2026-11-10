@@ -78,14 +78,17 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
         (0x37, 524_288.0 / 7.0 / 16.0),
         (0xF0, 16.0),
     ] {
-        let frequency = noise_frequency(&noise_regs(nr43)).expect("triggered noise");
+        let frequency = noise_frequency(&noise_regs(nr43));
         assert!(
             (frequency - expected).abs() < 0.01,
             "NR43={nr43:#04x}: {frequency} != {expected}"
         );
     }
-    assert_eq!(noise_frequency(&noise_regs(0x00)), Some(524_288.0));
-    assert_eq!(noise_frequency(&noise_regs(0x08)), Some(524_288.0));
+    assert_eq!(noise_frequency(&noise_regs(0x00)), 524_288.0);
+    assert_eq!(noise_frequency(&noise_regs(0x08)), 524_288.0);
+    let mut no_trigger = noise_regs(0x00);
+    no_trigger[0x1D] = 0;
+    assert_eq!(noise_frequency(&no_trigger), 524_288.0);
     for (width, seed, expected) in [(0x00, 0x4000, 0x0040), (0x08, 0x0040, 0x0030)] {
         let mut state = seed;
         for _ in 0..8 {
@@ -109,11 +112,8 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
 
     let mut mixer = PsgMixer::new();
     mixer.observe_envelopes([crate::bus::EnvelopeTrigger::default(); 3]);
-    mixer.frame(&noise_regs(0x48)); // 7-bit mode, exactly one shift per sample.
-    assert_eq!(
-        mixer.lfsr, 0x20,
-        "initial bus observation keeps the 7-bit seed"
-    );
+    mixer.frame(&noise_regs(0x48)); // Bus observation says inactive despite raw bit 15.
+    assert_eq!(mixer.lfsr, 0x4000, "initial bus state is inactive");
 
     let mut triggers = [crate::bus::EnvelopeTrigger::default(); 3];
     triggers[2] = crate::bus::EnvelopeTrigger {
@@ -146,9 +146,37 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
     );
     assert!(held_sample > 0.0, "output holds until the next LFSR step");
 
-    let mut disabled = noise_regs(0x00);
-    disabled[0x1D] = 0;
-    assert_eq!(noise_frequency(&disabled), None);
+    let mut bus = Bus::new(Cartridge::from_bytes(vec![0u8; 0x200]).expect("cart"));
+    bus.write16(0x0400_0080, 0x8007).expect("route noise left");
+    bus.write16(0x0400_0084, 0x0080).expect("master enable");
+    bus.write16(0x0400_0078, 0xF000).expect("noise volume");
+    bus.write16(0x0400_007C, 0x0001).expect("noise frequency");
+    let mut engine = AudioEngine::new(AudioSettings::new(100, false));
+    engine
+        .advance_bus(&mut bus, 1_024)
+        .expect("initial silent sample");
+    assert!(engine.samples().iter().all(|sample| *sample == 0));
+    bus.write16(0x0400_007C, 0x8001).expect("noise trigger");
+    let before = engine.samples().len();
+    engine
+        .advance_bus(&mut bus, 1_024)
+        .expect("triggered sample");
+    assert!(engine.samples()[before..].iter().any(|sample| *sample != 0));
+    bus.write16(0x0400_007C, 0x0001)
+        .expect("clear write-only trigger bit");
+    let before = engine.samples().len();
+    engine
+        .advance_bus(&mut bus, 1_024)
+        .expect("running noise sample");
+    assert!(engine.samples()[before..].iter().any(|sample| *sample != 0));
+
+    let mut standalone = PsgMixer::new();
+    let mut unrouted = noise_regs(0x00);
+    unrouted[0x20..0x22].fill(0);
+    standalone.frame(&unrouted); // Latch the restart bit before routing.
+    let mut routed = noise_regs(0x00);
+    routed[0x1D] = 0; // A later non-trigger write clears bit 15.
+    assert_eq!(standalone.frame(&routed).1, 1);
 }
 
 #[test]

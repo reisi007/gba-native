@@ -164,6 +164,8 @@ struct PsgMixer {
     lfsr: u16,
     noise_output_high: bool,
     noise_seed_pending: bool,
+    noise_active: bool,
+    noise_bus_observed: bool,
     envelopes: [Option<PsgEnvelope>; 3],
 }
 
@@ -183,6 +185,8 @@ impl PsgMixer {
             lfsr: noise_seed(0),
             noise_output_high: false,
             noise_seed_pending: true,
+            noise_active: false,
+            noise_bus_observed: false,
             envelopes: [None; 3],
         }
     }
@@ -215,7 +219,10 @@ impl PsgMixer {
             }
             active += 1;
         }
-        if channel_enabled(regs, 3) {
+        if !self.noise_bus_observed && u16_at(regs, 0x1C) & 0x8000 != 0 {
+            self.noise_active = true;
+        }
+        if channel_enabled(regs, 3) && self.noise_active {
             let envelope_volume = self.envelope_volume(2);
             if self.noise_seed_pending {
                 self.lfsr = noise_seed(regs[0x1C]);
@@ -273,6 +280,10 @@ impl PsgMixer {
             }
             if index == 2 && event.triggered {
                 self.noise_seed_pending = true;
+            }
+            if index == 2 {
+                self.noise_bus_observed = true;
+                self.noise_active = event.triggered;
             }
             if !event.triggered {
                 self.envelopes[index] = None;
