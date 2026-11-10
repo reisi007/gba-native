@@ -389,7 +389,9 @@ expectations, not from the decoder/interpreter:
   open for its other scoped work.
 - Integer nearest scaling, exact 3:2 letterboxing, the scale-aware
   sharp-bilinear CPU reference, invalid sizes, and explicit rejection of
-  FSR1/temporal-FSR/ML-FSR/DLSS names.
+  FSR1/temporal-FSR/ML-FSR/DLSS names. CPU tests also verify every content and
+  bar pixel at 3840x2160 and 4096x2160 for nearest (3120x2080) and
+  sharp-bilinear (3240x2160); this is not GPU or Rune integration evidence.
 - PPM header and payload length.
 
 ### Hybrid AOT and native proof

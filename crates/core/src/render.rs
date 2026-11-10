@@ -210,6 +210,54 @@ mod tests {
         assert_eq!(Backend::parse("sharp-bilinear"), Ok(Backend::SharpBilinear));
     }
 
+    fn assert_solid_content_rect(image: &Image, rect: (u32, u32, u32, u32), color: u32) {
+        let (left, top, content_width, content_height) = rect;
+        let right = left + content_width;
+        let bottom = top + content_height;
+
+        for y in 0..image.height {
+            for x in 0..image.width {
+                let inside = x >= left && x < right && y >= top && y < bottom;
+                let expected = if inside { color } else { 0 };
+                assert_eq!(
+                    image.pixel(x, y),
+                    expected,
+                    "unexpected output pixel at ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn four_k_layout_bounds_and_bars_are_cpu_verified() {
+        let color = 0x0012_3456;
+        let image = Image {
+            width: WIDTH,
+            height: HEIGHT,
+            pixels: vec![color; (WIDTH * HEIGHT) as usize],
+        };
+
+        for width in [3840, 4096] {
+            for backend in [Backend::Nearest, Backend::SharpBilinear] {
+                let (content_width, content_height) = match backend {
+                    Backend::Nearest => (3120, 2080),
+                    Backend::SharpBilinear => (3240, 2160),
+                    _ => unreachable!("only CPU presentation modes are exercised"),
+                };
+                let output = scale(&image, width, 2160, backend).expect("4K CPU scale");
+                assert_eq!((output.width, output.height), (width, 2160));
+                let rect = (
+                    (width - content_width) / 2,
+                    (2160 - content_height) / 2,
+                    content_width,
+                    content_height,
+                );
+
+                assert_solid_content_rect(&output, rect, color);
+            }
+        }
+    }
+
     #[test]
     fn unknown_backend_name_is_preserved_in_the_diagnostic() {
         let error = Backend::parse("foo").expect_err("unknown backend");
