@@ -95,10 +95,12 @@ fn channel_enabled(regs: &[u8], index: usize) -> bool {
 
 fn wave_frequency(regs: &[u8]) -> Option<f32> {
     let enable = u16_at(regs, 0x10);
-    if enable & 0x0080 == 0 || u16_at(regs, 0x14) & 0x8000 == 0 {
+    let control = u16_at(regs, 0x14);
+    if enable & 0x0080 == 0 || control & 0x8000 == 0 {
         return None;
     }
-    square_frequency(regs, 0x14)
+    let rate = control & 0x07FF;
+    Some(65_536.0 / f32::from(2048 - rate))
 }
 
 fn wave_sample(regs: &[u8], phase: f32) -> f32 {

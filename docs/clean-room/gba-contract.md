@@ -581,8 +581,10 @@ bits clear their corresponding queues; RegisterRamReset group 6 clears both and
 group 7 preserves them. No sample is consumed automatically and no DMA request
 is generated from the documented 16-byte refill threshold, a timer, a frame or
 automatic audio output. The separate `audio` module renders a bounded PSG mix
-from the register snapshot with a host volume/mute. The wave channel applies
-documented NR32 mute/100%/50%/25% volume and the force-75% bit. For its
+from the register snapshot with a host volume/mute. Channel 3 currently renders
+a single 32-digit wave bank, using the documented `2097152/(2048-n)` digit rate
+divided by 32 for its tone frequency. It applies NR32 mute/100%/50%/25% volume
+and the force-75% bit. For its
 normalized mix, the host counts Channel 3 only when routed, DAC-enabled, and the
 current register snapshot has its restart bit set. This snapshot gate is not
 persistent trigger-event tracking. Channels 1, 2 and 4 capture envelope initial
@@ -621,8 +623,9 @@ restart bit in the stateful `AudioEngine` path while master sound is enabled,
 independently of routing, and retains the synthetic active state after the bit
 is cleared. This is bounded host state, not hardware audio evidence. Standalone
 `render_psg` retains stateless
-register-snapshot volume behavior. Wave-channel envelopes, sweep, length
-counters and full PSG/timing behavior remain unsupported. The renderer does not
+register-snapshot volume behavior. Channel 3 dual-bank/64-digit playback and
+wave-RAM bank access, wave-channel envelopes, sweep, length counters and full
+PSG/timing behavior remain unsupported. The renderer does not
 consume FIFO samples or claim cycle-accurate Direct Sound. There is no DMA arbitration, scanline/cycle timing, automatic
 VBlank/HBlank trigger, Game Pak DRQ, video-capture transfer or DMA-driven IRQ.
 - The SRAM/flash backup window (`0x0E000000..=0x0E00FFFF`) is fail-closed by

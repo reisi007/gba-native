@@ -184,6 +184,8 @@ fn noise_frequency_uses_the_documented_nr43_ratio_and_shift() {
 
 #[test]
 fn wave_channel_volume_mute_ratios_and_force_75_percent_are_documented() {
+    let frequency = wave_frequency(&wave_regs(0x2000)).expect("single-bank wave frequency");
+    assert!((frequency - 65_536.0 / 298.0).abs() < 0.001);
     let peak = |volume| {
         render_psg(&wave_regs(volume), 64, AudioSettings::new(100, false))
             .into_iter()

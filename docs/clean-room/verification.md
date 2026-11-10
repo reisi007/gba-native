@@ -2217,6 +2217,22 @@ on-device MediaPlayer playback remains outside CI.
 - Source grounding: public GBATEK `#gbasoundchannel4noise`, consulted
   2026-11-10 at <https://problemkaputt.de/gbatek.htm>; no emulator source used.
 
+## Round: Channel 3 single-bank wave pitch (2026-11-10)
+
+- The modeled 32-digit single-bank Channel 3 now converts the documented
+  `2097152/(2048-n)` wave-digit rate to a tone frequency by dividing by 32.
+  This replaces accidental reuse of the square-channel formula, which doubled
+  the generated pitch.
+- The existing wave-volume test also checks register rate `n=1750` against
+  `65536/298` Hz. Two-bank/64-digit playback and wave-RAM bank access remain
+  unsupported; issue #29 stays open for the remaining PSG timeline and sinks.
+- The focused core audio suite passes 28/28. Fresh-target `./scripts/full.sh`
+  passes, including Ratchet fast/slow, formatting, Clippy, debug/release workspace
+  tests, demo and synthetic native proof (`native_vs_reference=match`, zero
+  fallbacks). This is software-test evidence, not hardware audio validation.
+- Source grounding: public GBATEK `#gbasoundchannel3waveoutput`, consulted
+  2026-11-10 at <https://problemkaputt.de/gbatek.htm>; no emulator source used.
+
 ## Round: Mode 2 static affine BG slice (2026-11-09)
 
 - Added a bounded static Mode 2 compositor that reuses `AffineBg` for BG2 and

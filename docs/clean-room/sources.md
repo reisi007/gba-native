@@ -87,9 +87,11 @@ Relevant anchors actually consulted for this milestone:
   Channel 2 follows the same frequency/control behavior. Consulted 2026-11-10
   at <https://problemkaputt.de/gbatek.htm>; retrieval not separately retained
   or hashed. The restart bit is an event, not a persistent enable.
-- `#gbasoundchannel3waveoutput`: SOUND3CNT_H volume codes 0=mute, 1=100%,
-  2=50%, 3=25%, and bit 15 forces 75% regardless of the code. Consulted
-  2026-11-10 at <https://problemkaputt.de/gbatek.htm>; retrieval not retained.
+- `#gbasoundchannel3waveoutput`: NR30's single-/dual-bank dimensions and selected
+  playback bank, sample rate `2097152/(2048-n)` wave digits per second, and
+  SOUND3CNT_H volume codes 0=mute, 1=100%, 2=50%, 3=25%, with bit 15 forcing
+  75%. Consulted 2026-11-10 at <https://problemkaputt.de/gbatek.htm>; retrieval
+  not retained.
 - `#gba-cart-io-port-gpio`: GPIO data/direction/control registers at ROM-window
   offsets `C4h`/`C6h`/`C8h`, low-four-bit data and direction, control bit 0, and
   the documented 16-/32-bit ROM-store access forms. Consulted at
