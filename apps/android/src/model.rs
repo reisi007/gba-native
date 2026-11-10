@@ -7,6 +7,7 @@
 //! save slots and the tone come from `gba_native::frontend`, the Android app
 //! cannot drift from the other GUI targets at the feature level.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use gba_native::frontend::ui::{self, SavesAction};
@@ -57,6 +58,7 @@ pub struct AppModel {
     settings_path: PathBuf,
     page: Page,
     pressed: u16,
+    active_touches: BTreeMap<i32, Option<Button>>,
     frame: RgbaImage,
     slots: SaveSlots,
     slot_list: Vec<SaveSlot>,
@@ -81,6 +83,7 @@ impl AppModel {
             settings_path,
             page: Page::Shell,
             pressed: 0,
+            active_touches: BTreeMap::new(),
             frame,
             slots: SaveSlots::new(saves_root),
             slot_list: Vec::new(),
@@ -144,37 +147,52 @@ impl AppModel {
         }
     }
 
-    /// Press a normalised composition coordinate against the shared controls.
-    pub fn touch_down(&mut self, x: f32, y: f32) -> Option<Button> {
-        if self.page != Page::Shell {
-            return None;
-        }
-        let button = ui::hit_test(x, y)?;
-        self.pressed |= button.bit();
-        Some(button)
+    /// Start tracking one Android pointer and update its host-side button state.
+    pub fn pointer_down(&mut self, id: i32, point: Option<(f32, f32)>) -> bool {
+        let previous = self.pressed;
+        let button = self.button_at(point);
+        self.active_touches.insert(id, button);
+        self.refresh_pressed();
+        self.pressed != previous
     }
 
-    /// Release a normalised composition coordinate against the shared controls.
-    pub fn touch_up(&mut self, x: f32, y: f32) -> Option<Button> {
-        if self.page != Page::Shell {
-            return None;
+    /// Update a tracked pointer as it moves between controls or outside them.
+    pub fn pointer_move(&mut self, id: i32, point: Option<(f32, f32)>) -> bool {
+        if !self.active_touches.contains_key(&id) {
+            return false;
         }
-        let button = ui::hit_test(x, y)?;
-        self.pressed &= !button.bit();
-        Some(button)
+        let previous = self.pressed;
+        let button = self.button_at(point);
+        self.active_touches.insert(id, button);
+        self.refresh_pressed();
+        self.pressed != previous
+    }
+
+    /// Release only the pointer that ended; other pointers retain their buttons.
+    pub fn pointer_up(&mut self, id: i32) -> bool {
+        let previous = self.pressed;
+        self.active_touches.remove(&id);
+        self.refresh_pressed();
+        self.pressed != previous
     }
 
     /// Clear every pressed bit, for a cancelled gesture.
-    pub fn clear_pressed(&mut self) {
+    pub fn clear_pressed(&mut self) -> bool {
+        let changed = self.pressed != 0 || !self.active_touches.is_empty();
+        self.active_touches.clear();
         self.pressed = 0;
+        changed
     }
 
     pub fn show_page(&mut self, page: Page) {
+        if self.page != page {
+            self.clear_pressed();
+        }
         self.page = page;
     }
 
     pub fn toggle_settings(&mut self, show: bool) {
-        self.page = if show { Page::Settings } else { Page::Shell };
+        self.show_page(if show { Page::Settings } else { Page::Shell });
     }
 
     /// True for the header band that opens the settings page.
@@ -211,10 +229,10 @@ impl AppModel {
     /// Apply a settings action and persist it through the shared settings file.
     pub fn apply_settings_action(&mut self, action: SettingsAction) -> std::io::Result<()> {
         match action {
-            SettingsAction::Close => self.page = Page::Shell,
+            SettingsAction::Close => self.show_page(Page::Shell),
             SettingsAction::OpenSaves => {
                 self.reload_slots();
-                self.page = Page::Saves;
+                self.show_page(Page::Saves);
             }
             SettingsAction::PlayTone => {}
             SettingsAction::ToggleMute => self.settings.muted = !self.settings.muted,
@@ -252,7 +270,7 @@ impl AppModel {
     /// Apply a saves-page action through the shared slot library.
     pub fn apply_saves_action(&mut self, action: SavesAction) -> std::io::Result<()> {
         match action {
-            SavesAction::Close => self.page = Page::Settings,
+            SavesAction::Close => self.show_page(Page::Settings),
             SavesAction::New => {
                 let seed = self.slot_list.len() as u8;
                 let name = format!("slot{}", self.slot_list.len() + 1);
@@ -266,7 +284,7 @@ impl AppModel {
                     if let Err(error) = self.slots.set_default(&slot.name) {
                         self.status = Some(format!("cannot select {}: {error}", slot.name));
                     } else if action == SavesAction::Use {
-                        self.page = Page::Shell;
+                        self.show_page(Page::Shell);
                     }
                 }
             }
@@ -299,10 +317,10 @@ impl AppModel {
                 }
             }
             SavesAction::Delete => {
-                if let Some(slot) = self.slot_list.get(self.selected) {
-                    if let Err(error) = self.slots.delete(&slot.name) {
-                        self.status = Some(format!("cannot delete {}: {error}", slot.name));
-                    }
+                if let Some(slot) = self.slot_list.get(self.selected)
+                    && let Err(error) = self.slots.delete(&slot.name)
+                {
+                    self.status = Some(format!("cannot delete {}: {error}", slot.name));
                 }
             }
         }
@@ -323,6 +341,22 @@ impl AppModel {
                 self.status = Some(format!("cannot list save slots: {error}"));
             }
         }
+    }
+
+    fn button_at(&self, point: Option<(f32, f32)>) -> Option<Button> {
+        if self.page != Page::Shell {
+            return None;
+        }
+        let (x, y) = point?;
+        ui::hit_test(x, y)
+    }
+
+    fn refresh_pressed(&mut self) {
+        self.pressed = self
+            .active_touches
+            .values()
+            .flatten()
+            .fold(0, |pressed, button| pressed | button.bit());
     }
 
     pub fn persist(&self) -> std::io::Result<()> {

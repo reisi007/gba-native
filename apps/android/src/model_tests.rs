@@ -1,7 +1,7 @@
 use super::*;
 use gba_native::frontend::SaveSlots;
 use gba_native::frontend::ui::SavesAction;
-use gba_native::input::TouchLayout;
+use gba_native::input::{GbaLayout, TouchLayout};
 use gba_native::sha256;
 
 fn temp(tag: &str) -> PathBuf {
@@ -56,12 +56,71 @@ fn every_touch_button_is_reachable_and_released() {
             .expect("button rect");
         let nx = (x as f32 + width as f32 / 2.0) / SCREEN_WIDTH as f32;
         let ny = (y as f32 + height as f32 / 2.0) / SCREEN_HEIGHT as f32;
-        assert_eq!(model.touch_down(nx, ny), Some(button));
+        assert!(model.pointer_down(1, Some((nx, ny))));
         assert_eq!(model.pressed() & button.bit(), button.bit());
-        assert_eq!(model.touch_up(nx, ny), Some(button));
+        assert!(model.pointer_up(1));
         assert_eq!(model.pressed() & button.bit(), 0);
     }
     assert_eq!(model.pressed(), 0);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn one_pointer_releasing_a_button_does_not_release_another_holders_button() {
+    let (mut model, directory) = model("shared-button");
+    let (x, y) = button_center(&TouchLayout::landscape(), Button::A);
+
+    assert!(model.pointer_down(10, Some((x, y))));
+    assert!(!model.pointer_down(11, Some((x, y))));
+    assert_eq!(model.pressed(), Button::A.bit());
+
+    assert!(!model.pointer_up(10));
+    assert_eq!(model.pressed(), Button::A.bit());
+    assert!(model.pointer_up(11));
+    assert_eq!(model.pressed(), 0);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn pointer_motion_transfers_and_releases_only_its_own_button() {
+    let (mut model, directory) = model("touch-motion");
+    let layout = TouchLayout::landscape();
+    let (ax, ay) = button_center(&layout, Button::A);
+    let (bx, by) = button_center(&layout, Button::B);
+    let (start, start_y) = button_center(&layout, Button::Start);
+
+    assert!(model.pointer_down(1, Some((ax, ay))));
+    assert!(model.pointer_down(2, Some((bx, by))));
+    assert_eq!(model.pressed(), Button::A.bit() | Button::B.bit());
+
+    assert!(model.pointer_move(1, Some((start, start_y))));
+    assert_eq!(model.pressed(), Button::B.bit() | Button::Start.bit());
+    assert!(model.pointer_move(1, None));
+    assert_eq!(model.pressed(), Button::B.bit());
+    assert!(!model.pointer_up(1));
+    assert_eq!(model.pressed(), Button::B.bit());
+
+    assert!(!model.pointer_move(99, Some((ax, ay))));
+    assert!(!model.pointer_up(99));
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
+fn cancel_and_page_changes_clear_pointer_ownership() {
+    let (mut model, directory) = model("touch-cancel");
+    let (x, y) = button_center(&TouchLayout::landscape(), Button::A);
+
+    assert!(model.pointer_down(7, Some((x, y))));
+    assert!(model.clear_pressed());
+    assert!(!model.pointer_move(7, Some((x, y))));
+    assert!(!model.pointer_up(7));
+    assert_eq!(model.pressed(), 0);
+
+    assert!(model.pointer_down(7, Some((x, y))));
+    model.show_page(Page::Settings);
+    assert_eq!(model.pressed(), 0);
+    assert!(!model.pointer_move(7, Some((x, y))));
+    assert!(!model.pointer_up(7));
     let _ = std::fs::remove_dir_all(directory);
 }
 
@@ -72,8 +131,9 @@ fn taps_on_the_guest_screen_produce_no_button() {
     let (sx, sy, sw, sh) = layout.screen.pixels(SCREEN_WIDTH, SCREEN_HEIGHT);
     let nx = (sx as f32 + sw as f32 / 2.0) / SCREEN_WIDTH as f32;
     let ny = (sy as f32 + sh as f32 / 2.0) / SCREEN_HEIGHT as f32;
-    assert_eq!(model.touch_down(nx, ny), None);
+    assert!(!model.pointer_down(1, Some((nx, ny))));
     assert_eq!(model.pressed(), 0);
+    assert!(!model.pointer_up(1));
     let _ = std::fs::remove_dir_all(directory);
 }
 
@@ -231,6 +291,16 @@ fn window_coordinates_map_through_the_shared_letterbox() {
     let (nx, _) = locate((2000, 1200), 200.0, 0.0).expect("inside");
     assert!(nx.abs() < 1e-6);
     assert_eq!(locate((0, 0), 0.0, 0.0), None);
+}
+
+fn button_center(layout: &GbaLayout, button: Button) -> (f32, f32) {
+    let (x, y, width, height) = layout
+        .button_pixels(button, SCREEN_WIDTH, SCREEN_HEIGHT)
+        .expect("button rect");
+    (
+        (x as f32 + width as f32 / 2.0) / SCREEN_WIDTH as f32,
+        (y as f32 + height as f32 / 2.0) / SCREEN_HEIGHT as f32,
+    )
 }
 
 #[test]

@@ -2407,3 +2407,23 @@ on-device MediaPlayer playback remains outside CI.
   host-side save persistence, not the portable versioned cartridge-save format,
   persistent SRAM/flash/EEPROM integration or cross-environment cartridge data
   compatibility required by issue #8. Issue #8 remains open.
+
+## Round: Android pointer ownership and cancellation safety (2026-11-10)
+
+- Android's host-testable model now records the button associated with each
+  pointer ID, recomputes pressed buttons across concurrent pointers, updates
+  ownership on motion, and releases only the pointer that ends. Pointer cancel,
+  focus loss, pause/stop and page changes clear all touch ownership.
+- Android model tests pass 14/14 and package Clippy passes with warnings denied,
+  covering shared-button holds, independent buttons, motion between/outside
+  controls, unknown pointer IDs, cancellation and page changes. Source routing
+  uses NDK pointer IDs and processes every pointer in move events.
+- A fresh-target `scripts/full.sh` passes, including hard source-size limit,
+  Ratchet fast/slow, formatting, Clippy, debug/release workspace tests, demo and
+  synthetic native proof (`native_vs_reference=match`).
+- Local APK validation is blocked: `scripts/android-app.sh --debug` reports no
+  installed Android SDK, and the Android Rust targets are not installed. The
+  Android-only event-loop code has not been cross-compiled locally; no physical
+  Android multitouch interaction was tested. Rune still uses the pinned
+  runtime's primary-finger touch path, and browser/mobile touch evidence remains
+  open. Issue #25 remains open.

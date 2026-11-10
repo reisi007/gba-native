@@ -53,6 +53,9 @@ fn run(app: AndroidApp) -> Result<(), String> {
             PollEvent::Main(MainEvent::InputAvailable) => {
                 dirty |= handle_input(&app, &mut model, surface, tone_path.as_deref());
             }
+            PollEvent::Main(MainEvent::LostFocus | MainEvent::Pause | MainEvent::Stop) => {
+                dirty |= model.clear_pressed();
+            }
             PollEvent::Main(MainEvent::Destroy) => exit = true,
             _ => {}
         });
@@ -85,19 +88,35 @@ fn handle_input(
     let mut changed = false;
     while events.next(|event| {
         if let InputEvent::MotionEvent(motion) = event {
-            let pointer = motion.pointer_at_index(motion.pointer_index());
-            let x = pointer.axis_value(Axis::X);
-            let y = pointer.axis_value(Axis::Y);
             match motion.action() {
                 MotionAction::Down | MotionAction::PointerDown => {
-                    changed |= on_down(model, surface, x, y, tone_path);
+                    let pointer = motion.pointer_at_index(motion.pointer_index());
+                    changed |= on_down(
+                        model,
+                        surface,
+                        pointer.pointer_id(),
+                        pointer.axis_value(Axis::X),
+                        pointer.axis_value(Axis::Y),
+                        tone_path,
+                    );
                 }
                 MotionAction::Up | MotionAction::PointerUp => {
-                    changed |= on_up(model, surface, x, y);
+                    let pointer = motion.pointer_at_index(motion.pointer_index());
+                    changed |= on_up(model, pointer.pointer_id());
+                }
+                MotionAction::Move => {
+                    for pointer in motion.pointers() {
+                        changed |= on_move(
+                            model,
+                            surface,
+                            pointer.pointer_id(),
+                            pointer.axis_value(Axis::X),
+                            pointer.axis_value(Axis::Y),
+                        );
+                    }
                 }
                 MotionAction::Cancel => {
-                    model.clear_pressed();
-                    changed = true;
+                    changed |= model.clear_pressed();
                 }
                 _ => {}
             }
@@ -110,12 +129,15 @@ fn handle_input(
 fn on_down(
     model: &mut AppModel,
     surface: (u32, u32),
+    pointer_id: i32,
     x: f32,
     y: f32,
     tone_path: Option<&std::path::Path>,
 ) -> bool {
-    let Some((nx, ny)) = locate(surface, x, y) else {
-        return false;
+    let point = locate(surface, x, y);
+    let mut changed = model.pointer_down(pointer_id, point);
+    let Some((nx, ny)) = point else {
+        return changed;
     };
     let (px, py) = composition_pixel(nx, ny);
     match model.page() {
@@ -124,11 +146,11 @@ fn on_down(
                 model.toggle_settings(true);
                 return true;
             }
-            model.touch_down(nx, ny).is_some()
+            changed
         }
         Page::Settings => {
             let Some(action) = model.settings_action(px, py) else {
-                return false;
+                return changed;
             };
             if action == SettingsAction::Close {
                 model.toggle_settings(false);
@@ -157,16 +179,17 @@ fn on_down(
                 }
                 return true;
             }
-            model.saves_row(px, py).is_some()
+            model.saves_row(px, py).is_some() || changed
         }
     }
 }
 
-fn on_up(model: &mut AppModel, surface: (u32, u32), x: f32, y: f32) -> bool {
-    let Some((nx, ny)) = locate(surface, x, y) else {
-        return false;
-    };
-    model.touch_up(nx, ny).is_some()
+fn on_move(model: &mut AppModel, surface: (u32, u32), pointer_id: i32, x: f32, y: f32) -> bool {
+    model.pointer_move(pointer_id, locate(surface, x, y))
+}
+
+fn on_up(model: &mut AppModel, pointer_id: i32) -> bool {
+    model.pointer_up(pointer_id)
 }
 
 fn draw(window: &NativeWindow, image: &gba_native::frontend::RgbaImage) -> Result<(), String> {
