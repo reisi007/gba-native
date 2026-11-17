@@ -253,6 +253,6 @@ const version = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, 
 console.log(`${name} ${version}`);
 ')
 printf '%s\n' "$VERSIONS"
-printf '%s\n' "$VERSIONS" | grep -qx '@playwright/test 1.64.1' || fail "unexpected Playwright version"
+printf '%s\n' "$VERSIONS" | grep -qx '@playwright/test 1.65.1' || fail "unexpected Playwright version"
 
 info "browser tooling ready (pinned, repository-owned caches)"
