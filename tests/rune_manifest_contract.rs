@@ -32,7 +32,7 @@ fn rune_manifest_and_canonical_gates_are_isolated_from_root_graph() {
 
     let browser_tools =
         std::fs::read_to_string(root.join("tools/browser/package.json")).expect("browser tools");
-    assert!(browser_tools.contains("\"@playwright/test\": \"1.64.1\""));
+    assert!(browser_tools.contains("\"@playwright/test\": \"1.65.1\""));
     assert!(!browser_tools.contains("tailwind"));
     assert!(!browser_tools.contains("daisyui"));
     let browser_lock = std::fs::read_to_string(root.join("tools/browser/package-lock.json"))
