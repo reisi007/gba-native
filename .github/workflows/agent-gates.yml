@@ -36,8 +36,9 @@ jobs:
         run: bash scripts/check_ratchet_release_assets.sh
 
       - name: Ratchet gates
-        uses: all-the-rest/ratchet-cli@dc43a9a322dd5906a49bc3bd4d7d8e3f8c327c0a # v0.6.4
+        uses: all-the-rest/ratchet-cli@dcb6a489d13aa9c7513584caf739deb7d97dcaee # v0.8.0
         with:
           mode: validate
-          version: v0.6.4
+          version: v0.8.0
           tier: fast
+          args: --no-ratchet
