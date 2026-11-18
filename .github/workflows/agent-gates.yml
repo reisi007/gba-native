@@ -27,10 +27,10 @@ jobs:
           fetch-depth: 0
 
       # The release-download URL has repeatedly returned HTTP 504 on hosted
-      # runners. Stage the exact v0.6.4 assets through GitHub's release API;
+      # runners. Stage the exact v0.8.0 assets through GitHub's release API;
       # authenticated API access avoids anonymous throttling. The helper scopes
       # the job token to api.github.com; the pinned action still verifies SHA.
-      - name: Stage pinned Ratchet v0.6.4 release assets
+      - name: Stage pinned Ratchet v0.8.0 release assets
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash scripts/check_ratchet_release_assets.sh
